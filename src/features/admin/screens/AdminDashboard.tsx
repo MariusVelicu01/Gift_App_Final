@@ -10,12 +10,13 @@ export default function AdminDashboard({ firstName, onLogout }: Props) {
   return (
     <View style={styles.dashboard}>
       <Text style={styles.heroTitle}>Bine ai venit, {firstName}!</Text>
-      <Text style={styles.roleText}>Ești conectat ca Administrator.</Text>
+      <Text style={styles.roleText}>Ești conectat ca Administrator!</Text>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Dashboard Admin</Text>
         <Text style={styles.cardText}>
           Aici va apărea zona de management pentru magazine partenere, produse, promoții și statistici.
+          Test
         </Text>
       </View>
 
