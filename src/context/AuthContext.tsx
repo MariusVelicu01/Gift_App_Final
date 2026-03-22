@@ -107,6 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return unsub;
   }, []);
 
+<<<<<<< HEAD
 const register = async (input: RegisterInput) => {
   const {
     firstName,
@@ -185,6 +186,74 @@ const register = async (input: RegisterInput) => {
     throw new Error(error?.message || 'Înregistrarea a eșuat.');
   }
 };
+=======
+  const register = async (input: RegisterInput) => {
+    const {
+      firstName,
+      lastName,
+      dateOfBirth,
+      gender,
+      role,
+      email,
+      password,
+      confirmPassword,
+    } = input;
+
+    if (!firstName.trim() || !lastName.trim()) {
+      throw new Error('Numele și prenumele sunt obligatorii.');
+    }
+
+    if (!dateOfBirth.trim()) {
+      throw new Error('Data nașterii este obligatorie.');
+    }
+
+    if (!gender.trim()) {
+      throw new Error('Genul este obligatoriu.');
+    }
+
+    if (!email.trim()) {
+      throw new Error('Emailul este obligatoriu.');
+    }
+
+    if (!password) {
+      throw new Error('Parola este obligatorie.');
+    }
+
+    if (password !== confirmPassword) {
+      throw new Error('Parolele nu coincid.');
+    }
+
+    try {
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
+
+      const uid = userCredential.user.uid;
+
+      const profileData: Omit<AppUserProfile, 'uid'> = {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim().toLowerCase(),
+        dateOfBirth: dateOfBirth.trim(),
+        gender: gender.trim(),
+        role,
+        isActive: true,
+        createdAt: serverTimestamp(),
+      };
+
+      await setDoc(doc(db, 'users', uid), profileData);
+
+      setProfile({
+        uid,
+        ...profileData,
+      });
+    } catch (error) {
+      throw new Error(normalizeFirebaseError(error));
+    }
+  };
+>>>>>>> a87b865ff20c0db0e296917c6a720c6c87944d1c
 
   const login = async (email: string, password: string) => {
     if (!email.trim()) {

@@ -27,7 +27,11 @@
     "expo-symbols": "~1.0.8",
     "expo-system-ui": "~6.0.9",
     "expo-web-browser": "~15.0.10",
+<<<<<<< HEAD
     "firebase": "^12.11.0",
+=======
+    "firebase": "^12.10.0",
+>>>>>>> a87b865ff20c0db0e296917c6a720c6c87944d1c
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
