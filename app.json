@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "gift-app",
-    "slug": "gift-app",
+    "name": "GiftApp",
+    "slug": "GiftApp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
