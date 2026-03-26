@@ -9,12 +9,16 @@ import {
 } from '../services/authApi';
 import { UserProfile } from '../types/user';
 
+type RegisterResult = {
+  autoLoginSuccess: boolean;
+};
+
 type AuthContextType = {
   loading: boolean;
   token: string | null;
   profile: UserProfile | null;
   login: (email: string, password: string) => Promise<void>;
-  register: (payload: RegisterPayload) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<RegisterResult>;
   forgotPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -65,9 +69,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(myProfile);
   };
 
-  const register = async (payload: RegisterPayload) => {
+  const register = async (payload: RegisterPayload): Promise<RegisterResult> => {
     await registerRequest(payload);
-    await login(payload.email, payload.password);
+
+    try {
+      await login(payload.email, payload.password);
+      return { autoLoginSuccess: true };
+    } catch {
+      return { autoLoginSuccess: false };
+    }
   };
 
   const forgotPassword = async (email: string) => {

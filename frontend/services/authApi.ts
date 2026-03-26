@@ -4,6 +4,7 @@ import { UserProfile } from '../types/user';
 export type RegisterPayload = {
   firstName: string;
   lastName: string;
+  birthDate: string;
   email: string;
   password: string;
   role: 'client' | 'admin';
@@ -35,8 +36,5 @@ export async function forgotPasswordRequest(email: string) {
 }
 
 export async function meRequest(token: string): Promise<UserProfile> {
-  return apiFetch('/auth/me', {
-    method: 'GET',
-    token,
-  });
+  return apiFetch('/auth/me', { method: 'GET' }, token);
 }

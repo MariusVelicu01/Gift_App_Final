@@ -4,6 +4,7 @@ import { createUserProfile, getUserProfileByUid, AppRole } from './userService';
 type RegisterInput = {
   firstName: string;
   lastName: string;
+  birthDate: string;
   email: string;
   password: string;
   role: AppRole;
@@ -18,7 +19,7 @@ type FirebaseLoginResponse = {
 };
 
 export async function registerUser(input: RegisterInput) {
-  const { firstName, lastName, email, password, role } = input;
+  const { firstName, lastName, birthDate, email, password, role } = input;
 
   const userRecord = await adminAuth.createUser({
     email,
@@ -26,22 +27,29 @@ export async function registerUser(input: RegisterInput) {
     displayName: `${firstName} ${lastName}`,
   });
 
-  await createUserProfile({
-    uid: userRecord.uid,
-    firstName,
-    lastName,
-    email,
-    role,
-    createdAt: new Date().toISOString(),
-  });
+  try {
+    await createUserProfile({
+      uid: userRecord.uid,
+      firstName,
+      lastName,
+      birthDate,
+      email,
+      role,
+      createdAt: new Date().toISOString(),
+    });
 
-  return {
-    uid: userRecord.uid,
-    firstName,
-    lastName,
-    email,
-    role,
-  };
+    return {
+      uid: userRecord.uid,
+      firstName,
+      lastName,
+      birthDate,
+      email,
+      role,
+    };
+  } catch (error) {
+    await adminAuth.deleteUser(userRecord.uid);
+    throw error;
+  }
 }
 
 export async function loginWithFirebase(email: string, password: string) {
@@ -67,7 +75,7 @@ export async function loginWithFirebase(email: string, password: string) {
   const data = (await response.json()) as any;
 
   if (!response.ok) {
-    throw new Error(data?.error?.message || 'Login failed.');
+    throw new Error('Emailul sau parola sunt incorecte.');
   }
 
   return data as FirebaseLoginResponse;
@@ -95,7 +103,7 @@ export async function sendPasswordReset(email: string) {
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(data?.error?.message || 'Failed to send reset email.');
+    throw new Error('Nu am putut trimite emailul de resetare.');
   }
 
   return { message: 'Password reset email sent.' };

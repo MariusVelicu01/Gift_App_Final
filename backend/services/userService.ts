@@ -6,6 +6,7 @@ export type UserProfile = {
   uid: string;
   firstName: string;
   lastName: string;
+  birthDate: string;
   email: string;
   role: AppRole;
   createdAt: string;
@@ -18,7 +19,11 @@ export async function createUserProfile(profile: UserProfile) {
 }
 
 export async function getUserProfileByUid(uid: string) {
-  const snapshot = await db.collection(USERS_COLLECTION).doc(uid).get();
-  if (!snapshot.exists) return null;
-  return snapshot.data() as UserProfile;
+  const doc = await db.collection(USERS_COLLECTION).doc(uid).get();
+
+  if (!doc.exists) {
+    return null;
+  }
+
+  return doc.data() as UserProfile;
 }

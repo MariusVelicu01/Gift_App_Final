@@ -1,15 +1,13 @@
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || '';
+const API_BASE_URL = 'http://localhost:4000/api';
 
-type ApiFetchOptions = RequestInit & {
-  token?: string | null;
-};
-
-export async function apiFetch(path: string, options: ApiFetchOptions = {}) {
-  const { token, ...rest } = options;
-
+export async function apiFetch(
+  path: string,
+  options: RequestInit = {},
+  token?: string
+) {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(rest.headers as Record<string, string>),
+    ...(options.headers as Record<string, string>),
   };
 
   if (token) {
@@ -17,7 +15,7 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}) {
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...rest,
+    ...options,
     headers,
   });
 
