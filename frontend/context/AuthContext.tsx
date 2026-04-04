@@ -41,15 +41,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const savedToken = await AsyncStorage.getItem(TOKEN_KEY);
 
+      console.log('BOOTSTRAP TOKEN:', savedToken);
+
       if (!savedToken) {
         setLoading(false);
         return;
       }
 
       setToken(savedToken);
+
       const myProfile = await meRequest(savedToken);
       setProfile(myProfile);
-    } catch {
+    } catch (error) {
+      console.log('BOOTSTRAP ERROR:', error);
       await AsyncStorage.removeItem(TOKEN_KEY);
       setToken(null);
       setProfile(null);

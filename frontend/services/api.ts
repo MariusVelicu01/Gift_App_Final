@@ -14,12 +14,19 @@ export async function apiFetch(
     headers.Authorization = `Bearer ${token}`;
   }
 
+  console.log('API PATH:', path);
+  console.log('API TOKEN:', token);
+  console.log('API HEADERS:', headers);
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
   });
 
   const data = await response.json().catch(() => null);
+
+  console.log('API STATUS:', response.status);
+  console.log('API RESPONSE DATA:', data);
 
   if (!response.ok) {
     throw new Error(data?.message || 'Request failed.');
