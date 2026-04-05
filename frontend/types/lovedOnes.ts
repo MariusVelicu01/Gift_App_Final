@@ -9,4 +9,5 @@ export type LovedOne = {
   notes?: string;
   imageUrl?: string;
   createdAt: string;
+  updatedAt?: string;
 };

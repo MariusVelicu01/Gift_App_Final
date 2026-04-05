@@ -10,11 +10,14 @@ import {
 import { useAuth } from '../../../context/AuthContext';
 import { getLovedOnes } from '../../../services/lovedOnesApi';
 import AddLovedOneModal from '../../../components/AddLovedOneModal';
+import LovedOneDetailsScreen from './LovedOneDetailsScreen';
+import { LovedOne } from '../../../types/lovedOnes';
 
 export default function LovedOnesScreen() {
   const { token } = useAuth();
-  const [data, setData] = useState<any[]>([]);
+  const [data, setData] = useState<LovedOne[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [selectedLovedOneId, setSelectedLovedOneId] = useState<string | null>(null);
 
   const loadLovedOnes = async () => {
     try {
@@ -29,6 +32,15 @@ export default function LovedOnesScreen() {
   useEffect(() => {
     loadLovedOnes();
   }, [token]);
+
+  if (selectedLovedOneId) {
+    return (
+      <LovedOneDetailsScreen
+        lovedOneId={selectedLovedOneId}
+        onBack={() => setSelectedLovedOneId(null)}
+      />
+    );
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -47,7 +59,11 @@ export default function LovedOnesScreen() {
         </View>
       ) : (
         data.map((item) => (
-          <View key={item.id} style={styles.card}>
+          <Pressable
+            key={item.id}
+            style={styles.card}
+            onPress={() => setSelectedLovedOneId(item.id)}
+          >
             {item.imageUrl ? (
               <Image source={{ uri: item.imageUrl }} style={styles.image} />
             ) : (
@@ -72,21 +88,8 @@ export default function LovedOnesScreen() {
                   Vârstă estimată: {item.estimatedAgeRange}
                 </Text>
               )}
-
-              <Text style={styles.meta}>
-                Gen:{' '}
-                {item.gender === 'male'
-                  ? 'Masculin'
-                  : item.gender === 'female'
-                  ? 'Feminin'
-                  : '-'}
-              </Text>
-
-              {!!item.notes && (
-                <Text style={styles.notes}>{item.notes}</Text>
-              )}
             </View>
-          </View>
+          </Pressable>
         ))
       )}
 
@@ -179,11 +182,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#4b5563',
     marginBottom: 4,
-  },
-  notes: {
-    marginTop: 8,
-    fontSize: 14,
-    color: '#111827',
-    lineHeight: 20,
   },
 });

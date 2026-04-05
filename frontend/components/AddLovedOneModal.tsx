@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   View,
@@ -12,8 +12,9 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../context/AuthContext';
-import { createLovedOne } from '../services/lovedOnesApi';
+import { createLovedOne, updateLovedOne } from '../services/lovedOnesApi';
 import { uploadImageApi } from '../services/uploadApi';
+import { LovedOne } from '../types/lovedOnes';
 
 const MONTHS = [
   { label: 'Ianuarie', value: 1 },
@@ -37,13 +38,9 @@ const DAYS = Array.from({ length: 31 }, (_, i) => ({
 
 function getYearOptions() {
   const currentYear = new Date().getFullYear();
-
   return Array.from({ length: currentYear - 1930 + 1 }, (_, i) => {
     const year = currentYear - i;
-    return {
-      label: String(year),
-      value: year,
-    };
+    return { label: String(year), value: year };
   });
 }
 
@@ -79,33 +76,53 @@ type Props = {
   visible: boolean;
   onClose: () => void;
   onSaved: () => void;
+  initialData?: LovedOne | null;
 };
 
 export default function AddLovedOneModal({
   visible,
   onClose,
   onSaved,
+  initialData,
 }: Props) {
   const { token } = useAuth();
 
   const [name, setName] = useState('');
-
   const [day, setDay] = useState<number | null>(null);
   const [month, setMonth] = useState<number | null>(null);
   const [year, setYear] = useState<number | null>(null);
   const [estimatedAgeRange, setEstimatedAgeRange] = useState<string | null>(null);
-
   const [gender, setGender] = useState<'male' | 'female' | 'unknown'>('unknown');
   const [notes, setNotes] = useState('');
-
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<any>(null);
-
+  const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const years = useMemo(() => getYearOptions(), []);
   const estimatedAgeOptions = useMemo(() => getEstimatedAgeOptions(), []);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    if (initialData) {
+      setName(initialData.name || '');
+      setDay(initialData.day ?? null);
+      setMonth(initialData.month ?? null);
+      setYear(initialData.year ?? null);
+      setEstimatedAgeRange(initialData.estimatedAgeRange ?? null);
+      setGender(initialData.gender ?? 'unknown');
+      setNotes(initialData.notes ?? '');
+      setCurrentImageUrl(initialData.imageUrl ?? null);
+      setImageUri(null);
+      setImageFile(null);
+      setError('');
+      setLoading(false);
+    } else {
+      reset();
+    }
+  }, [visible, initialData]);
 
   const reset = () => {
     setName('');
@@ -117,6 +134,7 @@ export default function AddLovedOneModal({
     setNotes('');
     setImageUri(null);
     setImageFile(null);
+    setCurrentImageUrl(null);
     setError('');
     setLoading(false);
   };
@@ -139,10 +157,7 @@ export default function AddLovedOneModal({
 
   const handleYearChange = (selectedYear: number) => {
     setYear(selectedYear);
-
-    if (estimatedAgeRange) {
-      setEstimatedAgeRange(null);
-    }
+    setEstimatedAgeRange(null);
 
     if (month !== null) {
       const maxDays = getDaysInMonth(selectedYear, month);
@@ -155,10 +170,7 @@ export default function AddLovedOneModal({
 
   const handleEstimatedAgeChange = (selectedRange: string) => {
     setEstimatedAgeRange(selectedRange);
-
-    if (year !== null) {
-      setYear(null);
-    }
+    setYear(null);
   };
 
   const pickImage = async () => {
@@ -206,7 +218,7 @@ export default function AddLovedOneModal({
 
       setLoading(true);
 
-      let imageUrl: string | undefined;
+      let imageUrl = currentImageUrl || undefined;
 
       if (imageUri && token) {
         imageUrl = await uploadImageApi(
@@ -226,45 +238,37 @@ export default function AddLovedOneModal({
         notes: notes.trim(),
       };
 
-      if (imageUrl) {
-        payload.imageUrl = imageUrl;
-      }
+      if (imageUrl) payload.imageUrl = imageUrl;
+      if (year !== null) payload.year = year;
+      if (estimatedAgeRange) payload.estimatedAgeRange = estimatedAgeRange;
 
-      if (year !== null) {
-        payload.year = year;
+      if (initialData?.id) {
+        await updateLovedOne(token!, initialData.id, payload);
+      } else {
+        await createLovedOne(token!, payload);
       }
-
-      if (estimatedAgeRange) {
-        payload.estimatedAgeRange = estimatedAgeRange;
-      }
-
-      await createLovedOne(token!, payload);
 
       handleClose();
       onSaved();
-    } catch (e) {
-      setError('Nu am putut salva.');
+    } catch {
+      setError(
+        initialData ? 'Nu am putut actualiza.' : 'Nu am putut salva.'
+      );
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent
-      onRequestClose={handleClose}
-    >
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
       <View style={styles.overlay}>
         <View style={styles.modalCard}>
           <View style={styles.handle} />
 
-          <ScrollView
-            contentContainerStyle={styles.body}
-            showsVerticalScrollIndicator={false}
-          >
-            <Text style={styles.title}>Adaugă persoană</Text>
+          <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+            <Text style={styles.title}>
+              {initialData ? 'Editează persoana' : 'Adaugă persoană'}
+            </Text>
             <Text style={styles.sectionHint}>
               Câmpurile marcate cu * sunt obligatorii.
             </Text>
@@ -272,21 +276,14 @@ export default function AddLovedOneModal({
             {!!error && <Text style={styles.errorText}>{error}</Text>}
 
             <Text style={styles.label}>Nume *</Text>
-            <Text style={styles.fieldHint}>
-              Exemplu: Popescu Andrei
-            </Text>
             <TextInput
               placeholder="Ex: Popescu Andrei"
               style={styles.input}
               value={name}
-              onChangeText={(value) => {
-                setName(value);
-                if (error) setError('');
-              }}
+              onChangeText={setName}
             />
 
             <Text style={styles.label}>Zi *</Text>
-            <Text style={styles.fieldHint}>Obligatoriu</Text>
             <Dropdown
               style={styles.dropdown}
               containerStyle={styles.dropdownContainer}
@@ -301,14 +298,10 @@ export default function AddLovedOneModal({
               placeholder="Selectează ziua"
               searchPlaceholder="Caută ziua..."
               value={day}
-              onChange={(item) => {
-                setDay(item.value);
-                if (error) setError('');
-              }}
+              onChange={(item) => setDay(item.value)}
             />
 
             <Text style={styles.label}>Lună *</Text>
-            <Text style={styles.fieldHint}>Obligatoriu</Text>
             <Dropdown
               style={styles.dropdown}
               containerStyle={styles.dropdownContainer}
@@ -323,16 +316,10 @@ export default function AddLovedOneModal({
               placeholder="Selectează luna"
               searchPlaceholder="Caută luna..."
               value={month}
-              onChange={(item) => {
-                handleMonthChange(item.value);
-                if (error) setError('');
-              }}
+              onChange={(item) => handleMonthChange(item.value)}
             />
 
             <Text style={styles.label}>An</Text>
-            <Text style={styles.fieldHint}>
-              Opțional. Dacă îl alegi, intervalul de vârstă nu mai este necesar.
-            </Text>
             <Dropdown
               style={styles.dropdown}
               containerStyle={styles.dropdownContainer}
@@ -347,16 +334,10 @@ export default function AddLovedOneModal({
               placeholder="Selectează anul"
               searchPlaceholder="Caută anul..."
               value={year}
-              onChange={(item) => {
-                handleYearChange(item.value);
-                if (error) setError('');
-              }}
+              onChange={(item) => handleYearChange(item.value)}
             />
 
             <Text style={styles.label}>Vârstă estimată</Text>
-            <Text style={styles.fieldHint}>
-              Opțional. Alege doar dacă nu cunoști anul.
-            </Text>
             <Dropdown
               style={styles.dropdown}
               containerStyle={styles.dropdownContainer}
@@ -368,17 +349,13 @@ export default function AddLovedOneModal({
               maxHeight={260}
               labelField="label"
               valueField="value"
-              placeholder="Selectează intervalul de vârstă"
+              placeholder="Selectează intervalul"
               searchPlaceholder="Caută intervalul..."
               value={estimatedAgeRange}
-              onChange={(item) => {
-                handleEstimatedAgeChange(item.value);
-                if (error) setError('');
-              }}
+              onChange={(item) => handleEstimatedAgeChange(item.value)}
             />
 
             <Text style={styles.label}>Gen</Text>
-            <Text style={styles.fieldHint}>Opțional</Text>
             <View style={styles.genderRow}>
               {['male', 'female', 'unknown'].map((g) => (
                 <Pressable
@@ -402,11 +379,8 @@ export default function AddLovedOneModal({
             </View>
 
             <Text style={styles.label}>Descriere</Text>
-            <Text style={styles.fieldHint}>
-              Opțional. Preferințe, hobby-uri, idei de cadouri.
-            </Text>
             <TextInput
-              placeholder="Ex: îi plac parfumurile, cărțile și produsele de skincare"
+              placeholder="Preferințe, hobby-uri..."
               style={[styles.input, styles.textArea]}
               multiline
               value={notes}
@@ -414,13 +388,17 @@ export default function AddLovedOneModal({
             />
 
             <Text style={styles.label}>Poză</Text>
-            <Text style={styles.fieldHint}>Opțional</Text>
             <Pressable style={styles.imageButton} onPress={pickImage}>
-              <Text style={styles.imageButtonText}>Alege poză</Text>
+              <Text style={styles.imageButtonText}>
+                {currentImageUrl || imageUri ? 'Schimbă poza' : 'Alege poză'}
+              </Text>
             </Pressable>
 
-            {imageUri && (
-              <Image source={{ uri: imageUri }} style={styles.preview} />
+            {(imageUri || currentImageUrl) && (
+              <Image
+                source={{ uri: imageUri || currentImageUrl || undefined }}
+                style={styles.preview}
+              />
             )}
 
             <Pressable
@@ -429,7 +407,13 @@ export default function AddLovedOneModal({
               disabled={loading}
             >
               <Text style={styles.saveButtonText}>
-                {loading ? 'Se salvează...' : 'Salvează'}
+                {loading
+                  ? initialData
+                    ? 'Se actualizează...'
+                    : 'Se salvează...'
+                  : initialData
+                  ? 'Salvează modificările'
+                  : 'Salvează'}
               </Text>
             </Pressable>
 
@@ -491,11 +475,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#111827',
     marginBottom: 4,
-  },
-  fieldHint: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginBottom: 8,
   },
   input: {
     borderWidth: 1,
