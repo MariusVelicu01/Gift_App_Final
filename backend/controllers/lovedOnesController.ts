@@ -12,6 +12,10 @@ function isDateInFuture(day: number, month: number, year: number) {
   return selected.getTime() > now.getTime();
 }
 
+function getParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value || '';
+}
+
 function buildLovedOnePayload(body: any) {
   const { name, day, month, year, estimatedAgeRange, gender, notes, imageUrl } =
     body;
@@ -146,7 +150,7 @@ export async function getAll(req: Request, res: Response) {
 export async function getOne(req: Request, res: Response) {
   try {
     const uid = req.user?.uid;
-    const lovedOneId = req.params.id;
+    const lovedOneId = getParam(req.params.id);
 
     if (!lovedOneId) {
       return res.status(400).json({ message: "ID invalid." });
@@ -175,7 +179,7 @@ export async function getOne(req: Request, res: Response) {
 export async function update(req: Request, res: Response) {
   try {
     const uid = req.user?.uid;
-    const lovedOneId = req.params.id;
+    const lovedOneId = getParam(req.params.id);
 
     if (!uid) {
       return res.status(401).json({ message: 'Unauthorized.' });
