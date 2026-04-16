@@ -106,6 +106,16 @@ function getEventLabel(type: CalendarEventType) {
   return 'Finalizat';
 }
 
+function formatSelectedDay(dateKey: string) {
+  const [yr, mo, dy] = dateKey.split('-').map(Number);
+  const date = new Date(yr, mo - 1, dy);
+  return date.toLocaleDateString('ro-RO', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+}
+
 function MultiSelectDropdown({
   label,
   placeholder,
@@ -222,6 +232,9 @@ export default function CalendarScreen() {
     lovedOneId: string;
     giftPlanId: string;
   } | null>(null);
+  const [selectedDay, setSelectedDay] = useState<string>(
+    toDateKey(today.getFullYear(), today.getMonth() + 1, today.getDate())
+  );
 
   const load = async (forceRefresh = false) => {
     try {
@@ -517,50 +530,103 @@ export default function CalendarScreen() {
         </View>
 
         {isCompact ? (
-          <View style={styles.agendaList}>
-            {monthAgendaDays.length === 0 ? (
-              <Text style={styles.emptyText}>
-                Nu exista evenimente in luna aceasta pentru filtrele alese.
+          <>
+            <View style={styles.weekHeader}>
+              {WEEK_DAYS.map((day) => (
+                <Text key={day} style={styles.weekDay}>{day}</Text>
+              ))}
+            </View>
+
+            <View style={styles.compactGrid}>
+              {monthDays.map((day, index) => {
+                const dateKey = day ? toDateKey(year, monthIndex + 1, day) : '';
+                const dayEvents = dateKey ? eventsByDate[dateKey] || [] : [];
+                const isToday =
+                  day !== null &&
+                  dateKey === toDateKey(today.getFullYear(), today.getMonth() + 1, today.getDate());
+                const isSelected = dateKey === selectedDay;
+
+                return (
+                  <Pressable
+                    key={`${dateKey || 'empty'}-${index}`}
+                    style={styles.compactDayCell}
+                    onPress={() => day && setSelectedDay(dateKey)}
+                  >
+                    {day && (
+                      <>
+                        <View
+                          style={[
+                            styles.compactDayCircle,
+                            isToday && styles.compactDayCircleToday,
+                            isSelected && !isToday && styles.compactDayCircleSelected,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.compactDayText,
+                              isToday && styles.compactDayTextToday,
+                              isSelected && !isToday && styles.compactDayTextSelected,
+                            ]}
+                          >
+                            {day}
+                          </Text>
+                        </View>
+                        {dayEvents.length > 0 && (
+                          <View style={styles.eventDots}>
+                            {dayEvents.slice(0, 3).map((event, i) => (
+                              <View
+                                key={i}
+                                style={[
+                                  styles.eventDot,
+                                  { backgroundColor: getEventColor(event.type) },
+                                ]}
+                              />
+                            ))}
+                          </View>
+                        )}
+                      </>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.selectedDayPanel}>
+              <Text style={styles.selectedDayTitle}>
+                {formatSelectedDay(selectedDay)}
               </Text>
-            ) : (
-              monthAgendaDays.map((day) => (
-                <View key={day.dateKey} style={styles.agendaDay}>
-                  <Text style={styles.agendaDate}>
-                    {day.day} {getMonthName(monthIndex)}
-                  </Text>
-                  {day.events.map((event) => (
-                    <Pressable
-                      key={event.id}
-                      style={({ hovered, pressed }) => [
-                        styles.eventPill,
-                        styles.agendaEvent,
-                        hovered && styles.eventPillHover,
-                        pressed && styles.eventPillPressed,
-                        { borderLeftColor: getEventColor(event.type) },
-                      ]}
-                      onPress={() =>
-                        setSelectedGiftTarget({
-                          lovedOneId: event.lovedOneId,
-                          giftPlanId: event.giftPlan.id,
-                        })
-                      }
-                    >
-                      <Text
-                        style={[
-                          styles.eventType,
-                          { color: getEventColor(event.type) },
-                        ]}
-                      >
-                        {getEventLabel(event.type)}
-                      </Text>
-                      <Text style={styles.eventTitle}>{event.giftPlan.purpose}</Text>
-                      <Text style={styles.eventPerson}>{event.lovedOneName}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              ))
-            )}
-          </View>
+              {(eventsByDate[selectedDay] || []).length === 0 ? (
+                <Text style={styles.emptyText}>
+                  Nu sunt cadouri pentru aceasta zi.
+                </Text>
+              ) : (
+                (eventsByDate[selectedDay] || []).map((event) => (
+                  <Pressable
+                    key={event.id}
+                    style={({ hovered, pressed }) => [
+                      styles.eventPill,
+                      styles.agendaEvent,
+                      hovered && styles.eventPillHover,
+                      pressed && styles.eventPillPressed,
+                      { borderLeftColor: getEventColor(event.type) },
+                    ]}
+                    onPress={() =>
+                      setSelectedGiftTarget({
+                        lovedOneId: event.lovedOneId,
+                        giftPlanId: event.giftPlan.id,
+                      })
+                    }
+                  >
+                    <Text style={[styles.eventType, { color: getEventColor(event.type) }]}>
+                      {getEventLabel(event.type)}
+                    </Text>
+                    <Text style={styles.eventTitle}>{event.giftPlan.purpose}</Text>
+                    <Text style={styles.eventPerson}>{event.lovedOneName}</Text>
+                  </Pressable>
+                ))
+              )}
+            </View>
+          </>
         ) : (
           <>
             <View style={styles.weekHeader}>
@@ -981,6 +1047,70 @@ const styles = StyleSheet.create({
   },
   agendaEvent: {
     marginBottom: 8,
+  },
+  compactGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 6,
+  },
+  compactDayCell: {
+    width: `${100 / 7}%`,
+    alignItems: 'center' as const,
+    paddingVertical: 5,
+  },
+  compactDayCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  compactDayCircleToday: {
+    backgroundColor: '#be123c',
+  },
+  compactDayCircleSelected: {
+    backgroundColor: '#fff1f2',
+    borderWidth: 1,
+    borderColor: '#fce7e0',
+  },
+  compactDayText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#374151',
+  },
+  compactDayTextToday: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  compactDayTextSelected: {
+    color: '#be123c',
+    fontWeight: '700',
+  },
+  eventDots: {
+    flexDirection: 'row',
+    gap: 3,
+    marginTop: 3,
+    justifyContent: 'center',
+    minHeight: 7,
+  },
+  eventDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+  },
+  selectedDayPanel: {
+    borderTopWidth: 1,
+    borderTopColor: '#fce7e0',
+    paddingTop: 14,
+    marginTop: 8,
+    gap: 8,
+  },
+  selectedDayTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#be123c',
+    textTransform: 'capitalize',
+    marginBottom: 4,
   },
   dayCell: {
     width: `${100 / 7}%`,
