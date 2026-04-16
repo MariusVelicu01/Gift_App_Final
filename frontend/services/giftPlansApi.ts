@@ -3,6 +3,8 @@ import {
   CompleteGiftPlanPayload,
   GiftPlan,
   GiftPlanPayload,
+  GiftPlanProductsPayload,
+  OfferGiftPlanPayload,
 } from '../types/giftPlans';
 
 export async function getGiftPlans(
@@ -63,6 +65,38 @@ export async function completeGiftPlan(
 ): Promise<GiftPlan> {
   return apiFetch(
     `/loved-ones/${lovedOneId}/gift-plans/${giftPlanId}/complete`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    },
+    token
+  );
+}
+
+export async function offerGiftPlan(
+  token: string,
+  lovedOneId: string,
+  giftPlanId: string,
+  data: OfferGiftPlanPayload
+): Promise<GiftPlan> {
+  return apiFetch(
+    `/loved-ones/${lovedOneId}/gift-plans/${giftPlanId}/offer`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    },
+    token
+  );
+}
+
+export async function updateGiftPlanProducts(
+  token: string,
+  lovedOneId: string,
+  giftPlanId: string,
+  data: GiftPlanProductsPayload
+): Promise<GiftPlan> {
+  return apiFetch(
+    `/loved-ones/${lovedOneId}/gift-plans/${giftPlanId}/products`,
     {
       method: 'PATCH',
       body: JSON.stringify(data),

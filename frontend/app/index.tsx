@@ -51,17 +51,10 @@ function IndexContent() {
     setServerChecking(true);
 
     try {
-      console.log('CHECK SERVER START');
-
-      const response = await fetch('http://localhost:4000/api/health');
-      console.log('RAW RESPONSE STATUS:', response.status);
-
-      const data = await response.json();
-      console.log('RAW RESPONSE DATA:', data);
-
+      await checkServerHealth();
       setServerUp(true);
     } catch (error) {
-      console.error('RAW FETCH ERROR:', error);
+      console.error('CHECK SERVER ERROR:', error);
       setServerUp(false);
     } finally {
       setServerChecking(false);

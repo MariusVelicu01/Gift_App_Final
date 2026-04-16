@@ -1,6 +1,5 @@
 import { Platform } from 'react-native';
-
-const API_BASE_URL = 'http://localhost:4000/api';
+import { API_BASE_URL } from './config';
 
 export async function uploadImageApi(
   params: {

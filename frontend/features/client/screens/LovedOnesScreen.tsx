@@ -44,7 +44,7 @@ export default function LovedOnesScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Persoane Dragi</Text>
+      <Text style={styles.title}>🎁 Persoane dragi</Text>
 
       <Pressable style={styles.addButton} onPress={() => setModalVisible(true)}>
         <Text style={styles.addButtonText}>+ Adaugă persoană</Text>
@@ -61,7 +61,11 @@ export default function LovedOnesScreen() {
         data.map((item) => (
           <Pressable
             key={item.id}
-            style={styles.card}
+            style={({ hovered, pressed }) => [
+              styles.card,
+              hovered && styles.cardHover,
+              pressed && styles.cardPressed,
+            ]}
             onPress={() => setSelectedLovedOneId(item.id)}
           >
             {item.imageUrl ? (
@@ -105,82 +109,102 @@ export default function LovedOnesScreen() {
 const styles = StyleSheet.create({
   container: {
     padding: 16,
-    gap: 16,
+    gap: 14,
+    backgroundColor: '#fff7ed',
+    paddingBottom: 32,
   },
   title: {
     fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
+    fontWeight: '800',
+    color: '#be123c',
+    marginBottom: 2,
   },
   addButton: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#be123c',
     paddingVertical: 14,
-    borderRadius: 14,
+    borderRadius: 12,
     alignItems: 'center',
   },
   addButtonText: {
     color: '#fff',
     fontWeight: '700',
-    fontSize: 16,
+    fontSize: 15,
   },
   emptyCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    padding: 18,
+    borderColor: '#fce7e0',
+    padding: 24,
+    alignItems: 'center',
   },
   emptyTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
     color: '#111827',
     marginBottom: 6,
+    textAlign: 'center',
   },
   emptyText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#9ca3af',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   card: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#fce7e0',
     padding: 14,
     flexDirection: 'row',
     gap: 14,
     alignItems: 'flex-start',
+    shadowColor: '#be123c',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  cardHover: {
+    backgroundColor: '#fff1f2',
+    transform: [{ translateY: -2 }],
+  },
+  cardPressed: {
+    transform: [{ scale: 0.99 }],
   },
   image: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
   },
   imagePlaceholder: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
-    backgroundColor: '#dbeafe',
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#ffe4e6',
     alignItems: 'center',
     justifyContent: 'center',
   },
   imagePlaceholderText: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '800',
-    color: '#2563eb',
+    color: '#be123c',
   },
   infoBlock: {
     flex: 1,
     justifyContent: 'center',
   },
   name: {
-    fontSize: 20,
-    fontWeight: '800',
+    fontSize: 18,
+    fontWeight: '700',
     color: '#111827',
-    marginBottom: 6,
+    marginBottom: 5,
   },
   meta: {
-    fontSize: 14,
-    color: '#4b5563',
-    marginBottom: 4,
+    fontSize: 13,
+    color: '#9ca3af',
+    marginBottom: 3,
+    fontWeight: '500',
   },
 });

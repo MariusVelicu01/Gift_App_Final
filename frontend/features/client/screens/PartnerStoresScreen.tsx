@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -7,8 +7,10 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
+import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
 import { getPartnerStores } from '../../../services/partnerStoresApi';
 import { PartnerStore } from '../../../types/partnerStores';
@@ -28,6 +30,8 @@ export default function PartnerStoresScreen() {
   const [stores, setStores] = useState<PartnerStore[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStore, setSelectedStore] = useState<PartnerStore | null>(null);
+  const [searchText, setSearchText] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
 
   const loadStores = async () => {
     try {
@@ -45,6 +49,80 @@ export default function PartnerStoresScreen() {
   useEffect(() => {
     loadStores();
   }, [token]);
+
+  const categoryOptions = useMemo(() => {
+    const categories = new Set<string>();
+
+    stores.forEach((store) => {
+      store.products.forEach((product) => {
+        const category = String(product.category || '').trim();
+
+        if (category) {
+          categories.add(category);
+        }
+      });
+    });
+
+    return [
+      { label: 'Toate categoriile', value: 'all' },
+      ...Array.from(categories)
+        .sort((a, b) => a.localeCompare(b))
+        .map((category) => ({
+          label: category,
+          value: category,
+        })),
+    ];
+  }, [stores]);
+
+  const filteredStores = useMemo(() => {
+    const normalizedSearch = searchText.trim().toLowerCase();
+
+    return stores.filter((store) => {
+      const matchesCategory =
+        selectedCategory === 'all' ||
+        store.products.some(
+          (product) =>
+            String(product.category || '').trim().toLowerCase() ===
+            selectedCategory.toLowerCase()
+        );
+
+      if (!matchesCategory) return false;
+
+      if (!normalizedSearch) return true;
+
+      const searchableText = [
+        store.displayName,
+        store.companyName,
+        store.source,
+        store.merchant?.name,
+        store.merchant?.domain,
+        store.merchant?.affiliateNetwork,
+        ...store.products.flatMap((product) => [
+          product.name,
+          product.brand,
+          product.category,
+          product.subcategory,
+        ]),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return searchableText.includes(normalizedSearch);
+    });
+  }, [searchText, selectedCategory, stores]);
+
+  const getCategoryProductCount = (store: PartnerStore) => {
+    if (selectedCategory === 'all') {
+      return store.products.length;
+    }
+
+    return store.products.filter(
+      (product) =>
+        String(product.category || '').trim().toLowerCase() ===
+        selectedCategory.toLowerCase()
+    ).length;
+  };
 
   if (selectedStore) {
     return (
@@ -142,7 +220,42 @@ export default function PartnerStoresScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Magazine Partenere</Text>
+      <Text style={styles.title}>🛍️ Magazine partenere</Text>
+
+      <View style={styles.filtersCard}>
+        <TextInput
+          placeholder="Cauta dupa magazin, brand, produs sau domeniu"
+          style={styles.searchInput}
+          value={searchText}
+          onChangeText={setSearchText}
+        />
+
+        <Dropdown
+          style={styles.dropdown}
+          containerStyle={styles.dropdownContainer}
+          placeholderStyle={styles.dropdownPlaceholder}
+          selectedTextStyle={styles.dropdownSelectedText}
+          data={categoryOptions}
+          maxHeight={260}
+          labelField="label"
+          valueField="value"
+          placeholder="Filtreaza dupa categorie"
+          value={selectedCategory}
+          onChange={(item) => setSelectedCategory(item.value)}
+        />
+
+        {(searchText.trim() || selectedCategory !== 'all') && (
+          <Pressable
+            style={styles.clearFiltersButton}
+            onPress={() => {
+              setSearchText('');
+              setSelectedCategory('all');
+            }}
+          >
+            <Text style={styles.clearFiltersText}>Curata filtrele</Text>
+          </Pressable>
+        )}
+      </View>
 
       {loading ? (
         <View style={styles.center}>
@@ -156,11 +269,22 @@ export default function PartnerStoresScreen() {
             Nu exista magazine partenere disponibile momentan.
           </Text>
         </View>
+      ) : filteredStores.length === 0 ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Niciun magazin gasit</Text>
+          <Text style={styles.cardText}>
+            Nu exista magazine care sa se potriveasca filtrelor selectate.
+          </Text>
+        </View>
       ) : (
-        stores.map((store) => (
+        filteredStores.map((store) => (
           <Pressable
             key={store.id}
-            style={styles.storeCard}
+            style={({ hovered, pressed }) => [
+              styles.storeCard,
+              hovered && styles.storeCardHover,
+              pressed && styles.storeCardPressed,
+            ]}
             onPress={() => setSelectedStore(store)}
           >
             {store.brandImageUri ? (
@@ -175,8 +299,14 @@ export default function PartnerStoresScreen() {
 
             <View style={styles.storeInfo}>
               <Text style={styles.storeName}>{store.displayName}</Text>
-              <Text style={styles.meta}>Produse: {store.products.length}</Text>
+              <Text style={styles.meta}>
+                Produse: {getCategoryProductCount(store)}
+                {selectedCategory !== 'all' ? ` in ${selectedCategory}` : ''}
+              </Text>
               <Text style={styles.meta}>Contract pana la {store.contractEndDate}</Text>
+              {!!store.merchant?.domain && (
+                <Text style={styles.meta}>Website: {store.merchant.domain}</Text>
+              )}
             </View>
           </Pressable>
         ))
@@ -186,115 +316,191 @@ export default function PartnerStoresScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, gap: 16 },
+  container: { padding: 16, gap: 16, backgroundColor: '#fff7ed', paddingBottom: 32 },
   center: {
     padding: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  title: { fontSize: 28, fontWeight: '700', color: '#111827' },
+  title: { fontSize: 28, fontWeight: '800', color: '#be123c', marginBottom: 2 },
   card: {
     backgroundColor: '#fff',
     padding: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#fce7e0',
+    shadowColor: '#be123c',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
   },
-  cardTitle: { fontSize: 18, fontWeight: '600', marginBottom: 8, color: '#111827' },
-  cardText: { fontSize: 15, lineHeight: 22, color: '#374151' },
+  filtersCard: {
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#fce7e0',
+    backgroundColor: '#ffffff',
+    gap: 10,
+  },
+  searchInput: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    color: '#111827',
+    backgroundColor: '#fafafa',
+    fontSize: 14,
+  },
+  dropdown: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#fafafa',
+  },
+  dropdownContainer: {
+    borderRadius: 10,
+    borderColor: '#e5e7eb',
+  },
+  dropdownPlaceholder: {
+    color: '#9ca3af',
+    fontSize: 14,
+  },
+  dropdownSelectedText: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  clearFiltersButton: {
+    backgroundColor: '#fff1f2',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#fce7e0',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  clearFiltersText: {
+    color: '#be123c',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  cardTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8, color: '#111827' },
+  cardText: { fontSize: 14, lineHeight: 21, color: '#9ca3af' },
   backButton: {
     alignSelf: 'flex-start',
-    backgroundColor: '#e5e7eb',
+    backgroundColor: '#f3f4f6',
     paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 8,
+    paddingHorizontal: 16,
+    borderRadius: 10,
   },
   backButtonText: {
-    color: '#111827',
-    fontWeight: '800',
+    color: '#374151',
+    fontWeight: '700',
+    fontSize: 14,
   },
   storeCard: {
     backgroundColor: '#fff',
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#fce7e0',
     padding: 14,
     flexDirection: 'row',
     gap: 12,
+    shadowColor: '#0d9488',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  storeCardHover: {
+    backgroundColor: '#f0fdfa',
+    transform: [{ translateY: -2 }],
+  },
+  storeCardPressed: {
+    transform: [{ scale: 0.99 }],
   },
   brandImage: {
-    width: 72,
-    height: 72,
-    borderRadius: 8,
+    width: 68,
+    height: 68,
+    borderRadius: 10,
   },
   brandImageLarge: {
-    width: 120,
-    height: 120,
-    borderRadius: 8,
+    width: 110,
+    height: 110,
+    borderRadius: 12,
     marginBottom: 14,
   },
   brandPlaceholder: {
-    width: 72,
-    height: 72,
-    borderRadius: 8,
-    backgroundColor: '#dcfce7',
+    width: 68,
+    height: 68,
+    borderRadius: 10,
+    backgroundColor: '#f0fdfa',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#99f6e4',
   },
   brandPlaceholderLarge: {
-    width: 120,
-    height: 120,
-    borderRadius: 8,
-    backgroundColor: '#dcfce7',
+    width: 110,
+    height: 110,
+    borderRadius: 12,
+    backgroundColor: '#f0fdfa',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#99f6e4',
   },
   brandPlaceholderText: {
-    color: '#166534',
-    fontSize: 30,
+    color: '#0d9488',
+    fontSize: 28,
     fontWeight: '800',
   },
   storeInfo: { flex: 1 },
   storeName: {
     color: '#111827',
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 17,
+    fontWeight: '700',
     marginBottom: 4,
   },
   meta: {
-    color: '#4b5563',
-    fontSize: 14,
-    marginBottom: 5,
+    color: '#9ca3af',
+    fontSize: 13,
+    marginBottom: 4,
+    fontWeight: '500',
   },
   productRow: {
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
+    borderTopColor: '#f9f1ee',
     paddingVertical: 12,
     flexDirection: 'row',
     gap: 12,
   },
   productImage: {
-    width: 58,
-    height: 58,
-    borderRadius: 8,
+    width: 56,
+    height: 56,
+    borderRadius: 10,
     backgroundColor: '#f3f4f6',
   },
   productInfo: { flex: 1 },
   productName: {
     color: '#111827',
-    fontSize: 15,
-    fontWeight: '800',
+    fontSize: 14,
+    fontWeight: '700',
   },
   productMeta: {
-    color: '#6b7280',
+    color: '#9ca3af',
     fontSize: 13,
     marginTop: 2,
+    fontWeight: '500',
   },
   productLinkText: {
     color: '#2563eb',
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '700',
     marginTop: 6,
   },
   priceBlock: {
@@ -304,18 +510,19 @@ const styles = StyleSheet.create({
   productPrice: {
     color: '#16a34a',
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   originalPrice: {
-    color: '#9ca3af',
+    color: '#d1d5db',
     fontSize: 12,
     textDecorationLine: 'line-through',
     marginTop: 2,
+    fontWeight: '500',
   },
   discountText: {
     color: '#dc2626',
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '700',
     marginTop: 2,
   },
 });

@@ -15,17 +15,41 @@ export type GiftPlanPayload = {
   purpose: GiftPurpose;
   budget: number;
   deadlineDate: string;
+  purchaseDeadlineDate?: string;
   requiresCustomDate: boolean;
-  status?: 'planned' | 'completed';
+  status?: 'planned' | 'purchased' | 'completed';
   createdAt?: string;
   updatedAt?: string;
+  budgetHistory?: unknown[];
 };
 
 export type CompleteGiftPlanPayload = {
-  status: 'completed';
-  experienceDetails: string;
-  reactionRating: number;
+  status: 'purchased';
+  appFeedbackDetails?: string;
+  appFeedbackRating?: number;
   completedAt: string;
+  daysUntilCompleted: number;
+  daysRemainingUntilGift?: number;
+  budget: number;
+  budgetHistory?: unknown[];
+  selectedProducts: unknown[];
+  updatedAt: string;
+};
+
+export type OfferGiftPlanPayload = {
+  status: 'completed';
+  experienceDetails?: string;
+  reactionRating: number;
+  productReactions: unknown[];
+  offeredAt: string;
+  daysRemainingUntilGift: number;
+  updatedAt: string;
+};
+
+export type GiftPlanProductPayload = {
+  selectedProducts: unknown[];
+  budget?: number;
+  budgetHistory?: unknown[];
   updatedAt: string;
 };
 
@@ -95,6 +119,34 @@ export async function completeGiftPlan(
   lovedOneId: string,
   giftPlanId: string,
   data: CompleteGiftPlanPayload
+) {
+  const ref = giftPlansCollection(uid, lovedOneId).doc(giftPlanId);
+
+  await ref.update(data);
+
+  const updated = await ref.get();
+  return updated.data();
+}
+
+export async function offerGiftPlan(
+  uid: string,
+  lovedOneId: string,
+  giftPlanId: string,
+  data: OfferGiftPlanPayload
+) {
+  const ref = giftPlansCollection(uid, lovedOneId).doc(giftPlanId);
+
+  await ref.update(data);
+
+  const updated = await ref.get();
+  return updated.data();
+}
+
+export async function updateGiftPlanProducts(
+  uid: string,
+  lovedOneId: string,
+  giftPlanId: string,
+  data: GiftPlanProductPayload
 ) {
   const ref = giftPlansCollection(uid, lovedOneId).doc(giftPlanId);
 
