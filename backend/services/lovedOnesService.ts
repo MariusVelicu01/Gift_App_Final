@@ -27,7 +27,9 @@ export async function getLovedOnes(uid: string) {
     .orderBy('createdAt', 'desc')
     .get();
 
-  return snapshot.docs.map((doc) => doc.data());
+  return snapshot.docs
+    .map((doc) => doc.data())
+    .filter((item) => !item.isDeleted);
 }
 
 export async function getLovedOneById(uid: string, lovedOneId: string) {
@@ -42,7 +44,13 @@ export async function getLovedOneById(uid: string, lovedOneId: string) {
     return null;
   }
 
-  return doc.data();
+  const data = doc.data();
+
+  if (data?.isDeleted) {
+    return null;
+  }
+
+  return data;
 }
 
 export async function updateLovedOne(uid: string, lovedOneId: string, data: any) {
@@ -53,6 +61,24 @@ export async function updateLovedOne(uid: string, lovedOneId: string, data: any)
     .doc(lovedOneId);
 
   await ref.update(data);
+
+  const updated = await ref.get();
+  return updated.data();
+}
+
+export async function deleteLovedOne(uid: string, lovedOneId: string) {
+  const ref = db
+    .collection(COLLECTION)
+    .doc(uid)
+    .collection('lovedOnes')
+    .doc(lovedOneId);
+  const deletedAt = new Date().toISOString();
+
+  await ref.update({
+    isDeleted: true,
+    deletedAt,
+    updatedAt: deletedAt,
+  });
 
   const updated = await ref.get();
   return updated.data();

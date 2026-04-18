@@ -37,3 +37,13 @@ export async function updateLovedOne(
     token
   );
 }
+
+export async function deleteLovedOne(token: string, id: string) {
+  return apiFetch(
+    `/loved-ones/${id}`,
+    {
+      method: 'DELETE',
+    },
+    token
+  );
+}

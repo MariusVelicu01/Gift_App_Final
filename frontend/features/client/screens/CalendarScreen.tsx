@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -14,7 +14,10 @@ import {
   getCalendarCache,
   hasCalendarCache,
   refreshCalendarCache,
+  subscribeCalendarCache,
 } from '../../../services/calendarCache';
+import { pushAppBackEntry } from '../../../services/navigationHistory';
+import { getModalBackdropResponder } from '../../../utils/modalBackdrop';
 import { GiftPlan, GiftPurpose } from '../../../types/giftPlans';
 import { LovedOne } from '../../../types/lovedOnes';
 import LovedOneDetailsScreen from './LovedOneDetailsScreen';
@@ -31,15 +34,24 @@ const PURPOSES: GiftPurpose[] = [
 
 const WEEK_DAYS = ['Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sam', 'Dum'];
 
-type CalendarEventType = 'buy' | 'offer' | 'completed';
+type CalendarEventType =
+  | 'buy'
+  | 'offer'
+  | 'completed'
+  | 'lovedBirthday'
+  | 'userBirthday'
+  | 'easter'
+  | 'christmas';
 
 type CalendarEvent = {
   id: string;
   type: CalendarEventType;
   dateKey: string;
-  lovedOneId: string;
-  lovedOneName: string;
-  giftPlan: GiftPlan;
+  lovedOneId?: string;
+  lovedOneName?: string;
+  giftPlan?: GiftPlan;
+  title?: string;
+  description?: string;
 };
 
 function pad(value: number) {
@@ -97,13 +109,64 @@ function getCalendarDays(year: number, monthIndex: number) {
 function getEventColor(type: CalendarEventType) {
   if (type === 'buy') return '#2563eb';
   if (type === 'offer') return '#0f766e';
-  return '#16a34a';
+  if (type === 'completed') return '#16a34a';
+  if (type === 'lovedBirthday') return '#be123c';
+  if (type === 'userBirthday') return '#f97316';
+  if (type === 'easter') return '#7c3aed';
+  return '#dc2626';
 }
 
 function getEventLabel(type: CalendarEventType) {
   if (type === 'buy') return 'De cumparat';
   if (type === 'offer') return 'De oferit';
-  return 'Finalizat';
+  if (type === 'completed') return 'Finalizat';
+  if (type === 'lovedBirthday') return 'Zi de nastere';
+  if (type === 'userBirthday') return 'Ziua ta';
+  if (type === 'easter') return 'Paste';
+  return 'Craciun';
+}
+
+function getEventTitle(event: CalendarEvent) {
+  return event.giftPlan?.purpose || event.title || getEventLabel(event.type);
+}
+
+function getEventPerson(event: CalendarEvent) {
+  return event.lovedOneName || event.description || '';
+}
+
+function getOrthodoxEasterDateKey(year: number) {
+  const a = year % 4;
+  const b = year % 7;
+  const c = year % 19;
+  const d = (19 * c + 15) % 30;
+  const e = (2 * a + 4 * b - d + 34) % 7;
+  const julianMonth = Math.floor((d + e + 114) / 31);
+  const julianDay = ((d + e + 114) % 31) + 1;
+  const date = new Date(year, julianMonth - 1, julianDay);
+
+  date.setDate(date.getDate() + 13);
+
+  return toDateKey(date.getFullYear(), date.getMonth() + 1, date.getDate());
+}
+
+function dateKeyFromBirthDate(birthDate: string | undefined, targetYear: number) {
+  if (!birthDate) return null;
+
+  const [birthYear, month, day] = birthDate.split('-').map(Number);
+  const date = new Date(targetYear, month - 1, day);
+
+  if (
+    !birthYear ||
+    !month ||
+    !day ||
+    date.getFullYear() !== targetYear ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return toDateKey(targetYear, month, day);
 }
 
 function formatSelectedDay(dateKey: string) {
@@ -161,7 +224,10 @@ function MultiSelectDropdown({
         transparent
         onRequestClose={() => setVisible(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View
+          style={styles.modalOverlay}
+          {...getModalBackdropResponder(() => setVisible(false))}
+        >
           <View style={styles.dropdownModal}>
             <Text style={styles.modalTitle}>{label}</Text>
             <ScrollView style={styles.dropdownList}>
@@ -211,8 +277,12 @@ function MultiSelectDropdown({
   );
 }
 
-export default function CalendarScreen() {
-  const { token } = useAuth();
+type Props = {
+  resetRef?: React.MutableRefObject<(() => void) | null>;
+};
+
+export default function CalendarScreen({ resetRef }: Props) {
+  const { token, profile } = useAuth();
   const { width } = useWindowDimensions();
   const today = new Date();
   const isCompact = width < 760;
@@ -226,15 +296,39 @@ export default function CalendarScreen() {
   const [showBuyEvents, setShowBuyEvents] = useState(true);
   const [showOfferEvents, setShowOfferEvents] = useState(true);
   const [showCompletedEvents, setShowCompletedEvents] = useState(true);
+  const [showLovedOneBirthdays, setShowLovedOneBirthdays] = useState(true);
+  const [showUserBirthday, setShowUserBirthday] = useState(true);
+  const [showHolidays, setShowHolidays] = useState(true);
+  const [showEaster, setShowEaster] = useState(true);
+  const [showChristmas, setShowChristmas] = useState(true);
   const [selectedLovedOneIds, setSelectedLovedOneIds] = useState<string[]>([]);
   const [selectedPurposes, setSelectedPurposes] = useState<string[]>([]);
   const [selectedGiftTarget, setSelectedGiftTarget] = useState<{
     lovedOneId: string;
     giftPlanId: string;
   } | null>(null);
+  const selectedGiftBackRef = useRef<ReturnType<typeof pushAppBackEntry> | null>(
+    null
+  );
   const [selectedDay, setSelectedDay] = useState<string>(
     toDateKey(today.getFullYear(), today.getMonth() + 1, today.getDate())
   );
+
+  useEffect(() => {
+    if (!resetRef) return;
+
+    const resetHandler = () => {
+      setSelectedGiftTarget(null);
+    };
+
+    resetRef.current = resetHandler;
+
+    return () => {
+      if (resetRef.current === resetHandler) {
+        resetRef.current = null;
+      }
+    };
+  }, [resetRef]);
 
   const load = async (forceRefresh = false) => {
     try {
@@ -258,6 +352,32 @@ export default function CalendarScreen() {
     load();
   }, [token]);
 
+  useEffect(() => {
+    return subscribeCalendarCache(() => {
+      load(true);
+    });
+  }, [token]);
+
+  useEffect(() => {
+    if (!selectedGiftTarget) return;
+
+    const entry = pushAppBackEntry(() => setSelectedGiftTarget(null));
+    selectedGiftBackRef.current = entry;
+
+    return () => {
+      entry.remove();
+      if (selectedGiftBackRef.current === entry) {
+        selectedGiftBackRef.current = null;
+      }
+    };
+  }, [selectedGiftTarget]);
+
+  const goBackFromGiftDetails = () => {
+    if (selectedGiftBackRef.current?.goBack()) return;
+
+    setSelectedGiftTarget(null);
+  };
+
   const lovedOneOptions = useMemo(
     () =>
       lovedOnes.map((lovedOne) => ({
@@ -273,7 +393,7 @@ export default function CalendarScreen() {
   );
 
   const allEvents = useMemo(() => {
-    return lovedOnes.flatMap((lovedOne) => {
+    const giftEvents = lovedOnes.flatMap((lovedOne) => {
       const giftPlans = giftPlansByLovedOne[lovedOne.id] || [];
 
       return giftPlans.flatMap((giftPlan) => {
@@ -281,7 +401,7 @@ export default function CalendarScreen() {
         const purchaseDeadlineDate =
           giftPlan.purchaseDeadlineDate || giftPlan.deadlineDate;
 
-        if (purchaseDeadlineDate) {
+        if (giftPlan.status === 'planned' && purchaseDeadlineDate) {
           events.push({
             id: `${giftPlan.id}-buy`,
             type: 'buy',
@@ -292,7 +412,7 @@ export default function CalendarScreen() {
           });
         }
 
-        if (giftPlan.deadlineDate) {
+        if (giftPlan.status !== 'completed' && giftPlan.deadlineDate) {
           events.push({
             id: `${giftPlan.id}-offer`,
             type: 'offer',
@@ -319,25 +439,86 @@ export default function CalendarScreen() {
         return events;
       });
     });
-  }, [giftPlansByLovedOne, lovedOnes]);
+
+    const lovedBirthdayEvents: CalendarEvent[] = lovedOnes
+      .map((lovedOne) => {
+        const dateKey = toDateKey(year, lovedOne.month, lovedOne.day);
+
+        return {
+          id: `${lovedOne.id}-birthday-${year}`,
+          type: 'lovedBirthday' as const,
+          dateKey,
+          lovedOneId: lovedOne.id,
+          lovedOneName: lovedOne.name,
+          title: `Ziua lui ${lovedOne.name}`,
+          description: lovedOne.year
+            ? `${year - lovedOne.year} ani`
+            : 'Persoana draga',
+        };
+      });
+
+    const userBirthdayDateKey = dateKeyFromBirthDate(profile?.birthDate, year);
+    const userBirthdayEvent: CalendarEvent[] =
+      userBirthdayDateKey && profile
+        ? [
+            {
+              id: `${profile.uid}-birthday-${year}`,
+              type: 'userBirthday',
+              dateKey: userBirthdayDateKey,
+              title: 'Ziua ta de nastere',
+              description: `${profile.firstName} ${profile.lastName}`,
+            },
+          ]
+        : [];
+
+    const holidayEvents: CalendarEvent[] = [
+      {
+        id: `easter-${year}`,
+        type: 'easter',
+        dateKey: getOrthodoxEasterDateKey(year),
+        title: 'Paste',
+        description: 'Sarbatoare',
+      },
+      {
+        id: `christmas-${year}`,
+        type: 'christmas',
+        dateKey: toDateKey(year, 12, 25),
+        title: 'Craciun',
+        description: 'Sarbatoare',
+      },
+    ];
+
+    return [
+      ...giftEvents,
+      ...lovedBirthdayEvents,
+      ...userBirthdayEvent,
+      ...holidayEvents,
+    ];
+  }, [giftPlansByLovedOne, lovedOnes, profile, year]);
 
   const visibleEvents = useMemo(() => {
     return allEvents.filter((event) => {
       const typeVisible =
         (event.type === 'buy' && showBuyEvents) ||
         (event.type === 'offer' && showOfferEvents) ||
-        (event.type === 'completed' && showCompletedEvents);
+        (event.type === 'completed' && showCompletedEvents) ||
+        (event.type === 'lovedBirthday' && showLovedOneBirthdays) ||
+        (event.type === 'userBirthday' && showUserBirthday) ||
+        ((event.type === 'easter' || event.type === 'christmas') &&
+          showHolidays);
 
       if (!typeVisible) return false;
 
       if (
         selectedLovedOneIds.length > 0 &&
+        event.lovedOneId &&
         !selectedLovedOneIds.includes(event.lovedOneId)
       ) {
         return false;
       }
 
       if (
+        event.giftPlan &&
         selectedPurposes.length > 0 &&
         !selectedPurposes.includes(event.giftPlan.purpose)
       ) {
@@ -352,14 +533,17 @@ export default function CalendarScreen() {
     selectedPurposes,
     showBuyEvents,
     showCompletedEvents,
+    showHolidays,
+    showLovedOneBirthdays,
     showOfferEvents,
+    showUserBirthday,
   ]);
 
   const eventsByDate = useMemo(() => {
     return visibleEvents.reduce<Record<string, CalendarEvent[]>>((acc, event) => {
       const current = acc[event.dateKey] || [];
       acc[event.dateKey] = [...current, event].sort((a, b) =>
-        a.giftPlan.purpose.localeCompare(b.giftPlan.purpose)
+        getEventTitle(a).localeCompare(getEventTitle(b))
       );
       return acc;
     }, {});
@@ -410,7 +594,7 @@ export default function CalendarScreen() {
         lovedOneId={selectedGiftTarget.lovedOneId}
         initialGiftPlanId={selectedGiftTarget.giftPlanId}
         backLabel="Inapoi la calendar"
-        onBack={() => setSelectedGiftTarget(null)}
+        onBack={goBackFromGiftDetails}
       />
     );
   }
@@ -447,9 +631,71 @@ export default function CalendarScreen() {
               <View style={[styles.legendDot, { backgroundColor: '#16a34a' }]} />
               <Text style={styles.legendText}>Finalizate</Text>
             </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: '#be123c' }]} />
+              <Text style={styles.legendText}>Zile nastere</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: '#7c3aed' }]} />
+              <Text style={styles.legendText}>Sarbatori</Text>
+            </View>
           </View>
           <Pressable style={styles.refreshButton} onPress={() => load(true)}>
             <Text style={styles.refreshButtonText}>Reincarca</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.filterCheck}
+            onPress={() => setShowLovedOneBirthdays((current) => !current)}
+          >
+            <View
+              style={[
+                styles.checkbox,
+                showLovedOneBirthdays && styles.birthdayCheckbox,
+              ]}
+            >
+              {showLovedOneBirthdays && (
+                <Text style={styles.checkboxMark}>✓</Text>
+              )}
+            </View>
+            <Text style={styles.filterCheckText}>Zile nastere persoane</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.filterCheck}
+            onPress={() => setShowUserBirthday((current) => !current)}
+          >
+            <View
+              style={[
+                styles.checkbox,
+                showUserBirthday && styles.userBirthdayCheckbox,
+              ]}
+            >
+              {showUserBirthday && <Text style={styles.checkboxMark}>✓</Text>}
+            </View>
+            <Text style={styles.filterCheckText}>Ziua mea</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.filterCheck}
+            onPress={() => setShowEaster((current) => !current)}
+          >
+            <View style={[styles.checkbox, showEaster && styles.easterCheckbox]}>
+              {showEaster && <Text style={styles.checkboxMark}>✓</Text>}
+            </View>
+            <Text style={styles.filterCheckText}>Paste</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.filterCheck}
+            onPress={() => setShowChristmas((current) => !current)}
+          >
+            <View
+              style={[styles.checkbox, showChristmas && styles.christmasCheckbox]}
+            >
+              {showChristmas && <Text style={styles.checkboxMark}>✓</Text>}
+            </View>
+            <Text style={styles.filterCheckText}>Craciun</Text>
           </Pressable>
         </View>
       </View>
@@ -495,6 +741,48 @@ export default function CalendarScreen() {
               )}
             </View>
             <Text style={styles.filterCheckText}>Cadouri - finalizate</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.filterCheck}
+            onPress={() => setShowLovedOneBirthdays((current) => !current)}
+          >
+            <View
+              style={[
+                styles.checkbox,
+                showLovedOneBirthdays && styles.birthdayCheckbox,
+              ]}
+            >
+              {showLovedOneBirthdays && (
+                <Text style={styles.checkboxMark}>✓</Text>
+              )}
+            </View>
+            <Text style={styles.filterCheckText}>Zile nastere persoane</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.filterCheck}
+            onPress={() => setShowUserBirthday((current) => !current)}
+          >
+            <View
+              style={[
+                styles.checkbox,
+                showUserBirthday && styles.userBirthdayCheckbox,
+              ]}
+            >
+              {showUserBirthday && <Text style={styles.checkboxMark}>✓</Text>}
+            </View>
+            <Text style={styles.filterCheckText}>Ziua mea</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.filterCheck}
+            onPress={() => setShowHolidays((current) => !current)}
+          >
+            <View style={[styles.checkbox, showHolidays && styles.holidayCheckbox]}>
+              {showHolidays && <Text style={styles.checkboxMark}>✓</Text>}
+            </View>
+            <Text style={styles.filterCheckText}>Sarbatori</Text>
           </Pressable>
         </View>
 
@@ -610,18 +898,21 @@ export default function CalendarScreen() {
                       pressed && styles.eventPillPressed,
                       { borderLeftColor: getEventColor(event.type) },
                     ]}
-                    onPress={() =>
+                    onPress={() => {
+                      if (!event.giftPlan || !event.lovedOneId) return;
+
                       setSelectedGiftTarget({
                         lovedOneId: event.lovedOneId,
                         giftPlanId: event.giftPlan.id,
-                      })
-                    }
+                      });
+                    }}
+                    disabled={!event.giftPlan || !event.lovedOneId}
                   >
                     <Text style={[styles.eventType, { color: getEventColor(event.type) }]}>
                       {getEventLabel(event.type)}
                     </Text>
-                    <Text style={styles.eventTitle}>{event.giftPlan.purpose}</Text>
-                    <Text style={styles.eventPerson}>{event.lovedOneName}</Text>
+                    <Text style={styles.eventTitle}>{getEventTitle(event)}</Text>
+                    <Text style={styles.eventPerson}>{getEventPerson(event)}</Text>
                   </Pressable>
                 ))
               )}
@@ -674,12 +965,15 @@ export default function CalendarScreen() {
                                 pressed && styles.eventPillPressed,
                                 { borderLeftColor: getEventColor(event.type) },
                               ]}
-                              onPress={() =>
+                              onPress={() => {
+                                if (!event.giftPlan || !event.lovedOneId) return;
+
                                 setSelectedGiftTarget({
                                   lovedOneId: event.lovedOneId,
                                   giftPlanId: event.giftPlan.id,
-                                })
-                              }
+                                });
+                              }}
+                              disabled={!event.giftPlan || !event.lovedOneId}
                             >
                               <Text
                                 style={[
@@ -690,10 +984,10 @@ export default function CalendarScreen() {
                                 {getEventLabel(event.type)}
                               </Text>
                               <Text style={styles.eventTitle} numberOfLines={1}>
-                                {event.giftPlan.purpose}
+                                {getEventTitle(event)}
                               </Text>
                               <Text style={styles.eventPerson} numberOfLines={1}>
-                                {event.lovedOneName}
+                                {getEventPerson(event)}
                               </Text>
                             </Pressable>
                           ))}
@@ -760,6 +1054,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   headerActions: {
+    display: 'none',
     alignItems: 'flex-end',
     gap: 8,
   },
@@ -852,6 +1147,26 @@ const styles = StyleSheet.create({
   completedCheckbox: {
     backgroundColor: '#16a34a',
     borderColor: '#16a34a',
+  },
+  birthdayCheckbox: {
+    backgroundColor: '#be123c',
+    borderColor: '#be123c',
+  },
+  userBirthdayCheckbox: {
+    backgroundColor: '#f97316',
+    borderColor: '#f97316',
+  },
+  easterCheckbox: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#7c3aed',
+  },
+  holidayCheckbox: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#7c3aed',
+  },
+  christmasCheckbox: {
+    backgroundColor: '#dc2626',
+    borderColor: '#dc2626',
   },
   checkboxMark: {
     color: '#ffffff',

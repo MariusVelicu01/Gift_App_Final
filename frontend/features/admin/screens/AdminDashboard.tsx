@@ -5,6 +5,7 @@ import HomeScreen from './HomeScreen';
 import PartnerStoresScreen from './PartnerStoresScreen';
 import StatisticsScreen from './StatisticsScreen';
 import SettingsScreen from './SettingsScreen';
+import { pushAppBackEntry } from '../../../services/navigationHistory';
 
 type AdminTab = 'home' | 'partnerStores' | 'statistics' | 'settings';
 
@@ -15,14 +16,26 @@ type Props = {
 
 export default function AdminDashboard({ firstName, onLogout }: Props) {
   const [activeTab, setActiveTab] = useState<AdminTab>('home');
+  const [partnerStoreSelectedId, setPartnerStoreSelectedId] = useState<string | null>(null);
+
+  const navigateToTab = (tab: AdminTab) => {
+    if (tab === activeTab) return;
+
+    const previousTab = activeTab;
+    pushAppBackEntry(() => setActiveTab(previousTab));
+    setActiveTab(tab);
+  };
 
   const currentScreen = useMemo(() => {
     switch (activeTab) {
       case 'home':
-        return <HomeScreen firstName={firstName} />;
+        return <HomeScreen firstName={firstName} onOpenStore={(storeId) => {
+          setPartnerStoreSelectedId(storeId);
+          navigateToTab('partnerStores');
+        }} />;
 
       case 'partnerStores':
-        return <PartnerStoresScreen />;
+        return <PartnerStoresScreen initialSelectedStoreId={partnerStoreSelectedId} />;
 
       case 'statistics':
         return <StatisticsScreen />;
@@ -31,9 +44,17 @@ export default function AdminDashboard({ firstName, onLogout }: Props) {
         return <SettingsScreen onLogout={onLogout} />;
 
       default:
-        return <HomeScreen firstName={firstName} />;
+        return (
+          <HomeScreen
+            firstName={firstName}
+            onOpenStore={(storeId) => {
+              setPartnerStoreSelectedId(storeId);
+              navigateToTab('partnerStores');
+            }}
+          />
+        );
     }
-  }, [activeTab, firstName, onLogout]);
+  }, [activeTab, firstName, onLogout, partnerStoreSelectedId]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -43,22 +64,22 @@ export default function AdminDashboard({ firstName, onLogout }: Props) {
         <TabButton
           label="Acasă"
           isActive={activeTab === 'home'}
-          onPress={() => setActiveTab('home')}
+          onPress={() => navigateToTab('home')}
         />
         <TabButton
           label="Magazine"
           isActive={activeTab === 'partnerStores'}
-          onPress={() => setActiveTab('partnerStores')}
+          onPress={() => navigateToTab('partnerStores')}
         />
         <TabButton
           label="Statistici"
           isActive={activeTab === 'statistics'}
-          onPress={() => setActiveTab('statistics')}
+          onPress={() => navigateToTab('statistics')}
         />
         <TabButton
           label="Setări"
           isActive={activeTab === 'settings'}
-          onPress={() => setActiveTab('settings')}
+          onPress={() => navigateToTab('settings')}
         />
       </View>
     </SafeAreaView>

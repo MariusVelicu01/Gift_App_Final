@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import {
   createLovedOne,
+  deleteLovedOne,
   getLovedOneById,
   getLovedOnes,
   updateLovedOne,
@@ -212,6 +213,40 @@ export async function update(req: Request, res: Response) {
 
     return res.status(500).json({
       message: 'Nu am putut actualiza persoana.',
+    });
+  }
+}
+
+export async function remove(req: Request, res: Response) {
+  try {
+    const uid = req.user?.uid;
+    const lovedOneId = getParam(req.params.id);
+
+    if (!uid) {
+      return res.status(401).json({ message: 'Unauthorized.' });
+    }
+
+    if (!lovedOneId) {
+      return res.status(400).json({ message: 'ID invalid.' });
+    }
+
+    const existing = await getLovedOneById(uid, lovedOneId);
+
+    if (!existing) {
+      return res.status(404).json({ message: 'Persoana nu a fost gasita.' });
+    }
+
+    await deleteLovedOne(uid, lovedOneId);
+
+    return res.status(200).json({
+      message:
+        'Persoana a fost stearsa din lista ta. Istoricul cadourilor ramane disponibil pentru statistici.',
+    });
+  } catch (error) {
+    console.error('DELETE LOVED ONE ERROR:', error);
+
+    return res.status(500).json({
+      message: 'Nu am putut sterge persoana.',
     });
   }
 }

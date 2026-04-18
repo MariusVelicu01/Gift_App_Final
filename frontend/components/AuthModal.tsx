@@ -1,6 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,7 +12,8 @@ import {
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { useAuth } from '../context/AuthContext';
-import type { AppRole } from '../types/user';
+import type { AppRole, UserGender } from '../types/user';
+import { getModalBackdropResponder } from '../utils/modalBackdrop';
 
 type Props = {
   visible: boolean;
@@ -70,13 +73,17 @@ export default function AuthModal({ visible, onClose }: Props) {
 
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [role, setRole] = useState<AppRole>('client');
+  const [gender, setGender] = useState<UserGender>('unknown');
 
   const [birthYear, setBirthYear] = useState(defaultBirth.year);
   const [birthMonth, setBirthMonth] = useState(defaultBirth.month);
@@ -94,18 +101,58 @@ export default function AuthModal({ visible, onClose }: Props) {
 
     setLoginEmail('');
     setLoginPassword('');
+    setShowLoginPassword(false);
     setFirstName('');
     setLastName('');
     setRegisterEmail('');
     setRegisterPassword('');
     setConfirmPassword('');
+    setShowRegisterPassword(false);
+    setShowConfirmPassword(false);
     setRole('client');
+    setGender('unknown');
     setBirthYear(freshDefault.year);
     setBirthMonth(freshDefault.month);
     setBirthDay(freshDefault.day);
     setForgotEmail('');
     clearMessages();
   };
+
+  const translateY = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      translateY.setValue(0);
+    }
+  }, [visible]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4,
+      onPanResponderMove: (_, gs) => {
+        if (gs.dy > 0) translateY.setValue(gs.dy);
+      },
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dy > 100 || gs.vy > 0.5) {
+          Animated.timing(translateY, {
+            toValue: 800,
+            duration: 180,
+            useNativeDriver: true,
+          }).start(() => {
+            translateY.setValue(0);
+            handleClose();
+          });
+        } else {
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            bounciness: 4,
+          }).start();
+        }
+      },
+    })
+  ).current;
 
   const handleClose = () => {
     resetFields();
@@ -199,6 +246,7 @@ export default function AuthModal({ visible, onClose }: Props) {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         birthDate,
+        gender,
         email: registerEmail.trim(),
         password: registerPassword,
         role,
@@ -240,8 +288,11 @@ export default function AuthModal({ visible, onClose }: Props) {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <View style={styles.overlay}>
-        <View style={styles.modalCard}>
+      <View style={styles.overlay} {...getModalBackdropResponder(handleClose)}>
+        <Animated.View style={[styles.modalCard, { transform: [{ translateY }] }]}>
+          <View style={styles.dragHandleArea} {...panResponder.panHandlers}>
+            <View style={styles.dragHandleBar} />
+          </View>
           <View style={styles.tabsRow}>
             <Pressable
               onPress={() => switchTab('login')}
@@ -290,16 +341,31 @@ export default function AuthModal({ visible, onClose }: Props) {
                   keyboardType="email-address"
                 />
 
+                <View style={styles.passwordInputWrapper}>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, styles.passwordInput]}
                   placeholder="Parolă"
                   value={loginPassword}
                   onChangeText={(value) => {
                     setLoginPassword(value);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  secureTextEntry
+                  secureTextEntry={!showLoginPassword}
+                  autoCapitalize="none"
                 />
+                  <Pressable
+                    style={({ hovered, pressed }) => [
+                      styles.passwordRevealButton,
+                      hovered && styles.passwordRevealButtonHover,
+                      pressed && styles.passwordRevealButtonPressed,
+                    ]}
+                    onPress={() => setShowLoginPassword((current) => !current)}
+                  >
+                    <Text style={styles.passwordRevealText}>
+                      {showLoginPassword ? 'Ascunde' : 'Arata'}
+                    </Text>
+                  </Pressable>
+                </View>
 
                 <Pressable
                   style={[styles.actionButton, submitting && styles.disabledButton]}
@@ -398,6 +464,34 @@ export default function AuthModal({ visible, onClose }: Props) {
                     : 'Trebuie să ai cel puțin 16 ani.'}
                 </Text>
 
+                <Text style={styles.label}>Gen</Text>
+
+                <View style={styles.genderRow}>
+                  {[
+                    { value: 'male', label: 'Masculin' },
+                    { value: 'female', label: 'Feminin' },
+                    { value: 'unknown', label: 'Nespecificat' },
+                  ].map((option) => (
+                    <Pressable
+                      key={option.value}
+                      style={[
+                        styles.genderButton,
+                        gender === option.value && styles.genderButtonActive,
+                      ]}
+                      onPress={() => setGender(option.value as UserGender)}
+                    >
+                      <Text
+                        style={[
+                          styles.genderButtonText,
+                          gender === option.value && styles.genderButtonTextActive,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
                 <TextInput
                   style={styles.input}
                   placeholder="Email"
@@ -410,16 +504,33 @@ export default function AuthModal({ visible, onClose }: Props) {
                   keyboardType="email-address"
                 />
 
+                <View style={styles.passwordInputWrapper}>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, styles.passwordInput]}
                   placeholder="Parolă"
                   value={registerPassword}
                   onChangeText={(value) => {
                     setRegisterPassword(value);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  secureTextEntry
+                  secureTextEntry={!showRegisterPassword}
+                  autoCapitalize="none"
                 />
+                  <Pressable
+                    style={({ hovered, pressed }) => [
+                      styles.passwordRevealButton,
+                      hovered && styles.passwordRevealButtonHover,
+                      pressed && styles.passwordRevealButtonPressed,
+                    ]}
+                    onPress={() =>
+                      setShowRegisterPassword((current) => !current)
+                    }
+                  >
+                    <Text style={styles.passwordRevealText}>
+                      {showRegisterPassword ? 'Ascunde' : 'Arata'}
+                    </Text>
+                  </Pressable>
+                </View>
 
                 <View style={styles.rulesBox}>
                   <Rule ok={passwordChecks.minLength} text="Minim 8 caractere" />
@@ -437,8 +548,21 @@ export default function AuthModal({ visible, onClose }: Props) {
                     setConfirmPassword(value);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  secureTextEntry
+                  secureTextEntry={!showConfirmPassword}
+                  autoCapitalize="none"
                 />
+                  <Pressable
+                    style={({ hovered, pressed }) => [
+                      styles.passwordRevealInlineButton,
+                      hovered && styles.passwordRevealButtonHover,
+                      pressed && styles.passwordRevealButtonPressed,
+                    ]}
+                    onPress={() => setShowConfirmPassword((current) => !current)}
+                  >
+                    <Text style={styles.passwordRevealText}>
+                      {showConfirmPassword ? 'Ascunde' : 'Arata'}
+                    </Text>
+                  </Pressable>
 
                 {confirmPassword.length > 0 && (
                   <Text
@@ -535,7 +659,7 @@ export default function AuthModal({ visible, onClose }: Props) {
               <Text style={styles.closeButtonText}>Închide</Text>
             </Pressable>
           </ScrollView>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -553,6 +677,16 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     maxHeight: '90%',
     paddingBottom: 24,
+  },
+  dragHandleArea: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  dragHandleBar: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#d1d5db',
   },
   tabsRow: {
     flexDirection: 'row',
@@ -598,6 +732,47 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     backgroundColor: '#fafafa',
     fontSize: 15,
+  },
+  passwordInputWrapper: {
+    position: 'relative',
+    marginBottom: 12,
+  },
+  passwordInput: {
+    marginBottom: 0,
+    paddingRight: 92,
+  },
+  passwordRevealButton: {
+    position: 'absolute',
+    right: 8,
+    top: 7,
+    borderRadius: 8,
+    backgroundColor: '#fff7ed',
+    borderWidth: 1,
+    borderColor: '#fed7aa',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  passwordRevealInlineButton: {
+    alignSelf: 'flex-end',
+    borderRadius: 8,
+    backgroundColor: '#fff7ed',
+    borderWidth: 1,
+    borderColor: '#fed7aa',
+    marginTop: -6,
+    marginBottom: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  passwordRevealButtonHover: {
+    backgroundColor: '#ffedd5',
+  },
+  passwordRevealButtonPressed: {
+    transform: [{ scale: 0.98 }],
+  },
+  passwordRevealText: {
+    color: '#be123c',
+    fontSize: 12,
+    fontWeight: '900',
   },
   label: {
     fontSize: 14,
@@ -672,6 +847,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   roleButtonTextActive: {
+    color: '#fff',
+  },
+  genderRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  genderButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  genderButtonActive: {
+    backgroundColor: '#f59e0b',
+    borderColor: '#f59e0b',
+  },
+  genderButtonText: {
+    fontWeight: '700',
+    color: '#6b7280',
+    fontSize: 14,
+  },
+  genderButtonTextActive: {
     color: '#fff',
   },
   actionButton: {

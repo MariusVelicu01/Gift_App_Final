@@ -10,4 +10,6 @@ export type LovedOne = {
   imageUrl?: string;
   createdAt: string;
   updatedAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 };

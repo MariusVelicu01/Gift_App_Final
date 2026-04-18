@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   loginRequest,
@@ -8,6 +9,8 @@ import {
   RegisterPayload,
 } from '../services/authApi';
 import { UserProfile } from '../types/user';
+import { onSessionExpired } from '../services/authEventBus';
+import SessionExpiredModal from '../components/SessionExpiredModal';
 
 type RegisterResult = {
   autoLoginSuccess: boolean;
@@ -32,6 +35,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [sessionEmail, setSessionEmail] = useState('');
+  const hasActiveSessionRef = useRef(false);
+
+  useEffect(() => {
+    hasActiveSessionRef.current = !!token;
+  }, [token]);
+
+  useEffect(() => {
+    return onSessionExpired(() => {
+      if (!hasActiveSessionRef.current) return;
+      setSessionEmail(profile?.email || sessionEmail);
+      setSessionExpired(true);
+    });
+  }, [profile?.email, sessionEmail]);
 
   useEffect(() => {
     bootstrap();
@@ -68,6 +86,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     await AsyncStorage.setItem(TOKEN_KEY, receivedToken);
     setToken(receivedToken);
+    setSessionExpired(false);
+    setSessionEmail('');
 
     const myProfile = await meRequest(receivedToken);
     setProfile(myProfile);
@@ -92,6 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.removeItem(TOKEN_KEY);
     setToken(null);
     setProfile(null);
+    setSessionExpired(false);
   };
 
   const refreshProfile = async () => {
@@ -114,6 +135,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
+      <SessionExpiredModal
+        visible={sessionExpired}
+        prefillEmail={sessionEmail || profile?.email || ''}
+        onLogin={login}
+        onLogout={logout}
+      />
     </AuthContext.Provider>
   );
 }

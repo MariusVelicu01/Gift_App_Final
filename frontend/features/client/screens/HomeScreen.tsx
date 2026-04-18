@@ -11,8 +11,8 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../../context/AuthContext';
-import { getCalendarCache } from '../../../services/calendarCache';
-import { getPartnerStores } from '../../../services/partnerStoresApi';
+import { getCalendarCache, subscribeCalendarCache } from '../../../services/calendarCache';
+import { getPartnerStoresCache, subscribePartnerStoresCache } from '../../../services/partnerStoresCache';
 import { GiftPlan } from '../../../types/giftPlans';
 import { LovedOne } from '../../../types/lovedOnes';
 import { PartnerStore, ProductImportItem } from '../../../types/partnerStores';
@@ -23,6 +23,16 @@ type Promotion = {
   discountPercent: number;
   currentPrice: number;
   originalPrice?: number;
+};
+
+type GiftDetailsTarget = {
+  lovedOneId: string;
+  giftPlanId: string;
+};
+
+type Props = {
+  firstName: string;
+  onOpenGift?: (target: GiftDetailsTarget) => void;
 };
 
 function getTodayKey() {
@@ -80,7 +90,7 @@ function openProductLink(affiliateUrl?: string, productUrl?: string) {
   });
 }
 
-export default function HomeScreen({ firstName }: { firstName: string }) {
+export default function HomeScreen({ firstName, onOpenGift }: Props) {
   const { token } = useAuth();
   const { width } = useWindowDimensions();
   const isCompact = width < 760;
@@ -98,7 +108,7 @@ export default function HomeScreen({ firstName }: { firstName: string }) {
       setLoading(true);
       const [calendarData, stores] = await Promise.all([
         getCalendarCache(token),
-        getPartnerStores(token),
+        getPartnerStoresCache(token),
       ]);
 
       setLovedOnes(calendarData.lovedOnes);
@@ -113,6 +123,13 @@ export default function HomeScreen({ firstName }: { firstName: string }) {
 
   useEffect(() => {
     load();
+    if (!token) return;
+    const unsubCalendar = subscribeCalendarCache(load);
+    const unsubStores = subscribePartnerStoresCache(load);
+    return () => {
+      unsubCalendar();
+      unsubStores();
+    };
   }, [token]);
 
   const allGiftPlans = useMemo(() => {
@@ -164,7 +181,7 @@ export default function HomeScreen({ firstName }: { firstName: string }) {
   }, [activeGiftPlans]);
 
   const promotions = useMemo(() => {
-    return partnerStores
+    const allDiscounted = partnerStores
       .flatMap((store) =>
         store.products.map((product) => {
           const currentPrice = Number(product.price?.current);
@@ -191,21 +208,13 @@ export default function HomeScreen({ firstName }: { firstName: string }) {
           };
         })
       )
-      .filter(Boolean)
-      .sort((a, b) => Number(b?.discountPercent) - Number(a?.discountPercent))
-      .slice(0, 5) as Promotion[];
+      .filter(Boolean) as Promotion[];
+
+    return [...allDiscounted]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 5);
   }, [partnerStores]);
 
-  const currentYear = new Date().getFullYear();
-  const currentYearBudget = activeGiftPlans
-    .filter(({ giftPlan }) => {
-      const date = dateKeyToDate(giftPlan.deadlineDate);
-      return date?.getFullYear() === currentYear;
-    })
-    .reduce((total, { giftPlan }) => total + giftPlan.budget, 0);
-  const purchasedGiftCount = activeGiftPlans.filter(
-    ({ giftPlan }) => giftPlan.status === 'purchased'
-  ).length;
 
   if (loading) {
     return (
@@ -218,24 +227,16 @@ export default function HomeScreen({ firstName }: { firstName: string }) {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      <View style={styles.heroBanner} />
+
       <View>
         <Text style={styles.title}>🎁 Acasa</Text>
         <Text style={styles.subtitle}>Bun venit, {firstName}.</Text>
       </View>
 
-      <View style={[styles.summaryGrid, isCompact && styles.summaryGridCompact]}>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryValue}>{activeGiftPlans.length}</Text>
-          <Text style={styles.summaryLabel}>🎀 cadouri active</Text>
-        </View>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryValue}>{purchasedGiftCount}</Text>
-          <Text style={styles.summaryLabel}>💝 cumparate, de oferit</Text>
-        </View>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryValue}>{currentYearBudget} RON</Text>
-          <Text style={styles.summaryLabel}>💳 buget anul curent</Text>
-        </View>
+      <View style={styles.summaryCard}>
+        <Text style={styles.summaryValue}>{activeGiftPlans.length}</Text>
+        <Text style={styles.summaryLabel}>🎀 cadouri active</Text>
       </View>
 
       <View style={styles.card}>
@@ -246,7 +247,20 @@ export default function HomeScreen({ firstName }: { firstName: string }) {
           </Text>
         ) : (
           urgentBuyPlans.map(({ lovedOne, giftPlan, daysLeft }) => (
-            <View key={`${lovedOne.id}-${giftPlan.id}-buy`} style={styles.giftRow}>
+            <Pressable
+              key={`${lovedOne.id}-${giftPlan.id}-buy`}
+              style={({ hovered, pressed }) => [
+                styles.giftRow,
+                hovered && styles.giftRowHover,
+                pressed && styles.giftRowPressed,
+              ]}
+              onPress={() =>
+                onOpenGift?.({
+                  lovedOneId: lovedOne.id,
+                  giftPlanId: giftPlan.id,
+                })
+              }
+            >
               <View style={styles.giftInfo}>
                 <Text style={styles.giftTitle}>{giftPlan.purpose}</Text>
                 <Text style={styles.giftMeta}>
@@ -257,7 +271,7 @@ export default function HomeScreen({ firstName }: { firstName: string }) {
               <Text style={styles.buyBadge}>
                 {Number(daysLeft) < 0 ? 'intarziat' : `${daysLeft} zile`}
               </Text>
-            </View>
+            </Pressable>
           ))
         )}
       </View>
@@ -270,7 +284,20 @@ export default function HomeScreen({ firstName }: { firstName: string }) {
           </Text>
         ) : (
           soonOfferPlans.map(({ lovedOne, giftPlan, daysLeft }) => (
-            <View key={`${lovedOne.id}-${giftPlan.id}-offer`} style={styles.giftRow}>
+            <Pressable
+              key={`${lovedOne.id}-${giftPlan.id}-offer`}
+              style={({ hovered, pressed }) => [
+                styles.giftRow,
+                hovered && styles.giftRowHover,
+                pressed && styles.giftRowPressed,
+              ]}
+              onPress={() =>
+                onOpenGift?.({
+                  lovedOneId: lovedOne.id,
+                  giftPlanId: giftPlan.id,
+                })
+              }
+            >
               <View style={styles.giftInfo}>
                 <Text style={styles.giftTitle}>{giftPlan.purpose}</Text>
                 <Text style={styles.giftMeta}>
@@ -280,7 +307,7 @@ export default function HomeScreen({ firstName }: { firstName: string }) {
               <Text style={styles.offerBadge}>
                 {daysLeft === 0 ? 'azi' : `${daysLeft} zile`}
               </Text>
-            </View>
+            </Pressable>
           ))
         )}
       </View>
@@ -360,13 +387,6 @@ export default function HomeScreen({ firstName }: { firstName: string }) {
         )}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>✨ Idei rapide</Text>
-        <Text style={styles.cardText}>
-          Verifica in Calendar zilele aglomerate, intra la Persoane pentru
-          cadourile active si foloseste Magazine pentru produse cu link afiliat.
-        </Text>
-      </View>
     </ScrollView>
   );
 }
@@ -401,15 +421,16 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginTop: 2,
   },
-  summaryGrid: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  summaryGridCompact: {
-    flexDirection: 'column',
+  heroBanner: {
+    width: '100%',
+    height: 180,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#fce7e0',
+    borderStyle: 'dashed',
+    backgroundColor: '#fff1f2',
   },
   summaryCard: {
-    flex: 1,
     borderWidth: 1,
     borderColor: '#fce7e0',
     borderRadius: 12,
@@ -475,6 +496,15 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#f9f1ee',
     paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+  },
+  giftRowHover: {
+    backgroundColor: '#fff1f2',
+    transform: [{ translateY: -1 }],
+  },
+  giftRowPressed: {
+    transform: [{ scale: 0.99 }],
   },
   giftInfo: {
     flex: 1,

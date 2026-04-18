@@ -1,10 +1,17 @@
 import { adminAuth } from '../config/firebase';
-import { createUserProfile, getUserProfileByUid, AppRole } from './userService';
+import {
+  createUserProfile,
+  getUserProfileByUid,
+  updateUserProfile,
+  AppRole,
+  UserGender,
+} from './userService';
 
 type RegisterInput = {
   firstName: string;
   lastName: string;
   birthDate: string;
+  gender: UserGender;
   email: string;
   password: string;
   role: AppRole;
@@ -19,7 +26,7 @@ type FirebaseLoginResponse = {
 };
 
 export async function registerUser(input: RegisterInput) {
-  const { firstName, lastName, birthDate, email, password, role } = input;
+  const { firstName, lastName, birthDate, gender, email, password, role } = input;
 
   const userRecord = await adminAuth.createUser({
     email,
@@ -33,6 +40,7 @@ export async function registerUser(input: RegisterInput) {
       firstName,
       lastName,
       birthDate,
+      gender,
       email,
       role,
       createdAt: new Date().toISOString(),
@@ -43,6 +51,7 @@ export async function registerUser(input: RegisterInput) {
       firstName,
       lastName,
       birthDate,
+      gender,
       email,
       role,
     };
@@ -111,4 +120,19 @@ export async function sendPasswordReset(email: string) {
 
 export async function getMyProfile(uid: string) {
   return getUserProfileByUid(uid);
+}
+
+export async function updateUserName(uid: string, firstName: string, lastName: string) {
+  await adminAuth.updateUser(uid, { displayName: `${firstName} ${lastName}` });
+  return updateUserProfile(uid, { firstName, lastName });
+}
+
+export async function changeUserPassword(
+  uid: string,
+  email: string,
+  currentPassword: string,
+  newPassword: string
+) {
+  await loginWithFirebase(email, currentPassword);
+  await adminAuth.updateUser(uid, { password: newPassword });
 }

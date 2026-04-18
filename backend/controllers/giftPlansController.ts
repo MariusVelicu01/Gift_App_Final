@@ -317,8 +317,11 @@ function normalizeSelectedProducts(products: unknown) {
     const storeId = String(product?.storeId || '').trim();
     const price = Number(product?.price);
     const originalPrice = Number(product?.originalPrice);
+    const priceBeforePromo = Number(product?.priceBeforePromo);
     const discount = Number(product?.discount);
     const discountPercent = Number(product?.discountPercent);
+    const promoDiscount = Number(product?.promoDiscount);
+    const promoDiscountPercent = Number(product?.promoDiscountPercent);
     const purchasePrice = Number(product?.purchasePrice);
 
     if (!name || !storeId || !Number.isFinite(price) || price < 0) {
@@ -340,10 +343,20 @@ function normalizeSelectedProducts(products: unknown) {
       affiliateUrl: String(product?.affiliateUrl || '').trim(),
       imageUrl: String(product?.imageUrl || '').trim(),
       price,
+      priceBeforePromo: Number.isFinite(priceBeforePromo)
+        ? priceBeforePromo
+        : 0,
       originalPrice: Number.isFinite(originalPrice) ? originalPrice : price,
       discount: Number.isFinite(discount) ? discount : 0,
       discountPercent: Number.isFinite(discountPercent) ? discountPercent : 0,
       hasDiscount: Boolean(product?.hasDiscount),
+      hasPromoCode: Boolean(product?.hasPromoCode),
+      promoCode: String(product?.promoCode || '').trim(),
+      promoDiscount: Number.isFinite(promoDiscount) ? promoDiscount : 0,
+      promoDiscountPercent: Number.isFinite(promoDiscountPercent)
+        ? promoDiscountPercent
+        : 0,
+      promoNote: String(product?.promoNote || '').trim(),
       currency: String(product?.currency || 'RON').trim(),
       addedAt: String(product?.addedAt || new Date().toISOString()),
       isPurchased: Boolean(product?.isPurchased),
@@ -358,6 +371,14 @@ function normalizeSelectedProducts(products: unknown) {
           ? purchasePrice
           : 0,
       purchasedFromImportedStore: Boolean(product?.purchasedFromImportedStore),
+      selectedAsCheapestOffer:
+        product?.selectedAsCheapestOffer !== undefined
+          ? Boolean(product?.selectedAsCheapestOffer)
+          : storeId !== 'manual',
+      manualSearchFallback:
+        product?.manualSearchFallback !== undefined
+          ? Boolean(product?.manualSearchFallback)
+          : storeId === 'manual',
     };
   });
 

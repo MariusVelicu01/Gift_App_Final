@@ -12,8 +12,17 @@ import {
 } from 'react-native';
 import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
-import { getPartnerStores } from '../../../services/partnerStoresApi';
+import { getPartnerStoresCache, subscribePartnerStoresCache } from '../../../services/partnerStoresCache';
 import { PartnerStore } from '../../../types/partnerStores';
+
+function buildStoreUrl(domain?: string) {
+  const cleanDomain = String(domain || '').trim();
+
+  if (!cleanDomain) return '';
+  if (/^https?:\/\//i.test(cleanDomain)) return cleanDomain;
+
+  return `https://${cleanDomain}`;
+}
 
 function openProductLink(affiliateUrl?: string, productUrl?: string) {
   const targetUrl = affiliateUrl || productUrl;
@@ -25,19 +34,74 @@ function openProductLink(affiliateUrl?: string, productUrl?: string) {
   });
 }
 
-export default function PartnerStoresScreen() {
+function openStoreLink(domain?: string) {
+  const targetUrl = buildStoreUrl(domain);
+
+  if (!targetUrl) return;
+
+  Linking.openURL(targetUrl).catch((error) => {
+    console.error('OPEN STORE LINK ERROR:', error);
+  });
+}
+
+function shuffleProducts<T>(items: T[]) {
+  return [...items].sort(() => Math.random() - 0.5);
+}
+
+function pickFeaturedProducts(store: PartnerStore) {
+  const discountedProducts = shuffleProducts(
+    store.products.filter(
+      (product) =>
+        product.price?.hasDiscount ||
+        Number(product.price?.discountPercent || 0) > 0 ||
+        Number(product.price?.discount || 0) > 0
+    )
+  );
+  const regularProducts = shuffleProducts(
+    store.products.filter((product) => !discountedProducts.includes(product))
+  );
+
+  return [...discountedProducts, ...regularProducts].slice(0, 5);
+}
+
+type Props = {
+  resetRef?: React.MutableRefObject<(() => void) | null>;
+};
+
+export default function PartnerStoresScreen({ resetRef }: Props) {
   const { token } = useAuth();
   const [stores, setStores] = useState<PartnerStore[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStore, setSelectedStore] = useState<PartnerStore | null>(null);
+  const [featuredProducts, setFeaturedProducts] = useState<PartnerStore['products']>(
+    []
+  );
   const [searchText, setSearchText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+
+  useEffect(() => {
+    if (!resetRef) return;
+
+    const resetHandler = () => {
+      setSelectedStore(null);
+      setSearchText('');
+      setSelectedCategory('all');
+    };
+
+    resetRef.current = resetHandler;
+
+    return () => {
+      if (resetRef.current === resetHandler) {
+        resetRef.current = null;
+      }
+    };
+  }, [resetRef]);
 
   const loadStores = async () => {
     try {
       if (!token) return;
       setLoading(true);
-      const data = await getPartnerStores(token);
+      const data = await getPartnerStoresCache(token);
       setStores(data);
     } catch (error) {
       console.error('LOAD PARTNER STORES ERROR:', error);
@@ -48,6 +112,8 @@ export default function PartnerStoresScreen() {
 
   useEffect(() => {
     loadStores();
+    if (!token) return;
+    return subscribePartnerStoresCache(loadStores);
   }, [token]);
 
   const categoryOptions = useMemo(() => {
@@ -95,14 +161,6 @@ export default function PartnerStoresScreen() {
         store.companyName,
         store.source,
         store.merchant?.name,
-        store.merchant?.domain,
-        store.merchant?.affiliateNetwork,
-        ...store.products.flatMap((product) => [
-          product.name,
-          product.brand,
-          product.category,
-          product.subcategory,
-        ]),
       ]
         .filter(Boolean)
         .join(' ')
@@ -124,6 +182,11 @@ export default function PartnerStoresScreen() {
     ).length;
   };
 
+  const openStoreDetails = (store: PartnerStore) => {
+    setFeaturedProducts(pickFeaturedProducts(store));
+    setSelectedStore(store);
+  };
+
   if (selectedStore) {
     return (
       <ScrollView contentContainerStyle={styles.container}>
@@ -143,27 +206,29 @@ export default function PartnerStoresScreen() {
           )}
 
           <Text style={styles.title}>{selectedStore.displayName}</Text>
-          <Text style={styles.meta}>Contract activ pana la {selectedStore.contractEndDate}</Text>
-          <Text style={styles.meta}>Produse disponibile: {selectedStore.products.length}</Text>
           {!!selectedStore.merchant?.domain && (
-            <Text style={styles.meta}>Website: {selectedStore.merchant.domain}</Text>
-          )}
-          {!!selectedStore.merchant?.affiliateNetwork && (
-            <Text style={styles.meta}>
-              Retea afiliere: {selectedStore.merchant.affiliateNetwork}
-            </Text>
+            <Pressable
+              style={styles.storeLinkButton}
+              onPress={() => openStoreLink(selectedStore.merchant?.domain)}
+            >
+              <Text style={styles.storeLinkButtonText}>Mergi pe magazin</Text>
+            </Pressable>
           )}
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Produse</Text>
+          <Text style={styles.cardTitle}>Produse recomandate</Text>
+          <Text style={styles.cardText}>
+            Selectam de fiecare data 5 produse diferite, cu accent pe ofertele
+            reduse.
+          </Text>
 
           {selectedStore.products.length === 0 ? (
             <Text style={styles.cardText}>
               Magazinul nu are produse importate momentan.
             </Text>
           ) : (
-            selectedStore.products.slice(0, 20).map((product, index) => (
+            featuredProducts.map((product, index) => (
               <Pressable
                 key={`${product.id || product.sku || product.name}-${index}`}
                 style={styles.productRow}
@@ -209,6 +274,9 @@ export default function PartnerStoresScreen() {
                       -{product.price.discountPercent}%
                     </Text>
                   )}
+                  {product.price?.hasDiscount && (
+                    <Text style={styles.discountBadge}>Reducere</Text>
+                  )}
                 </View>
               </Pressable>
             ))
@@ -224,7 +292,7 @@ export default function PartnerStoresScreen() {
 
       <View style={styles.filtersCard}>
         <TextInput
-          placeholder="Cauta dupa magazin, brand, produs sau domeniu"
+          placeholder="Cauta dupa numele magazinului"
           style={styles.searchInput}
           value={searchText}
           onChangeText={setSearchText}
@@ -285,7 +353,7 @@ export default function PartnerStoresScreen() {
               hovered && styles.storeCardHover,
               pressed && styles.storeCardPressed,
             ]}
-            onPress={() => setSelectedStore(store)}
+            onPress={() => openStoreDetails(store)}
           >
             {store.brandImageUri ? (
               <Image source={{ uri: store.brandImageUri }} style={styles.brandImage} />
@@ -299,11 +367,6 @@ export default function PartnerStoresScreen() {
 
             <View style={styles.storeInfo}>
               <Text style={styles.storeName}>{store.displayName}</Text>
-              <Text style={styles.meta}>
-                Produse: {getCategoryProductCount(store)}
-                {selectedCategory !== 'all' ? ` in ${selectedCategory}` : ''}
-              </Text>
-              <Text style={styles.meta}>Contract pana la {store.contractEndDate}</Text>
               {!!store.merchant?.domain && (
                 <Text style={styles.meta}>Website: {store.merchant.domain}</Text>
               )}
@@ -472,6 +535,18 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     fontWeight: '500',
   },
+  storeLinkButton: {
+    marginTop: 10,
+    backgroundColor: '#be123c',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  storeLinkButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '800',
+  },
   productRow: {
     borderTopWidth: 1,
     borderTopColor: '#f9f1ee',
@@ -524,5 +599,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     marginTop: 2,
+  },
+  discountBadge: {
+    overflow: 'hidden',
+    borderRadius: 20,
+    backgroundColor: '#fee2e2',
+    color: '#dc2626',
+    fontSize: 11,
+    fontWeight: '800',
+    marginTop: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
 });

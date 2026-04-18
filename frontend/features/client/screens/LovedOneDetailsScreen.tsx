@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -12,9 +12,13 @@ import {
   Linking,
 } from 'react-native';
 import type { GestureResponderEvent } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
-import { getLovedOneById } from '../../../services/lovedOnesApi';
+import { deleteLovedOne, getLovedOneById } from '../../../services/lovedOnesApi';
+import { invalidateCalendarCache } from '../../../services/calendarCache';
+import { pushAppBackEntry } from '../../../services/navigationHistory';
+import { getModalBackdropResponder } from '../../../utils/modalBackdrop';
 import {
   completeGiftPlan,
   createGiftPlan,
@@ -25,6 +29,8 @@ import {
   updateGiftPlan,
 } from '../../../services/giftPlansApi';
 import { getPartnerStores } from '../../../services/partnerStoresApi';
+import { markPriceAlertHighlightSeen } from '../../../services/priceAlertsApi';
+import { uploadImageApi } from '../../../services/uploadApi';
 import AddLovedOneModal from '../../../components/AddLovedOneModal';
 import { LovedOne } from '../../../types/lovedOnes';
 import {
@@ -34,6 +40,7 @@ import {
   ProductReaction,
 } from '../../../types/giftPlans';
 import { PartnerStore, ProductImportItem } from '../../../types/partnerStores';
+import { PriceAlert } from '../../../types/priceAlerts';
 
 const GIFT_PURPOSE_OPTIONS = [
   { label: 'Zi de nastere', value: 'Zi de nastere' },
@@ -356,13 +363,14 @@ function getGiftStatusLabel(status: GiftPlan['status']) {
   return 'Planificat';
 }
 
-function getGiftTimingNote(giftPlan: GiftPlan) {
+function getGiftTimingNotes(giftPlan: GiftPlan) {
   const todayKey = getTodayKey();
   const purchaseDeadlineDate =
     giftPlan.purchaseDeadlineDate || giftPlan.deadlineDate;
+  const notes: string[] = [];
 
   if (giftPlan.status === 'planned' && purchaseDeadlineDate < todayKey) {
-    return 'Deadline-ul de cumparare a trecut. Daca il cumperi acum, va fi notat ca achizitionat mai tarziu.';
+    notes.push('Deadline depasit pentru data de cumparare.');
   }
 
   if (giftPlan.status === 'purchased') {
@@ -375,12 +383,12 @@ function getGiftTimingNote(giftPlan: GiftPlan) {
           )}`;
 
       if (completedKey && completedKey > purchaseDeadlineDate) {
-        return 'Cadoul a fost cumparat dupa deadline-ul de cumparare.';
+        notes.push('Deadline depasit pentru data de cumparare.');
       }
     }
 
     if (giftPlan.deadlineDate < todayKey) {
-      return 'Data oferirii a trecut. Cand il marchezi ca oferit, va fi notat ca oferit mai tarziu.';
+      notes.push('Deadline depasit pentru data de oferire.');
     }
   }
 
@@ -393,20 +401,65 @@ function getGiftTimingNote(giftPlan: GiftPlan) {
         )}`;
 
     if (offeredKey && offeredKey > giftPlan.deadlineDate) {
-      return 'Cadoul a fost oferit dupa data planificata.';
+      notes.push('Deadline depasit pentru data de oferire.');
     }
   }
 
-  return '';
+  return Array.from(new Set(notes));
+}
+
+function getGiftTimingNote(giftPlan: GiftPlan) {
+  return getGiftTimingNotes(giftPlan).join(' ');
 }
 
 function formatMoney(value: number, currency = 'RON') {
   return `${value} ${currency}`;
 }
 
+function roundMoney(value: number) {
+  return Number(value.toFixed(2));
+}
+
+function getProductPriceDetails(product: ProductImportItem) {
+  const currentPrice = Number(product.price?.current);
+
+  if (!Number.isFinite(currentPrice)) {
+    return null;
+  }
+
+  const promo = product.promo;
+  const hasPromoCode = Boolean(promo?.hasPromoCode || promo?.code);
+  const promoDiscountPercent = Number(promo?.discountPercent);
+  const promoDiscountAmount = Number(promo?.discountAmount ?? promo?.discount);
+  let promoDiscount = 0;
+
+  if (hasPromoCode) {
+    if (Number.isFinite(promoDiscountPercent) && promoDiscountPercent > 0) {
+      promoDiscount = (currentPrice * promoDiscountPercent) / 100;
+    } else if (Number.isFinite(promoDiscountAmount) && promoDiscountAmount > 0) {
+      promoDiscount = promoDiscountAmount;
+    }
+  }
+
+  promoDiscount = Math.min(currentPrice, Math.max(0, roundMoney(promoDiscount)));
+  const effectivePrice = roundMoney(currentPrice - promoDiscount);
+
+  return {
+    currentPrice: roundMoney(currentPrice),
+    effectivePrice,
+    hasPromoCode,
+    promoCode: promo?.code ? String(promo.code) : '',
+    promoDiscount,
+    promoDiscountPercent:
+      Number.isFinite(promoDiscountPercent) && promoDiscountPercent > 0
+        ? promoDiscountPercent
+        : 0,
+    promoNote: promo?.note ? String(promo.note) : '',
+  };
+}
+
 function getProductPrice(product: ProductImportItem) {
-  const price = Number(product.price?.current);
-  return Number.isFinite(price) ? price : null;
+  return getProductPriceDetails(product)?.effectivePrice ?? null;
 }
 
 function normalizeProductText(value?: string) {
@@ -458,12 +511,16 @@ function toProductSuggestion(
   product: ProductImportItem,
   index: number
 ): ProductSuggestion | null {
-  const price = getProductPrice(product);
+  const priceDetails = getProductPriceDetails(product);
+  const price = priceDetails?.effectivePrice ?? null;
 
   if (price === null) {
     return null;
   }
 
+  const baseDiscount = Number(product.price?.discount);
+  const baseDiscountPercent = Number(product.price?.discountPercent);
+  const hasPromoDiscount = Boolean(priceDetails && priceDetails.promoDiscount > 0);
   const suggestion: ProductSuggestion = {
     id: getProductSuggestionId(store, product, index),
     productKey: getProductIdentityKey(product),
@@ -479,16 +536,18 @@ function toProductSuggestion(
     affiliateUrl: product.affiliateUrl,
     imageUrl: product.imageUrl,
     price,
+    priceBeforePromo: hasPromoDiscount ? priceDetails?.currentPrice : undefined,
     originalPrice: Number.isFinite(Number(product.price?.original))
       ? Number(product.price?.original)
-      : price,
-    discount: Number.isFinite(Number(product.price?.discount))
-      ? Number(product.price?.discount)
-      : 0,
-    discountPercent: Number.isFinite(Number(product.price?.discountPercent))
-      ? Number(product.price?.discountPercent)
-      : 0,
-    hasDiscount: Boolean(product.price?.hasDiscount),
+      : priceDetails?.currentPrice ?? price,
+    discount: Number.isFinite(baseDiscount) ? baseDiscount : 0,
+    discountPercent: Number.isFinite(baseDiscountPercent) ? baseDiscountPercent : 0,
+    hasDiscount: Boolean(product.price?.hasDiscount || hasPromoDiscount),
+    hasPromoCode: priceDetails?.hasPromoCode,
+    promoCode: priceDetails?.promoCode,
+    promoDiscount: priceDetails?.promoDiscount,
+    promoDiscountPercent: priceDetails?.promoDiscountPercent,
+    promoNote: priceDetails?.promoNote,
     currency: store.currency || 'RON',
     addedAt: new Date().toISOString(),
     availabilityStatus: product.availability?.stockStatus,
@@ -525,10 +584,16 @@ function toGiftPlanProduct(product: ProductSuggestion): GiftPlanProduct {
     affiliateUrl: product.affiliateUrl,
     imageUrl: product.imageUrl,
     price: product.price,
+    priceBeforePromo: product.priceBeforePromo,
     originalPrice: product.originalPrice,
     discount: product.discount,
     discountPercent: product.discountPercent,
     hasDiscount: product.hasDiscount,
+    hasPromoCode: product.hasPromoCode,
+    promoCode: product.promoCode,
+    promoDiscount: product.promoDiscount,
+    promoDiscountPercent: product.promoDiscountPercent,
+    promoNote: product.promoNote,
     currency: product.currency,
     addedAt: new Date().toISOString(),
     isPurchased: false,
@@ -536,6 +601,8 @@ function toGiftPlanProduct(product: ProductSuggestion): GiftPlanProduct {
     purchasedStoreName: '',
     purchasePrice: undefined,
     purchasedFromImportedStore: false,
+    selectedAsCheapestOffer: true,
+    manualSearchFallback: false,
   };
 }
 
@@ -564,10 +631,26 @@ function getZodiac(day: number, month: number) {
   return 'Pești';
 }
 
+function calculateAge(day: number, month: number, year: number) {
+  const today = new Date();
+  let age = today.getFullYear() - year;
+  if (
+    today.getMonth() + 1 < month ||
+    (today.getMonth() + 1 === month && today.getDate() < day)
+  ) {
+    age -= 1;
+  }
+  return age;
+}
+
 type Props = {
   lovedOneId: string;
   onBack: () => void;
   initialGiftPlanId?: string | null;
+  initialProductId?: string | null;
+  priceAlert?: PriceAlert | null;
+  onPriceAlertConsumed?: () => void;
+  onGiftPlanTargetConsumed?: () => void;
   backLabel?: string;
 };
 
@@ -575,12 +658,19 @@ export default function LovedOneDetailsScreen({
   lovedOneId,
   onBack,
   initialGiftPlanId,
+  initialProductId,
+  priceAlert,
+  onPriceAlertConsumed,
+  onGiftPlanTargetConsumed,
   backLabel = 'Inapoi la persoana',
 }: Props) {
   const { token } = useAuth();
   const [data, setData] = useState<LovedOne | null>(null);
   const [loading, setLoading] = useState(true);
   const [editVisible, setEditVisible] = useState(false);
+  const [deleteLovedOneVisible, setDeleteLovedOneVisible] = useState(false);
+  const [deletingLovedOne, setDeletingLovedOne] = useState(false);
+  const [deleteLovedOneError, setDeleteLovedOneError] = useState('');
   const [giftModalVisible, setGiftModalVisible] = useState(false);
   const [giftPurpose, setGiftPurpose] = useState<GiftPurpose | null>(null);
   const [giftBudget, setGiftBudget] = useState(200);
@@ -589,6 +679,7 @@ export default function LovedOneDetailsScreen({
   const [deadlineDay, setDeadlineDay] = useState<number | null>(null);
   const [deadlineMonth, setDeadlineMonth] = useState<number | null>(null);
   const [deadlineYear, setDeadlineYear] = useState<number | null>(null);
+  const [canEditFixedGiftDate, setCanEditFixedGiftDate] = useState(false);
   const [purchaseDeadlineDay, setPurchaseDeadlineDay] = useState<number | null>(
     null
   );
@@ -604,6 +695,9 @@ export default function LovedOneDetailsScreen({
   const [giftPlansLoading, setGiftPlansLoading] = useState(false);
   const [editingGiftPlan, setEditingGiftPlan] = useState<GiftPlan | null>(null);
   const [selectedGiftPlan, setSelectedGiftPlan] = useState<GiftPlan | null>(null);
+  const selectedGiftPlanBackRef = useRef<ReturnType<typeof pushAppBackEntry> | null>(
+    null
+  );
   const [savingGift, setSavingGift] = useState(false);
   const [completeModalVisible, setCompleteModalVisible] = useState(false);
   const [emptyGiftGuideVisible, setEmptyGiftGuideVisible] = useState(false);
@@ -635,6 +729,7 @@ export default function LovedOneDetailsScreen({
     new Date().getFullYear()
   );
   const [historyVisible, setHistoryVisible] = useState(false);
+  const historyBackRef = useRef<ReturnType<typeof pushAppBackEntry> | null>(null);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [giftPlanToDelete, setGiftPlanToDelete] = useState<GiftPlan | null>(null);
   const [deleteError, setDeleteError] = useState('');
@@ -691,6 +786,14 @@ export default function LovedOneDetailsScreen({
     useState<GiftPlanProduct | null>(null);
   const [addedProductToastProgress, setAddedProductToastProgress] = useState(1);
   const [selectedProductDetailId, setSelectedProductDetailId] = useState<string | null>(null);
+  const [activePriceAlert, setActivePriceAlert] = useState<PriceAlert | null>(
+    priceAlert || null
+  );
+  const [priceAlertHighlightActive, setPriceAlertHighlightActive] = useState(Boolean(priceAlert));
+  const markedPriceAlertRef = useRef<string | null>(null);
+  const productDetailBackRef = useRef<ReturnType<typeof pushAppBackEntry> | null>(
+    null
+  );
   const [aiHelpModalVisible, setAiHelpModalVisible] = useState(false);
   const [aiPersonDescription, setAiPersonDescription] = useState('');
   const [aiBudget, setAiBudget] = useState('');
@@ -707,8 +810,11 @@ export default function LovedOneDetailsScreen({
   const [changeProductAiBudget, setChangeProductAiBudget] = useState('');
   const [changeProductAiPromptInput, setChangeProductAiPromptInput] = useState('');
   const [otherStoreModalVisible, setOtherStoreModalVisible] = useState(false);
+  const [otherStoreMode, setOtherStoreMode] = useState<'other' | 'manual'>('other');
   const [otherStoreName, setOtherStoreName] = useState('');
   const [otherStorePrice, setOtherStorePrice] = useState('');
+  const [otherStoreImageUri, setOtherStoreImageUri] = useState('');
+  const [otherStoreImageFile, setOtherStoreImageFile] = useState<File | null>(null);
   const [otherStoreError, setOtherStoreError] = useState('');
 
   const years = getYearOptions();
@@ -866,21 +972,6 @@ export default function LovedOneDetailsScreen({
       };
     });
 
-  const currentYearPlannedBudget = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-
-    return plannedGiftPlans
-      .filter((giftPlan) => getYearFromDateKey(giftPlan.deadlineDate) === currentYear)
-      .reduce((total, giftPlan) => total + giftPlan.budget, 0);
-  }, [plannedGiftPlans]);
-
-  const totalPlannedBudget = useMemo(() => {
-    return plannedGiftPlans.reduce(
-      (total, giftPlan) => total + giftPlan.budget,
-      0
-    );
-  }, [plannedGiftPlans]);
-
   const load = async () => {
     try {
       if (!token) return;
@@ -911,6 +1002,31 @@ export default function LovedOneDetailsScreen({
     }
   };
 
+  const closeDeleteLovedOneModal = () => {
+    if (deletingLovedOne) return;
+
+    setDeleteLovedOneVisible(false);
+    setDeleteLovedOneError('');
+  };
+
+  const confirmDeleteLovedOne = async () => {
+    if (!token || !data) return;
+
+    try {
+      setDeletingLovedOne(true);
+      setDeleteLovedOneError('');
+      await deleteLovedOne(token, data.id);
+      invalidateCalendarCache();
+      setDeleteLovedOneVisible(false);
+      onBack();
+    } catch (error) {
+      console.error('DELETE LOVED ONE ERROR:', error);
+      setDeleteLovedOneError('Nu am putut sterge persoana. Incearca din nou.');
+    } finally {
+      setDeletingLovedOne(false);
+    }
+  };
+
   useEffect(() => {
     load();
   }, [lovedOneId, token]);
@@ -922,8 +1038,143 @@ export default function LovedOneDetailsScreen({
 
     if (giftPlan) {
       setSelectedGiftPlan(giftPlan);
+      onGiftPlanTargetConsumed?.();
     }
-  }, [giftPlans, initialGiftPlanId, selectedGiftPlan]);
+  }, [
+    giftPlans,
+    initialGiftPlanId,
+    onGiftPlanTargetConsumed,
+    selectedGiftPlan,
+  ]);
+
+  useEffect(() => {
+    if (!priceAlert) return;
+
+    setActivePriceAlert(priceAlert);
+    setPriceAlertHighlightActive(true);
+    markedPriceAlertRef.current = null;
+  }, [priceAlert]);
+
+  useEffect(() => {
+    if (!initialProductId || !selectedGiftPlan) return;
+
+    const productToOpen = (selectedGiftPlan.selectedProducts || []).find(
+      (product) =>
+        product.id === initialProductId ||
+        (activePriceAlert?.productKey &&
+          getProductIdentityKey(product) === activePriceAlert.productKey)
+    );
+
+    if (!productToOpen) return;
+
+    setGiftDetailTab('details');
+    onPriceAlertConsumed?.();
+  }, [
+    activePriceAlert,
+    initialProductId,
+    onPriceAlertConsumed,
+    selectedGiftPlan,
+  ]);
+
+  useEffect(() => {
+    if (!selectedGiftPlan || initialGiftPlanId) return;
+
+    const entry = pushAppBackEntry(() => setSelectedGiftPlan(null));
+    selectedGiftPlanBackRef.current = entry;
+
+    return () => {
+      entry.remove();
+      if (selectedGiftPlanBackRef.current === entry) {
+        selectedGiftPlanBackRef.current = null;
+      }
+    };
+  }, [initialGiftPlanId, selectedGiftPlan]);
+
+  useEffect(() => {
+    if (!historyVisible) return;
+
+    const entry = pushAppBackEntry(() => setHistoryVisible(false));
+    historyBackRef.current = entry;
+
+    return () => {
+      entry.remove();
+      if (historyBackRef.current === entry) {
+        historyBackRef.current = null;
+      }
+    };
+  }, [historyVisible]);
+
+  useEffect(() => {
+    if (!selectedProductDetailId) return;
+
+    const entry = pushAppBackEntry(() => setSelectedProductDetailId(null));
+    productDetailBackRef.current = entry;
+
+    return () => {
+      entry.remove();
+      if (productDetailBackRef.current === entry) {
+        productDetailBackRef.current = null;
+      }
+    };
+  }, [selectedProductDetailId]);
+
+  useEffect(() => {
+    if (selectedGiftPlan?.status !== 'planned' && giftDetailTab !== 'details') {
+      setGiftDetailTab('details');
+    }
+  }, [giftDetailTab, selectedGiftPlan?.status]);
+
+  const goBackFromSelectedGiftPlan = () => {
+    if (initialGiftPlanId) {
+      onBack();
+      return;
+    }
+
+    selectedGiftPlanBackRef.current?.remove();
+    selectedGiftPlanBackRef.current = null;
+    setSelectedGiftPlan(null);
+  };
+
+  const goBackFromHistory = () => {
+    historyBackRef.current?.remove();
+    historyBackRef.current = null;
+    setHistoryVisible(false);
+  };
+
+  const goBackFromProductDetail = () => {
+    productDetailBackRef.current?.remove();
+    productDetailBackRef.current = null;
+    setSelectedProductDetailId(null);
+  };
+
+  useEffect(() => {
+    if (
+      !token ||
+      !activePriceAlert ||
+      !selectedProductDetailId ||
+      selectedProductDetailId !== activePriceAlert.productId ||
+      activePriceAlert.highlightSeenAt ||
+      markedPriceAlertRef.current === activePriceAlert.id
+    ) {
+      return;
+    }
+
+    markedPriceAlertRef.current = activePriceAlert.id;
+    markPriceAlertHighlightSeen(token, activePriceAlert.id)
+      .then(() => {
+        const highlightSeenAt = new Date().toISOString();
+        setPriceAlertHighlightActive(false);
+        setActivePriceAlert((current) =>
+          current?.id === activePriceAlert.id
+            ? { ...current, highlightSeenAt }
+            : current
+        );
+      })
+      .catch((error) => {
+        console.error('MARK PRICE ALERT HIGHLIGHT ERROR:', error);
+        markedPriceAlertRef.current = null;
+      });
+  }, [activePriceAlert, selectedProductDetailId, token]);
 
   useEffect(() => {
     if (!addedProductToast) return;
@@ -957,6 +1208,7 @@ export default function LovedOneDetailsScreen({
     setDeadlineDay(null);
     setDeadlineMonth(null);
     setDeadlineYear(null);
+    setCanEditFixedGiftDate(false);
     setPurchaseDeadlineDay(null);
     setPurchaseDeadlineMonth(null);
     setPurchaseDeadlineYear(null);
@@ -1047,6 +1299,7 @@ export default function LovedOneDetailsScreen({
     setDeadlineDay(parts.day);
     setDeadlineMonth(parts.month);
     setDeadlineYear(parts.year);
+    setCanEditFixedGiftDate(false);
     const purchaseParts = parseDateParts(
       giftPlan.purchaseDeadlineDate || giftPlan.deadlineDate
     );
@@ -1061,6 +1314,7 @@ export default function LovedOneDetailsScreen({
   const handlePurposeChange = (purpose: GiftPurpose) => {
     setGiftPurpose(purpose);
     setGiftError('');
+    setCanEditFixedGiftDate(false);
 
     if (purpose === 'Zi de nastere' && data) {
       const nextBirthday = getNextDateParts(Number(data.day), Number(data.month));
@@ -1168,6 +1422,7 @@ export default function LovedOneDetailsScreen({
         await createGiftPlan(token, lovedOneId, payload);
       }
 
+      invalidateCalendarCache();
       await loadGiftPlans();
       closeGiftModal();
     } catch (error: any) {
@@ -1292,6 +1547,7 @@ export default function LovedOneDetailsScreen({
         }
       );
 
+      invalidateCalendarCache();
       await loadGiftPlans();
       setSelectedGiftPlan(completedGiftPlan);
       closeCompleteModal();
@@ -1369,6 +1625,7 @@ export default function LovedOneDetailsScreen({
         }
       );
 
+      invalidateCalendarCache();
       await loadGiftPlans();
       setSelectedGiftPlan(offeredGiftPlan);
       setOfferModalVisible(false);
@@ -1403,6 +1660,7 @@ export default function LovedOneDetailsScreen({
         }
       );
 
+      invalidateCalendarCache();
       setGiftPlans((current) =>
         current.map((currentGiftPlan) =>
           currentGiftPlan.id === updatedGiftPlan.id
@@ -1433,6 +1691,7 @@ export default function LovedOneDetailsScreen({
       { selectedProducts }
     );
 
+    invalidateCalendarCache();
     setGiftPlans((current) =>
       current.map((currentGiftPlan) =>
         currentGiftPlan.id === updatedGiftPlan.id
@@ -1613,10 +1872,13 @@ export default function LovedOneDetailsScreen({
       purchasedStoreName: '',
       purchasePrice: undefined,
       purchasedFromImportedStore: false,
+      selectedAsCheapestOffer: false,
+      manualSearchFallback: true,
     };
     const nextSelectedProducts = [...selectedProducts, manualProduct];
 
     await saveProductAddition(giftPlan, manualProduct, nextSelectedProducts);
+    setProductSearch('');
     setManualProductName('');
     setManualProductPrice('');
     setManualProductError('');
@@ -1792,6 +2054,8 @@ export default function LovedOneDetailsScreen({
       purchasedStoreName: '',
       purchasePrice: undefined,
       purchasedFromImportedStore: false,
+      selectedAsCheapestOffer: false,
+      manualSearchFallback: true,
     };
     const updatedProducts = selectedProducts.map((product) =>
       product.id === currentProduct.id ? manualReplacement : product
@@ -1937,6 +2201,7 @@ export default function LovedOneDetailsScreen({
         }
       );
 
+      invalidateCalendarCache();
       setGiftPlans((current) =>
         current.map((currentGiftPlan) =>
           currentGiftPlan.id === updatedGiftPlan.id
@@ -1959,6 +2224,7 @@ export default function LovedOneDetailsScreen({
     purchaseData?: {
       storeName?: string;
       price?: number;
+      imageUrl?: string;
       fromImportedStore?: boolean;
     }
   ) => {
@@ -1974,6 +2240,9 @@ export default function LovedOneDetailsScreen({
               purchaseData?.storeName || product.purchasedStoreName || product.storeName,
             purchasePrice:
               purchaseData?.price !== undefined ? purchaseData.price : product.price,
+            purchaseImageUrl:
+              purchaseData?.imageUrl || product.purchaseImageUrl || product.imageUrl,
+            imageUrl: purchaseData?.imageUrl || product.imageUrl,
             purchasedFromImportedStore: Boolean(purchaseData?.fromImportedStore),
           }
         : product
@@ -1994,6 +2263,7 @@ export default function LovedOneDetailsScreen({
             purchasedAt: '',
             purchasedStoreName: '',
             purchasePrice: undefined,
+            purchaseImageUrl: '',
             purchasedFromImportedStore: false,
           }
         : product
@@ -2002,9 +2272,12 @@ export default function LovedOneDetailsScreen({
     await saveSelectedProducts(giftPlan, selectedProducts);
   };
 
-  const openOtherStoreModal = () => {
+  const openOtherStoreModal = (mode: 'other' | 'manual' = 'other') => {
+    setOtherStoreMode(mode);
     setOtherStoreName('');
     setOtherStorePrice('');
+    setOtherStoreImageUri('');
+    setOtherStoreImageFile(null);
     setOtherStoreError('');
     setOtherStoreModalVisible(true);
   };
@@ -2013,19 +2286,48 @@ export default function LovedOneDetailsScreen({
     if (savingGiftProducts) return;
 
     setOtherStoreModalVisible(false);
+    setOtherStoreMode('other');
     setOtherStoreName('');
     setOtherStorePrice('');
+    setOtherStoreImageUri('');
+    setOtherStoreImageFile(null);
     setOtherStoreError('');
+  };
+
+  const pickOtherStoreImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.75,
+    });
+
+    if (!result.canceled) {
+      const asset = result.assets[0];
+      setOtherStoreImageUri(asset.uri);
+      setOtherStoreImageFile((asset as any).file ?? null);
+      setOtherStoreError('');
+    }
   };
 
   const markProductAsPurchasedFromOtherStore = async (
     giftPlan: GiftPlan,
     productId: string
   ) => {
-    const price = Number(otherStorePrice);
+    const targetProduct = (giftPlan.selectedProducts || []).find(
+      (product) => product.id === productId
+    );
+    const isManualPurchase = otherStoreMode === 'manual';
+    const hasCustomPrice = otherStorePrice.trim().length > 0;
+    const price = hasCustomPrice
+      ? Number(otherStorePrice)
+      : targetProduct?.price ?? 0;
 
-    if (!otherStoreName.trim()) {
+    if (!isManualPurchase && !otherStoreName.trim()) {
       setOtherStoreError('Introdu numele magazinului.');
+      return;
+    }
+
+    if (!isManualPurchase && !hasCustomPrice) {
+      setOtherStoreError('Introdu suma platita.');
       return;
     }
 
@@ -2034,9 +2336,31 @@ export default function LovedOneDetailsScreen({
       return;
     }
 
+    let imageUrl = '';
+
+    if (otherStoreImageUri && token) {
+      try {
+        imageUrl = await uploadImageApi(
+          {
+            uri: otherStoreImageUri,
+            file: otherStoreImageFile,
+          },
+          token
+        );
+      } catch {
+        setOtherStoreError('Nu am putut incarca imaginea. Incearca din nou.');
+        return;
+      }
+    }
+
     await markProductAsPurchased(giftPlan, productId, {
-      storeName: otherStoreName.trim(),
+      storeName:
+        otherStoreName.trim() ||
+        targetProduct?.purchasedStoreName ||
+        targetProduct?.storeName ||
+        'Adaugat manual',
       price,
+      ...(imageUrl ? { imageUrl } : {}),
       fromImportedStore: false,
     });
     closeOtherStoreModal();
@@ -2326,6 +2650,104 @@ export default function LovedOneDetailsScreen({
     setDeleteError('');
   };
 
+  const closeTopModal = () => {
+    if (savingGiftProducts || deletingGift || deletingLovedOne) return;
+
+    if (otherStoreModalVisible) {
+      closeOtherStoreModal();
+      return;
+    }
+
+    if (addedProductToast) {
+      setAddedProductToast(null);
+      return;
+    }
+
+    if (historyToastVisible) {
+      setHistoryToastVisible(false);
+      return;
+    }
+
+    if (completeIncompleteProductsConfirmVisible) {
+      setCompleteIncompleteProductsConfirmVisible(false);
+      return;
+    }
+
+    if (completeModalVisible) {
+      closeCompleteModal();
+      return;
+    }
+
+    if (offerModalVisible) {
+      setOfferModalVisible(false);
+      return;
+    }
+
+    if (emptyGiftGuideVisible) {
+      setEmptyGiftGuideVisible(false);
+      return;
+    }
+
+    if (budgetDecreaseConfirmVisible) {
+      setBudgetDecreaseConfirmVisible(false);
+      return;
+    }
+
+    if (budgetIncreaseModalVisible) {
+      closeBudgetIncreaseModal();
+      return;
+    }
+
+    if (budgetHistoryVisible) {
+      setBudgetHistoryVisible(false);
+      return;
+    }
+
+    if (budgetModalVisible) {
+      closeBudgetModal();
+      return;
+    }
+
+    if (duplicateProductModalVisible) {
+      clearDuplicateProductModal();
+      return;
+    }
+
+    if (deadlineModalVisible) {
+      closeDeadlineEditModal();
+      return;
+    }
+
+    if (removeProductConfirmVisible) {
+      setRemoveProductConfirmVisible(false);
+      return;
+    }
+
+    if (changeProductAiVisible || changeProductManualVisible || changeProductModeVisible) {
+      closeChangeProductFlow();
+      return;
+    }
+
+    if (aiHelpModalVisible) {
+      closeAiHelpModal();
+      return;
+    }
+
+    if (deleteLovedOneVisible) {
+      closeDeleteLovedOneModal();
+      return;
+    }
+
+    if (deleteModalVisible) {
+      closeDeleteModal();
+      return;
+    }
+
+    if (giftModalVisible) {
+      closeGiftModal();
+    }
+  };
+
   const confirmDeleteGiftPlan = async () => {
     if (!token || !giftPlanToDelete) return;
 
@@ -2335,6 +2757,7 @@ export default function LovedOneDetailsScreen({
       setGiftPlans((current) =>
         current.filter((giftPlan) => giftPlan.id !== giftPlanToDelete.id)
       );
+      invalidateCalendarCache();
       await loadGiftPlans();
       setDeleteModalVisible(false);
       setGiftPlanToDelete(null);
@@ -2538,7 +2961,7 @@ export default function LovedOneDetailsScreen({
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable
           style={styles.backButton}
-          onPress={() => setSelectedProductDetailId(null)}
+          onPress={goBackFromProductDetail}
         >
           <Text style={styles.backButtonText}>Inapoi la cadou</Text>
         </Pressable>
@@ -2578,11 +3001,28 @@ export default function LovedOneDetailsScreen({
 
             {displayedProductOffers.map((offer, index) => {
               const originalPrice = offer.originalPrice || offer.price;
+              const storePrice = offer.priceBeforePromo || offer.price;
               const discount = offer.discount || 0;
               const discountPercent = offer.discountPercent || 0;
+              const promoDiscount = offer.promoDiscount || 0;
+              const promoDiscountPercent = offer.promoDiscountPercent || 0;
+              const hasPromoCode = Boolean(
+                offer.hasPromoCode && offer.promoCode && promoDiscount > 0
+              );
               const hasDiscount =
                 Boolean(offer.hasDiscount) && originalPrice > offer.price;
               const isBestOffer = index === 0;
+              const isFreshPriceChange =
+                priceAlertHighlightActive &&
+                !!activePriceAlert &&
+                activePriceAlert.storeId === offer.storeId &&
+                getProductIdentityKey(offer) === activePriceAlert.productKey;
+              const priceChangeDirectionText =
+                activePriceAlert?.changeDirection === 'up'
+                  ? 'Pret crescut'
+                  : activePriceAlert?.changeDirection === 'down'
+                    ? 'Pret scazut'
+                    : 'Pret modificat';
 
               return (
                 <View
@@ -2590,14 +3030,25 @@ export default function LovedOneDetailsScreen({
                   style={[
                     styles.offerCard,
                     isBestOffer && styles.bestOfferCard,
+                    isFreshPriceChange && styles.freshPriceDropCard,
                   ]}
                 >
                   <View style={styles.offerHeader}>
                     <View style={styles.productInfo}>
                       <Text style={styles.offerStoreName}>{offer.storeName}</Text>
+                      {isFreshPriceChange && (
+                        <Text style={styles.freshPriceDropBadge}>
+                          Pret modificat la acest magazin
+                        </Text>
+                      )}
                       {isBestOffer && (
                         <Text style={styles.bestOfferBadge}>
-                          Cel mai mic pret
+                          Cel mai mic pret efectiv
+                        </Text>
+                      )}
+                      {hasPromoCode && (
+                        <Text style={styles.promoBadge}>
+                          Cu cod {offer.promoCode}
                         </Text>
                       )}
                     </View>
@@ -2605,6 +3056,22 @@ export default function LovedOneDetailsScreen({
                       {formatMoney(offer.price, offer.currency)}
                     </Text>
                   </View>
+                  {hasPromoCode && (
+                    <View style={styles.priceDetailRow}>
+                      <Text style={styles.priceDetailLabel}>Pret in magazin</Text>
+                      <Text style={styles.priceDetailValue}>
+                        {formatMoney(storePrice, offer.currency)}
+                      </Text>
+                    </View>
+                  )}
+                  {isFreshPriceChange && (
+                    <Text style={styles.freshPriceDropText}>
+                      {priceChangeDirectionText}: de la{' '}
+                      {formatMoney(activePriceAlert.oldPrice, offer.currency)} la{' '}
+                      {formatMoney(offer.price, offer.currency)} pentru
+                      acest magazin.
+                    </Text>
+                  )}
 
                   <View style={styles.priceDetailRow}>
                     <Text style={styles.priceDetailLabel}>Pret original</Text>
@@ -2619,7 +3086,26 @@ export default function LovedOneDetailsScreen({
                       {discountPercent > 0 ? ` (${discountPercent}%)` : ''}
                     </Text>
                   </View>
-                  {!hasDiscount && (
+                  {hasPromoCode && (
+                    <>
+                      <View style={styles.priceDetailRow}>
+                        <Text style={styles.priceDetailLabel}>Reducere cod</Text>
+                        <Text style={styles.priceDetailValue}>
+                          {formatMoney(promoDiscount, offer.currency)}
+                          {promoDiscountPercent > 0
+                            ? ` (${promoDiscountPercent}%)`
+                            : ''}
+                        </Text>
+                      </View>
+                      <Text style={styles.productMeta}>
+                        Codul {offer.promoCode} trebuie introdus pe site pentru pretul final.
+                      </Text>
+                      {!!offer.promoNote && (
+                        <Text style={styles.productMeta}>{offer.promoNote}</Text>
+                      )}
+                    </>
+                  )}
+                  {!hasDiscount && !hasPromoCode && (
                     <Text style={styles.productMeta}>
                       Produsul nu are reducere notata in import.
                     </Text>
@@ -2652,15 +3138,17 @@ export default function LovedOneDetailsScreen({
                         savingGiftProducts && styles.disabledButton,
                       ]}
                       onPress={() =>
-                        markProductAsPurchased(
-                          visibleSelectedGiftPlan,
-                          selectedProductDetail.id,
-                          {
-                            storeName: offer.storeName,
-                            price: offer.price,
-                            fromImportedStore: true,
-                          }
-                        )
+                        isManualProduct
+                          ? openOtherStoreModal('manual')
+                          : markProductAsPurchased(
+                              visibleSelectedGiftPlan,
+                              selectedProductDetail.id,
+                              {
+                                storeName: offer.storeName,
+                                price: offer.price,
+                                fromImportedStore: true,
+                              }
+                            )
                       }
                       disabled={savingGiftProducts}
                     >
@@ -2691,6 +3179,12 @@ export default function LovedOneDetailsScreen({
                       )}`
                     : ''}.
                 </Text>
+                {!!selectedProductDetail.purchaseImageUrl && (
+                  <Image
+                    source={{ uri: selectedProductDetail.purchaseImageUrl }}
+                    style={styles.purchasePreviewImage}
+                  />
+                )}
                 {visibleSelectedGiftPlan.status === 'planned' && (
                   <Pressable
                     style={[styles.changeProductButton, styles.productDetailAction]}
@@ -2715,7 +3209,7 @@ export default function LovedOneDetailsScreen({
                   styles.productDetailAction,
                   savingGiftProducts && styles.disabledButton,
                 ]}
-                onPress={openOtherStoreModal}
+                onPress={() => openOtherStoreModal('other')}
                 disabled={savingGiftProducts}
               >
                 <Text style={styles.changeProductButtonText}>
@@ -2732,18 +3226,37 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={closeOtherStoreModal}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.confirmModalCard}>
-              <Text style={styles.modalTitle}>Alt magazin</Text>
-              <Text style={styles.confirmText}>
-                Noteaza magazinul si suma cu care ai cumparat produsul.
+              <Text style={styles.modalTitle}>
+                {otherStoreMode === 'manual'
+                  ? 'Marcheaza produsul cumparat'
+                  : 'Alt magazin'}
               </Text>
+              <Text style={styles.confirmText}>
+                {otherStoreMode === 'manual'
+                  ? 'Poti nota magazinul, pretul concret si o imagine. Toate sunt optionale.'
+                  : 'Noteaza magazinul si suma cu care ai cumparat produsul. Poti adauga si o imagine optionala.'}
+              </Text>
+              {otherStoreMode === 'manual' && (
+                <Text style={styles.productMeta}>
+                  Daca nu completezi pretul, produsul ramane cumparat cu pretul
+                  estimat initial:{' '}
+                  {formatMoney(selectedProductDetail.price, selectedProductDetail.currency)}.
+                </Text>
+              )}
 
               {!!otherStoreError && (
                 <Text style={styles.giftErrorText}>{otherStoreError}</Text>
               )}
 
-              <Text style={styles.modalLabel}>Numele magazinului</Text>
+              <Text style={styles.modalLabel}>
+                Numele magazinului
+                {otherStoreMode === 'manual' ? ' (optional)' : ''}
+              </Text>
               <TextInput
                 placeholder="Ex: Farmacia X, magazin local..."
                 style={styles.modalInput}
@@ -2754,9 +3267,16 @@ export default function LovedOneDetailsScreen({
                 }}
               />
 
-              <Text style={styles.modalLabel}>Suma platita</Text>
+              <Text style={styles.modalLabel}>
+                Suma platita
+                {otherStoreMode === 'manual' ? ' (optional)' : ''}
+              </Text>
               <TextInput
-                placeholder="Introdu suma"
+                placeholder={
+                  otherStoreMode === 'manual'
+                    ? `Ex: ${selectedProductDetail.price}`
+                    : 'Introdu suma'
+                }
                 style={styles.modalInput}
                 keyboardType="numeric"
                 value={otherStorePrice}
@@ -2765,6 +3285,23 @@ export default function LovedOneDetailsScreen({
                   setOtherStoreError('');
                 }}
               />
+
+              <Text style={styles.modalLabel}>Imagine (optional)</Text>
+              <Pressable
+                style={styles.imageButton}
+                onPress={pickOtherStoreImage}
+              >
+                <Text style={styles.imageButtonText}>
+                  {otherStoreImageUri ? 'Schimba imaginea' : 'Alege imagine'}
+                </Text>
+              </Pressable>
+
+              {!!otherStoreImageUri && (
+                <Image
+                  source={{ uri: otherStoreImageUri }}
+                  style={styles.purchasePreviewImage}
+                />
+              )}
 
               <Pressable
                 style={[styles.saveGiftButton, savingGiftProducts && styles.disabledButton]}
@@ -2796,14 +3333,7 @@ export default function LovedOneDetailsScreen({
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable
           style={styles.backButton}
-          onPress={() => {
-            if (initialGiftPlanId) {
-              onBack();
-              return;
-            }
-
-            setSelectedGiftPlan(null);
-          }}
+          onPress={goBackFromSelectedGiftPlan}
         >
           <Text style={styles.backButtonText}>{backLabel}</Text>
         </Pressable>
@@ -2849,11 +3379,11 @@ export default function LovedOneDetailsScreen({
               </Text>
             </>
           )}
-          {!!getGiftTimingNote(visibleSelectedGiftPlan) && (
-            <Text style={styles.expiredText}>
-              {getGiftTimingNote(visibleSelectedGiftPlan)}
+          {getGiftTimingNotes(visibleSelectedGiftPlan).map((note) => (
+            <Text key={note} style={styles.expiredText}>
+              {note}
             </Text>
-          )}
+          ))}
 
           {visibleSelectedGiftPlan.status === 'planned' && (
             <Pressable
@@ -2967,31 +3497,35 @@ export default function LovedOneDetailsScreen({
                     Detalii
                   </Text>
                 </Pressable>
-                <Pressable
-                  style={[
-                    styles.detailTab,
-                    giftDetailTab === 'products' && styles.detailTabActive,
-                  ]}
-                  onPress={() => setGiftDetailTab('products')}
-                >
-                  <Text
-                    style={[
-                      styles.detailTabText,
-                      giftDetailTab === 'products' && styles.detailTabTextActive,
-                    ]}
-                  >
-                    Cauta produse
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.detailTab, styles.aiHelpTab]}
-                  onPress={() => openAiHelpModal(visibleSelectedGiftPlan)}
-                >
-                  <Text style={styles.aiHelpButtonText}>Ajutor AI</Text>
-                </Pressable>
+                {visibleSelectedGiftPlan.status === 'planned' && (
+                  <>
+                    <Pressable
+                      style={[
+                        styles.detailTab,
+                        giftDetailTab === 'products' && styles.detailTabActive,
+                      ]}
+                      onPress={() => setGiftDetailTab('products')}
+                    >
+                      <Text
+                        style={[
+                          styles.detailTabText,
+                          giftDetailTab === 'products' && styles.detailTabTextActive,
+                        ]}
+                      >
+                        Cauta produse
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.detailTab, styles.aiHelpTab]}
+                      onPress={() => openAiHelpModal(visibleSelectedGiftPlan)}
+                    >
+                      <Text style={styles.aiHelpButtonText}>Ajutor AI</Text>
+                    </Pressable>
+                  </>
+                )}
               </View>
 
-              {giftDetailTab === 'products' ? (
+              {giftDetailTab === 'products' && visibleSelectedGiftPlan.status === 'planned' ? (
                 <View style={styles.productSearchBox}>
                   <Text style={styles.notesTitle}>Produse pentru cadou</Text>
 
@@ -3091,6 +3625,11 @@ export default function LovedOneDetailsScreen({
                                 {product.offerCount} magazine disponibile
                               </Text>
                             )}
+                            {!!product.promoCode && (
+                              <Text style={styles.productMeta}>
+                                Pret cu cod {product.promoCode}
+                              </Text>
+                            )}
                             {!!product.category && (
                               <Text style={styles.productMeta}>
                                 {product.category}
@@ -3170,18 +3709,20 @@ export default function LovedOneDetailsScreen({
                           )}
                         </View>
 
-                        <Pressable
-                          style={[
-                            styles.updateBudgetButton,
-                            savingGiftProducts && styles.disabledButton,
-                          ]}
-                          onPress={() => openBudgetModal(visibleSelectedGiftPlan)}
-                          disabled={savingGiftProducts}
-                        >
-                          <Text style={styles.updateBudgetButtonText}>
-                            Modifica bugetul
-                          </Text>
-                        </Pressable>
+                        {visibleSelectedGiftPlan.status === 'planned' && (
+                          <Pressable
+                            style={[
+                              styles.updateBudgetButton,
+                              savingGiftProducts && styles.disabledButton,
+                            ]}
+                            onPress={() => openBudgetModal(visibleSelectedGiftPlan)}
+                            disabled={savingGiftProducts}
+                          >
+                            <Text style={styles.updateBudgetButtonText}>
+                              Modifica bugetul
+                            </Text>
+                          </Pressable>
+                        )}
 
                         <Pressable
                           style={styles.budgetHistoryButton}
@@ -3192,83 +3733,99 @@ export default function LovedOneDetailsScreen({
                           </Text>
                         </Pressable>
 
-                        {selectedGiftProducts.map((product) => (
-                          <Pressable
-                            key={product.id}
-                            style={[
-                              styles.selectedProductRow,
-                              product.isPurchased && styles.purchasedProductRow,
-                            ]}
-                            onPress={() => setSelectedProductDetailId(product.id)}
-                          >
-                            {!!product.imageUrl && (
-                              <Image
-                                source={{ uri: product.imageUrl }}
-                                style={styles.productThumb}
-                              />
-                            )}
-                            <View style={styles.productInfo}>
-                              <Text style={styles.productName}>{product.name}</Text>
-                              <Text style={styles.productMeta}>
-                                {product.brand || product.category || 'Produs adaugat'}
-                              </Text>
-                              {product.isPurchased && (
-                                <Text style={styles.purchasedBadge}>
-                                  Cumparat
-                                </Text>
+                        {selectedGiftProducts.map((product) => {
+                          const isAlertProduct =
+                            priceAlertHighlightActive &&
+                            !!activePriceAlert &&
+                            (!activePriceAlert.storeId || !product.storeId || activePriceAlert.storeId === product.storeId) &&
+                            (product.id === activePriceAlert.productId ||
+                              getProductIdentityKey(product) ===
+                                activePriceAlert.productKey);
+
+                          return (
+                            <Pressable
+                              key={product.id}
+                              style={[
+                                styles.selectedProductRow,
+                                product.isPurchased && styles.purchasedProductRow,
+                                isAlertProduct && styles.alertSelectedProductRow,
+                              ]}
+                              onPress={() => setSelectedProductDetailId(product.id)}
+                            >
+                              {!!product.imageUrl && (
+                                <Image
+                                  source={{ uri: product.imageUrl }}
+                                  style={styles.productThumb}
+                                />
                               )}
-                            </View>
-                            <View style={styles.productPriceBox}>
-                              <Text style={styles.productPrice}>
-                                {formatMoney(product.price, product.currency)}
-                              </Text>
-                              {visibleSelectedGiftPlan.status !== 'planned' ? (
-                                <Text style={styles.lockedProductText}>
-                                  {product.isPurchased
-                                    ? 'Cumparat'
-                                    : 'Neinclus in buget'}
+                              <View style={styles.productInfo}>
+                                <Text style={styles.productName}>{product.name}</Text>
+                                <Text style={styles.productMeta}>
+                                  {product.brand || product.category || 'Produs adaugat'}
                                 </Text>
-                              ) : product.isPurchased ? (
-                                <Text style={styles.lockedProductText}>
-                                  Ramane in lista
+                                {isAlertProduct && (
+                                  <Text style={styles.alertProductHint}>
+                                    Pret schimbat la {activePriceAlert.storeName}. Apasa pentru detalii.
+                                  </Text>
+                                )}
+                                {product.isPurchased && (
+                                  <Text style={styles.purchasedBadge}>
+                                    Cumparat
+                                  </Text>
+                                )}
+                              </View>
+                              <View style={styles.productPriceBox}>
+                                <Text style={styles.productPrice}>
+                                  {formatMoney(product.price, product.currency)}
                                 </Text>
-                              ) : (
-                                <>
-                                  <Pressable
-                                    style={[
-                                      styles.changeProductButton,
-                                      savingGiftProducts && styles.disabledButton,
-                                    ]}
-                                    onPress={(event) => {
-                                      stopPressPropagation(event);
-                                      openChangeProductOptions(product);
-                                    }}
-                                    disabled={savingGiftProducts}
-                                  >
-                                    <Text style={styles.changeProductButtonText}>
-                                      Schimba produs
-                                    </Text>
-                                  </Pressable>
-                                  <Pressable
-                                    style={[
-                                      styles.removeProductButton,
-                                      savingGiftProducts && styles.disabledButton,
-                                    ]}
-                                    onPress={(event) => {
-                                      stopPressPropagation(event);
-                                      requestRemoveProductFromGift(product);
-                                    }}
-                                    disabled={savingGiftProducts}
-                                  >
-                                    <Text style={styles.removeProductText}>
-                                      Scoate
-                                    </Text>
-                                  </Pressable>
-                                </>
-                              )}
-                            </View>
-                          </Pressable>
-                        ))}
+                                {visibleSelectedGiftPlan.status !== 'planned' ? (
+                                  <Text style={styles.lockedProductText}>
+                                    {product.isPurchased
+                                      ? 'Cumparat'
+                                      : 'Neinclus in buget'}
+                                  </Text>
+                                ) : product.isPurchased ? (
+                                  <Text style={styles.lockedProductText}>
+                                    Ramane in lista
+                                  </Text>
+                                ) : (
+                                  <>
+                                    <Pressable
+                                      style={[
+                                        styles.changeProductButton,
+                                        savingGiftProducts && styles.disabledButton,
+                                      ]}
+                                      onPress={(event) => {
+                                        stopPressPropagation(event);
+                                        openChangeProductOptions(product);
+                                      }}
+                                      disabled={savingGiftProducts}
+                                    >
+                                      <Text style={styles.changeProductButtonText}>
+                                        Schimba produs
+                                      </Text>
+                                    </Pressable>
+                                    <Pressable
+                                      style={[
+                                        styles.removeProductButton,
+                                        savingGiftProducts && styles.disabledButton,
+                                      ]}
+                                      onPress={(event) => {
+                                        stopPressPropagation(event);
+                                        requestRemoveProductFromGift(product);
+                                      }}
+                                      disabled={savingGiftProducts}
+                                    >
+                                      <Text style={styles.removeProductText}>
+                                        Scoate
+                                      </Text>
+                                    </Pressable>
+                                  </>
+                                )}
+                              </View>
+                            </Pressable>
+                          );
+                        })}
                       </>
                     )}
                   </View>
@@ -3309,7 +3866,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={() => setAddedProductToast(null)}
         >
-          <View style={styles.toastModalOverlay}>
+          <View
+            style={styles.toastModalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             {!!addedProductToast && (
               <View style={styles.addedProductToast}>
                 <View style={styles.addedProductToastHeader}>
@@ -3394,7 +3954,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={() => setEmptyGiftGuideVisible(false)}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.confirmModalCard}>
               <Text style={styles.modalTitle}>Adauga mai intai un cadou</Text>
               <Text style={styles.confirmText}>
@@ -3443,7 +4006,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={() => setHistoryToastVisible(false)}
         >
-          <View style={styles.toastModalOverlay}>
+          <View
+            style={styles.toastModalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.addedProductToast}>
               <Text style={styles.addedProductToastTitle}>
                 Cadoul a fost mutat in istoric
@@ -3468,7 +4034,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={closeCompleteModal}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.giftModalCard}>
               <View style={styles.modalHandle} />
 
@@ -3665,7 +4234,10 @@ export default function LovedOneDetailsScreen({
             setOfferModalVisible(false);
           }}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.giftModalCard}>
               <View style={styles.modalHandle} />
 
@@ -3938,7 +4510,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={() => setCompleteIncompleteProductsConfirmVisible(false)}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.confirmModalCard}>
               <Text style={styles.modalTitle}>Produse nemarcate</Text>
               <Text style={styles.confirmText}>
@@ -3978,7 +4553,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={closeBudgetModal}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.confirmModalCard}>
               <Text style={styles.modalTitle}>Modifica bugetul</Text>
               <Text style={styles.confirmText}>
@@ -4027,7 +4605,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={keepDuplicateProductInExistingLists}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.confirmModalCard}>
               <Text style={styles.modalTitle}>Produs deja folosit</Text>
               <Text style={styles.confirmText}>
@@ -4094,7 +4675,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={closeBudgetIncreaseModal}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.confirmModalCard}>
               <Text style={styles.modalTitle}>Buget depasit</Text>
               <Text style={styles.confirmText}>
@@ -4156,7 +4740,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={closeBudgetDecreaseConfirm}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.confirmModalCard}>
               <Text style={styles.modalTitle}>Buget sub totalul listei</Text>
               <Text style={styles.confirmText}>
@@ -4200,7 +4787,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={() => setBudgetHistoryVisible(false)}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.giftModalCard}>
               <View style={styles.modalHandle} />
 
@@ -4337,7 +4927,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={closeDeadlineEditModal}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.giftModalCard}>
               <View style={styles.modalHandle} />
 
@@ -4506,7 +5099,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={closeRemoveProductConfirm}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.confirmModalCard}>
               <Text style={styles.modalTitle}>Scoate produsul?</Text>
               <Text style={styles.confirmText}>
@@ -4545,7 +5141,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={closeAiHelpModal}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.giftModalCard}>
               <View style={styles.modalHandle} />
 
@@ -4579,6 +5178,11 @@ export default function LovedOneDetailsScreen({
                     {String(data.month).padStart(2, '0')}
                     {data.year ? `.${data.year}` : ''}
                   </Text>
+                  {!!data.year && (
+                    <Text style={styles.historyDetails}>
+                      Vârstă: {calculateAge(data.day, data.month, data.year)} ani
+                    </Text>
+                  )}
                 </View>
 
                 {selectedGiftProducts.length > 0 && (
@@ -4708,7 +5312,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={closeChangeProductFlow}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.confirmModalCard}>
               <Text style={styles.modalTitle}>Schimba produs</Text>
               <Text style={styles.confirmText}>
@@ -4743,7 +5350,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={closeChangeProductFlow}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.giftModalCard}>
               <View style={styles.modalHandle} />
 
@@ -4856,6 +5466,11 @@ export default function LovedOneDetailsScreen({
                             {product.offerCount} magazine disponibile
                           </Text>
                         )}
+                        {!!product.promoCode && (
+                          <Text style={styles.productMeta}>
+                            Pret cu cod {product.promoCode}
+                          </Text>
+                        )}
                         {!!product.category && (
                           <Text style={styles.productMeta}>
                             {product.category}
@@ -4908,7 +5523,10 @@ export default function LovedOneDetailsScreen({
           transparent
           onRequestClose={closeChangeProductFlow}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalOverlay}
+            {...getModalBackdropResponder(closeTopModal)}
+          >
             <View style={styles.giftModalCard}>
               <View style={styles.modalHandle} />
 
@@ -5000,7 +5618,7 @@ export default function LovedOneDetailsScreen({
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable
           style={styles.backButton}
-          onPress={() => setHistoryVisible(false)}
+          onPress={goBackFromHistory}
         >
           <Text style={styles.backButtonText}>Inapoi la persoana</Text>
         </Pressable>
@@ -5228,9 +5846,11 @@ export default function LovedOneDetailsScreen({
           {data.year ? `.${data.year}` : ''}
         </Text>
 
-        {!!data.estimatedAgeRange && (
+        {data.year ? (
+          <Text style={styles.info}>Vârstă: {calculateAge(data.day, data.month, data.year)} ani</Text>
+        ) : !!data.estimatedAgeRange ? (
           <Text style={styles.info}>Vârstă estimată: {data.estimatedAgeRange}</Text>
-        )}
+        ) : null}
 
         <Text style={styles.info}>
           Gen:{' '}
@@ -5253,6 +5873,14 @@ export default function LovedOneDetailsScreen({
         <Pressable style={styles.editButton} onPress={() => setEditVisible(true)}>
           <Text style={styles.editButtonText}>Editează</Text>
         </Pressable>
+        <Pressable
+          style={styles.deleteLovedOneButton}
+          onPress={() => setDeleteLovedOneVisible(true)}
+        >
+          <Text style={styles.deleteLovedOneButtonText}>
+            Sterge persoana
+          </Text>
+        </Pressable>
       </View>
 
       <View style={styles.giftsSection}>
@@ -5264,22 +5892,6 @@ export default function LovedOneDetailsScreen({
         >
           <Text style={styles.newGiftButtonText}>Stabileste un nou cadou</Text>
         </Pressable>
-
-        <View style={styles.budgetSummaryRow}>
-          <View style={styles.budgetSummaryBox}>
-            <Text style={styles.budgetSummaryLabel}>Anul curent</Text>
-            <Text style={styles.budgetSummaryValue}>
-              {currentYearPlannedBudget} RON
-            </Text>
-          </View>
-
-          <View style={styles.budgetSummaryBox}>
-            <Text style={styles.budgetSummaryLabel}>Total</Text>
-            <Text style={styles.budgetSummaryValue}>
-              {totalPlannedBudget} RON
-            </Text>
-          </View>
-        </View>
 
         <Pressable
           style={styles.historyButton}
@@ -5308,7 +5920,7 @@ export default function LovedOneDetailsScreen({
                 </View>
 
                 {group.plans.map((gift) => {
-                  const timingNote = getGiftTimingNote(gift);
+                  const timingNotes = getGiftTimingNotes(gift);
 
                   return (
                     <Pressable
@@ -5320,19 +5932,22 @@ export default function LovedOneDetailsScreen({
                         <Text style={styles.historyPurpose}>{gift.purpose}</Text>
                         <Text style={styles.historyBudget}>{gift.budget} RON</Text>
                       </View>
-                      <Text style={styles.historyDeadline}>
-                        Cumpara pana la:{' '}
-                        {formatDate(gift.purchaseDeadlineDate || gift.deadlineDate)}
-                      </Text>
-                      <Text style={styles.historyDetails}>
-                        Ofera pe: {formatDate(gift.deadlineDate)}
-                      </Text>
-                      <Text style={styles.historyDetails}>
-                        Status: {getGiftStatusLabel(gift.status)}
-                      </Text>
-                      {!!timingNote && (
-                        <Text style={styles.expiredText}>{timingNote}</Text>
+                      {gift.status === 'planned' && (
+                        <Text style={styles.historyDeadline}>
+                          Cumpara pana la:{' '}
+                          {formatDate(gift.purchaseDeadlineDate || gift.deadlineDate)}
+                        </Text>
                       )}
+                      {gift.status === 'purchased' && (
+                        <Text style={styles.historyDeadline}>
+                          Ofera pe: {formatDate(gift.deadlineDate)}
+                        </Text>
+                      )}
+                      {timingNotes.map((note) => (
+                        <Text key={note} style={styles.expiredText}>
+                          {note}
+                        </Text>
+                      ))}
                       {gift.status === 'planned' && (
                         <View style={styles.historyActions}>
                           <Pressable
@@ -5370,9 +5985,63 @@ export default function LovedOneDetailsScreen({
       <AddLovedOneModal
         visible={editVisible}
         onClose={() => setEditVisible(false)}
-        onSaved={load}
+        onSaved={() => {
+          invalidateCalendarCache();
+          load();
+        }}
         initialData={data}
       />
+
+      <Modal
+        visible={deleteLovedOneVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={closeDeleteLovedOneModal}
+      >
+        <View
+          style={styles.modalOverlay}
+          {...getModalBackdropResponder(closeTopModal)}
+        >
+          <View style={styles.confirmModalCard}>
+            <Text style={styles.modalTitle}>Sterge persoana</Text>
+            <Text style={styles.confirmText}>
+              {data.name} va disparea din lista ta si din calendar. Cadourile
+              si produsele deja salvate raman in baza de date pentru statisticile
+              admin.
+            </Text>
+            <Text style={styles.confirmText}>
+              Daca adaugi din nou aceeasi persoana, va fi tratata ca o persoana
+              noua, fara istoricul vechi.
+            </Text>
+
+            {!!deleteLovedOneError && (
+              <Text style={styles.giftErrorText}>{deleteLovedOneError}</Text>
+            )}
+
+            <Pressable
+              style={[
+                styles.saveGiftButton,
+                styles.deleteConfirmButton,
+                deletingLovedOne && styles.disabledButton,
+              ]}
+              onPress={confirmDeleteLovedOne}
+              disabled={deletingLovedOne}
+            >
+              <Text style={styles.saveGiftButtonText}>
+                {deletingLovedOne ? 'Se sterge...' : 'Sterge persoana'}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.cancelGiftButton}
+              onPress={closeDeleteLovedOneModal}
+              disabled={deletingLovedOne}
+            >
+              <Text style={styles.cancelGiftButtonText}>Anuleaza</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={deleteModalVisible}
@@ -5380,7 +6049,10 @@ export default function LovedOneDetailsScreen({
         transparent
         onRequestClose={closeDeleteModal}
       >
-        <View style={styles.modalOverlay}>
+        <View
+          style={styles.modalOverlay}
+          {...getModalBackdropResponder(closeTopModal)}
+        >
           <View style={styles.confirmModalCard}>
             <Text style={styles.modalTitle}>Sterge cadoul</Text>
             <Text style={styles.confirmText}>
@@ -5419,7 +6091,10 @@ export default function LovedOneDetailsScreen({
         transparent
         onRequestClose={closeGiftModal}
       >
-        <View style={styles.modalOverlay}>
+        <View
+          style={styles.modalOverlay}
+          {...getModalBackdropResponder(closeTopModal)}
+        >
           <View style={styles.giftModalCard}>
             <View style={styles.modalHandle} />
 
@@ -5512,7 +6187,9 @@ export default function LovedOneDetailsScreen({
                     </View>
               </View>
 
-              {giftPurpose && isFixedGiftPurpose(giftPurpose) ? (
+              {giftPurpose &&
+              isFixedGiftPurpose(giftPurpose) &&
+              !canEditFixedGiftDate ? (
                 <View style={styles.duplicateInfoBox}>
                   <Text style={styles.duplicateInfoTitle}>Data oferirii</Text>
                   <Text style={styles.duplicateInfoText}>
@@ -5524,6 +6201,14 @@ export default function LovedOneDetailsScreen({
                         )
                       : 'Se calculeaza automat pentru aceasta ocazie.'}
                   </Text>
+                  <Pressable
+                    style={styles.inlineEditDateButton}
+                    onPress={() => setCanEditFixedGiftDate(true)}
+                  >
+                    <Text style={styles.inlineEditDateButtonText}>
+                      Modifica data
+                    </Text>
+                  </Pressable>
                 </View>
               ) : (
                 <>
@@ -5983,6 +6668,15 @@ const styles = StyleSheet.create({
     borderColor: '#86efac',
     backgroundColor: '#f0fdf4',
   },
+  freshPriceDropCard: {
+    borderColor: '#f97316',
+    backgroundColor: '#fff7ed',
+    shadowColor: '#f97316',
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 3,
+  },
   offerHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -6003,6 +6697,38 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 12,
     fontWeight: '900',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  freshPriceDropBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#f97316',
+    borderRadius: 8,
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '900',
+    marginBottom: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  freshPriceDropText: {
+    backgroundColor: '#ffedd5',
+    borderRadius: 8,
+    color: '#9a3412',
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18,
+    marginBottom: 10,
+    padding: 10,
+  },
+  promoBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#fff7ed',
+    borderRadius: 8,
+    color: '#c2410c',
+    fontSize: 12,
+    fontWeight: '900',
+    marginTop: 6,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
@@ -6095,6 +6821,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     lineHeight: 18,
+  },
+  inlineEditDateButton: {
+    marginTop: 10,
+    backgroundColor: '#eef2ff',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  inlineEditDateButtonText: {
+    color: '#3730a3',
+    fontSize: 13,
+    fontWeight: '900',
   },
   budgetChartScroll: {
     marginBottom: 14,
@@ -6255,6 +6993,27 @@ const styles = StyleSheet.create({
   purchasedProductRow: {
     borderColor: '#86efac',
     backgroundColor: '#f0fdf4',
+  },
+  alertSelectedProductRow: {
+    borderColor: '#f97316',
+    backgroundColor: '#fff7ed',
+    shadowColor: '#f97316',
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  alertProductHint: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#ffedd5',
+    borderRadius: 8,
+    color: '#9a3412',
+    fontSize: 12,
+    fontWeight: '900',
+    lineHeight: 17,
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
   },
   productSuggestionRow: {
     flexDirection: 'row',
@@ -6486,6 +7245,19 @@ const styles = StyleSheet.create({
   editButtonText: {
     color: '#fff',
     fontWeight: '800',
+  },
+  deleteLovedOneButton: {
+    marginTop: 10,
+    backgroundColor: '#fee2e2',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+  },
+  deleteLovedOneButtonText: {
+    color: '#b91c1c',
+    fontWeight: '900',
   },
   giftsSection: {
     backgroundColor: '#ffffff',
@@ -6771,6 +7543,27 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 14,
     backgroundColor: '#ffffff',
+  },
+  imageButton: {
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  imageButtonText: {
+    color: '#374151',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  purchasePreviewImage: {
+    width: 86,
+    height: 86,
+    borderRadius: 12,
+    backgroundColor: '#e5e7eb',
+    marginBottom: 14,
   },
   modalTextArea: {
     minHeight: 110,

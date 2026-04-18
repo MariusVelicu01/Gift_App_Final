@@ -1,4 +1,5 @@
 import { API_BASE_URL } from './config';
+import { emitSessionExpired } from './authEventBus';
 
 export async function apiFetch(
   path: string,
@@ -27,6 +28,10 @@ export async function apiFetch(
 
   console.log('API STATUS:', response.status);
   console.log('API RESPONSE DATA:', data);
+
+  if (response.status === 401) {
+    emitSessionExpired();
+  }
 
   if (!response.ok) {
     throw new Error(data?.message || 'Request failed.');

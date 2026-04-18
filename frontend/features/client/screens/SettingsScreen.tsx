@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 import {
+  ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,335 +12,567 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
-import { clearCalendarCache } from '../../../services/calendarCache';
+import { changePasswordRequest, updateProfileRequest } from '../../../services/authApi';
 
-const CLIENT_SETTINGS_KEY = 'gift_app_client_settings';
+type SettingsSection = 'personalData' | 'notifications';
 
-type ClientSettings = {
-  notificationsEnabled: boolean;
-  buyReminderDays: string;
-  offerReminderDays: string;
-  defaultBudget: string;
-  defaultCurrency: string;
-  calendarShowBuy: boolean;
-  calendarShowOffer: boolean;
-  calendarShowCompleted: boolean;
-  aiDefaultProductCount: string;
-  aiKeepProductsByDefault: boolean;
+type Props = {
+  onLogout: () => void;
+  personalDataOpen: boolean;
+  notificationsOpen: boolean;
+  onToggleSection: (section: SettingsSection) => void;
 };
+import {
+  ClientSettings,
+  DEFAULT_SETTINGS,
+  loadClientSettings,
+  saveClientSettings,
+} from '../../../services/clientSettings';
 
-const DEFAULT_SETTINGS: ClientSettings = {
-  notificationsEnabled: true,
-  buyReminderDays: '7',
-  offerReminderDays: '2',
-  defaultBudget: '200',
-  defaultCurrency: 'RON',
-  calendarShowBuy: true,
-  calendarShowOffer: true,
-  calendarShowCompleted: true,
-  aiDefaultProductCount: '1',
-  aiKeepProductsByDefault: true,
-};
+const PROFILE_PHOTO_KEY_PREFIX = 'gift_app_profile_photo_';
 
-const CURRENCY_OPTIONS = [
-  { label: 'RON', value: 'RON' },
-  { label: 'EUR', value: 'EUR' },
-  { label: 'USD', value: 'USD' },
-];
-
-function normalizeNumericInput(value: string) {
-  return value.replace(/[^0-9]/g, '');
+function getProfilePhotoKey(uid?: string) {
+  return `${PROFILE_PHOTO_KEY_PREFIX}${uid ?? 'default'}`;
 }
 
-export default function SettingsScreen({ onLogout }: { onLogout: () => void }) {
-  const { profile } = useAuth();
+function calculateAge(birthDate: string) {
+  const birth = new Date(birthDate);
+  if (Number.isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  if (
+    today.getMonth() < birth.getMonth() ||
+    (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())
+  ) {
+    age--;
+  }
+  return age;
+}
+
+function getZodiac(birthDate: string) {
+  const date = new Date(birthDate);
+  if (Number.isNaN(date.getTime())) return '';
+  const m = date.getMonth() + 1;
+  const d = date.getDate();
+  if ((m === 3 && d >= 21) || (m === 4 && d <= 19)) return 'Berbec \u2648';
+  if ((m === 4 && d >= 20) || (m === 5 && d <= 20)) return 'Taur \u2649';
+  if ((m === 5 && d >= 21) || (m === 6 && d <= 20)) return 'Gemeni \u264A';
+  if ((m === 6 && d >= 21) || (m === 7 && d <= 22)) return 'Rac \u264B';
+  if ((m === 7 && d >= 23) || (m === 8 && d <= 22)) return 'Leu \u264C';
+  if ((m === 8 && d >= 23) || (m === 9 && d <= 22)) return 'Fecioara \u264D';
+  if ((m === 9 && d >= 23) || (m === 10 && d <= 22)) return 'Balanta \u264E';
+  if ((m === 10 && d >= 23) || (m === 11 && d <= 21)) return 'Scorpion \u264F';
+  if ((m === 11 && d >= 22) || (m === 12 && d <= 21)) return 'Sagetator \u2650';
+  if ((m === 12 && d >= 22) || (m === 1 && d <= 19)) return 'Capricorn \u2651';
+  if ((m === 1 && d >= 20) || (m === 2 && d <= 18)) return 'Varsator \u2652';
+  return 'Pesti \u2653';
+}
+
+function formatBirthDate(birthDate: string) {
+  const date = new Date(birthDate);
+  if (Number.isNaN(date.getTime())) return '-';
+  return `${String(date.getDate()).padStart(2, '0')}.${String(
+    date.getMonth() + 1
+  ).padStart(2, '0')}.${date.getFullYear()}`;
+}
+
+
+export default function SettingsScreen({ onLogout, personalDataOpen, notificationsOpen, onToggleSection }: Props) {
+  const { profile, token, refreshProfile } = useAuth();
+
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [nameMessage, setNameMessage] = useState('');
+  const [nameError, setNameError] = useState('');
+
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
+
   const [settings, setSettings] = useState<ClientSettings>(DEFAULT_SETTINGS);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState('');
+
+  useEffect(() => {
+    if (profile) {
+      setFirstName(profile.firstName);
+      setLastName(profile.lastName);
+    }
+  }, [profile]);
 
   useEffect(() => {
     loadSettings();
   }, []);
 
-  const loadSettings = async () => {
-    try {
-      const savedSettings = await AsyncStorage.getItem(CLIENT_SETTINGS_KEY);
-
-      if (!savedSettings) return;
-
-      setSettings({
-        ...DEFAULT_SETTINGS,
-        ...JSON.parse(savedSettings),
-      });
-    } catch (error) {
-      console.error('LOAD CLIENT SETTINGS ERROR:', error);
-    }
-  };
-
-  const updateSetting = <Key extends keyof ClientSettings>(
-    key: Key,
-    value: ClientSettings[Key]
-  ) => {
-    setSettings((current) => ({
-      ...current,
-      [key]: value,
-    }));
-    setMessage('');
-  };
-
-  const validateSettings = () => {
-    const defaultBudget = Number(settings.defaultBudget);
-    const buyReminderDays = Number(settings.buyReminderDays);
-    const offerReminderDays = Number(settings.offerReminderDays);
-    const aiDefaultProductCount = Number(settings.aiDefaultProductCount);
-
-    if (!Number.isFinite(defaultBudget) || defaultBudget <= 0) {
-      return 'Bugetul implicit trebuie sa fie mai mare decat 0.';
-    }
-
-    if (!Number.isInteger(buyReminderDays) || buyReminderDays < 0) {
-      return 'Reminder-ul pentru cumparare trebuie sa fie 0 sau mai mare.';
-    }
-
-    if (!Number.isInteger(offerReminderDays) || offerReminderDays < 0) {
-      return 'Reminder-ul pentru oferire trebuie sa fie 0 sau mai mare.';
-    }
-
-    if (!Number.isInteger(aiDefaultProductCount) || aiDefaultProductCount < 1) {
-      return 'Numarul implicit de produse pentru AI trebuie sa fie cel putin 1.';
-    }
-
-    return '';
-  };
-
-  const saveSettings = async () => {
-    const validationError = validateSettings();
-
-    if (validationError) {
-      setMessage(validationError);
+  useEffect(() => {
+    if (!profile?.uid) {
+      setPhotoUri(null);
       return;
     }
 
+    loadPhoto(profile.uid);
+  }, [profile]);
+
+  const loadPhoto = async (uid: string) => {
     try {
-      setSaving(true);
-      await AsyncStorage.setItem(CLIENT_SETTINGS_KEY, JSON.stringify(settings));
-      setMessage('Setarile au fost salvate.');
+      const saved = await AsyncStorage.getItem(getProfilePhotoKey(uid));
+      if (saved) setPhotoUri(saved);
+      else setPhotoUri(null);
+    } catch {
+      setPhotoUri(null);
+    }
+  };
+
+  const loadSettings = async () => {
+    const s = await loadClientSettings();
+    setSettings(s);
+  };
+
+  const pickPhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0] && profile?.uid) {
+      const asset = result.assets[0];
+      const uri = asset.base64
+        ? `data:image/jpeg;base64,${asset.base64}`
+        : asset.uri;
+      setPhotoUri(uri);
+      await AsyncStorage.setItem(getProfilePhotoKey(profile.uid), uri);
+    }
+  };
+
+  const removePhoto = async () => {
+    try {
+      if (profile?.uid) {
+        await AsyncStorage.removeItem(getProfilePhotoKey(profile.uid));
+      }
     } catch (error) {
-      console.error('SAVE CLIENT SETTINGS ERROR:', error);
-      setMessage('Nu am putut salva setarile.');
+      console.error('REMOVE PROFILE PHOTO ERROR:', error);
+    }
+
+    setPhotoUri(null);
+  };
+
+  const saveName = async () => {
+    setNameMessage('');
+    setNameError('');
+
+    if (!firstName.trim() || !lastName.trim()) {
+      setNameError('Prenumele si numele nu pot fi goale.');
+      return;
+    }
+
+    if (!token) return;
+    setSavingName(true);
+
+    try {
+      await updateProfileRequest(token, firstName.trim(), lastName.trim());
+      await refreshProfile();
+      setNameMessage('Numele a fost actualizat.');
+    } catch (e: any) {
+      setNameError(e?.message || 'Nu am putut actualiza numele.');
     } finally {
-      setSaving(false);
+      setSavingName(false);
     }
   };
 
-  const resetSettings = async () => {
+  const savePassword = async () => {
+    setPasswordMessage('');
+    setPasswordError('');
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordError('Completeaza toate campurile pentru parola.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Parola noua si confirmarea nu coincid.');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setPasswordError('Parola noua trebuie sa aiba cel putin 6 caractere.');
+      return;
+    }
+
+    if (!token) return;
+    setSavingPassword(true);
+
     try {
-      setSettings(DEFAULT_SETTINGS);
-      await AsyncStorage.setItem(
-        CLIENT_SETTINGS_KEY,
-        JSON.stringify(DEFAULT_SETTINGS)
-      );
-      setMessage('Setarile au fost resetate.');
-    } catch (error) {
-      console.error('RESET CLIENT SETTINGS ERROR:', error);
-      setMessage('Nu am putut reseta setarile.');
+      await changePasswordRequest(token, currentPassword, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordMessage('Parola a fost schimbata cu succes.');
+    } catch (e: any) {
+      setPasswordError(e?.message || 'Nu am putut schimba parola.');
+    } finally {
+      setSavingPassword(false);
     }
   };
 
-  const clearLocalCache = () => {
-    clearCalendarCache();
-    setMessage('Cache-ul calendarului a fost curatat.');
+  const saveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      await saveClientSettings(settings);
+      setSettingsMessage('Setarile au fost salvate.');
+    } catch {
+      setSettingsMessage('Nu am putut salva setarile.');
+    } finally {
+      setSavingSettings(false);
+    }
   };
+
+  const toggleAll = (enabled: boolean) => {
+    setSettings((s) => ({
+      ...s,
+      notificationsEnabled: enabled,
+      notifyBuyReminder: enabled,
+      notifyOfferReminder: enabled,
+      notifyPriceUp: enabled,
+      notifyPriceDown: enabled,
+      notifyBirthdays: enabled,
+    }));
+    setSettingsMessage('');
+  };
+
+  const updateSetting = <K extends keyof ClientSettings>(key: K, value: ClientSettings[K]) => {
+    setSettings((s) => ({ ...s, [key]: value }));
+    setSettingsMessage('');
+  };
+
+  const initials = profile
+    ? `${profile.firstName[0] ?? ''}${profile.lastName[0] ?? ''}`.toUpperCase()
+    : '?';
+
+  const age = profile?.birthDate ? calculateAge(profile.birthDate) : null;
+  const zodiac = profile?.birthDate ? getZodiac(profile.birthDate) : '';
+  const birthDateFormatted = profile?.birthDate ? formatBirthDate(profile.birthDate) : '-';
+  const roleLabel = profile?.role === 'admin' ? 'Administrator' : 'Client';
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>⚙️ Setari</Text>
+      <Text style={styles.pageTitle}>Setari</Text>
 
+      {/* --- CONT --- */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>👤 Cont</Text>
-        <Text style={styles.cardText}>
-          {profile
-            ? `${profile.firstName} ${profile.lastName} - ${profile.email}`
-            : 'Esti conectat in aplicatie.'}
-        </Text>
-        <Text style={styles.metaText}>
-          Rol: {profile?.role === 'admin' ? 'Administrator' : 'Client'}
-        </Text>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>🔔 Notificari si remindere</Text>
-        <SettingSwitch
-          label="Activeaza remindere pentru cadouri"
-          value={settings.notificationsEnabled}
-          onValueChange={(value) => updateSetting('notificationsEnabled', value)}
-        />
-
-        <View style={styles.inputGrid}>
-          <View style={styles.inputBlock}>
-            <Text style={styles.inputLabel}>Reminder cumparare</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              value={settings.buyReminderDays}
-              onChangeText={(value) =>
-                updateSetting('buyReminderDays', normalizeNumericInput(value))
-              }
-              placeholder="Ex: 7"
-            />
-            <Text style={styles.hintText}>zile inainte de deadline</Text>
+        <Text style={styles.cardTitle}>Cont</Text>
+        <View style={styles.profileRow}>
+          <View style={styles.avatarWrap}>
+            {photoUri ? (
+              <Image source={{ uri: photoUri }} style={styles.avatar} />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarInitials}>{initials}</Text>
+              </View>
+            )}
           </View>
-
-          <View style={styles.inputBlock}>
-            <Text style={styles.inputLabel}>Reminder oferire</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              value={settings.offerReminderDays}
-              onChangeText={(value) =>
-                updateSetting('offerReminderDays', normalizeNumericInput(value))
-              }
-              placeholder="Ex: 2"
-            />
-            <Text style={styles.hintText}>zile inainte de ziua cadoului</Text>
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileName}>
+              {profile ? `${profile.firstName} ${profile.lastName}` : '-'}
+            </Text>
+            <Text style={styles.profileEmail}>{profile?.email ?? '-'}</Text>
+            <Text style={styles.profileMeta}>Data nasterii: {birthDateFormatted}</Text>
+            {age !== null && (
+              <Text style={styles.profileMeta}>Varsta: {age} ani</Text>
+            )}
+            {!!zodiac && <Text style={styles.profileMeta}>Zodie: {zodiac}</Text>}
+            <Text style={styles.profileMeta}>Rol: {roleLabel}</Text>
           </View>
         </View>
       </View>
 
+      {/* --- DATE PERSONALE --- */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>🎁 Cadouri si buget</Text>
-        <View style={styles.inputGrid}>
+        <Pressable
+          style={styles.cardHeader}
+          onPress={() => onToggleSection('personalData')}
+        >
+          <Text style={styles.cardTitle}>Date personale</Text>
+          <Text style={styles.expandIcon}>{personalDataOpen ? '▾' : '▸'}</Text>
+        </Pressable>
+
+        {personalDataOpen && (
+          <>
+            {/* Photo */}
+            <View style={styles.photoSection}>
+          <View style={styles.photoPreviewWrap}>
+            {photoUri ? (
+              <Image source={{ uri: photoUri }} style={styles.photoPreview} />
+            ) : (
+              <View style={[styles.photoPreview, styles.photoPreviewFallback]}>
+                <Text style={styles.avatarInitials}>{initials}</Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.photoButtonGroup}>
+            <Pressable
+              style={({ hovered, pressed }) => [
+                styles.photoButton,
+                hovered && styles.photoButtonHover,
+                pressed && styles.photoButtonPressed,
+              ]}
+              onPress={pickPhoto}
+            >
+              <Text style={styles.photoButtonText}>
+                {photoUri ? 'Schimba poza' : 'Adauga poza'}
+              </Text>
+            </Pressable>
+            {photoUri && (
+              <Pressable
+                style={({ hovered, pressed }) => [
+                  styles.photoButton,
+                  styles.photoDeleteButton,
+                  hovered && styles.photoButtonHover,
+                  pressed && styles.photoButtonPressed,
+                ]}
+                onPress={removePhoto}
+              >
+                <Text style={[styles.photoButtonText, styles.photoDeleteButtonText]}>
+                  Sterge poza
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Name */}
+        <Text style={styles.sectionLabel}>Modifica numele</Text>
+        <View style={styles.inputRow}>
           <View style={styles.inputBlock}>
-            <Text style={styles.inputLabel}>Buget implicit</Text>
+            <Text style={styles.inputLabel}>Prenume</Text>
             <TextInput
               style={styles.input}
-              keyboardType="numeric"
-              value={settings.defaultBudget}
-              onChangeText={(value) =>
-                updateSetting('defaultBudget', normalizeNumericInput(value))
-              }
-              placeholder="Ex: 200"
+              value={firstName}
+              onChangeText={setFirstName}
+              placeholder="Prenume"
+              placeholderTextColor="#9ca3af"
+              editable={!savingName}
             />
           </View>
-
           <View style={styles.inputBlock}>
-            <Text style={styles.inputLabel}>Moneda preferata</Text>
-            <Dropdown
-              style={styles.dropdown}
-              containerStyle={styles.dropdownContainer}
-              placeholderStyle={styles.dropdownPlaceholder}
-              selectedTextStyle={styles.dropdownSelectedText}
-              data={CURRENCY_OPTIONS}
-              maxHeight={180}
-              labelField="label"
-              valueField="value"
-              value={settings.defaultCurrency}
-              onChange={(item) => updateSetting('defaultCurrency', item.value)}
+            <Text style={styles.inputLabel}>Nume</Text>
+            <TextInput
+              style={styles.input}
+              value={lastName}
+              onChangeText={setLastName}
+              placeholder="Nume"
+              placeholderTextColor="#9ca3af"
+              editable={!savingName}
             />
           </View>
         </View>
-      </View>
+        {!!nameError && <Text style={styles.errorText}>{nameError}</Text>}
+        {!!nameMessage && <Text style={styles.successText}>{nameMessage}</Text>}
+        <Pressable
+          style={[styles.saveSmallButton, savingName && styles.disabledButton]}
+          onPress={saveName}
+          disabled={savingName}
+        >
+          {savingName ? (
+            <ActivityIndicator color="#ffffff" size="small" />
+          ) : (
+            <Text style={styles.saveSmallButtonText}>Salveaza numele</Text>
+          )}
+        </Pressable>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>📅 Calendar</Text>
-        <Text style={styles.cardText}>
-          Alege ce tipuri de evenimente vrei sa fie bifate implicit in calendar.
-        </Text>
-        <SettingSwitch
-          label="Cadouri - de cumparat"
-          value={settings.calendarShowBuy}
-          onValueChange={(value) => updateSetting('calendarShowBuy', value)}
-        />
-        <SettingSwitch
-          label="Cadouri - de oferit"
-          value={settings.calendarShowOffer}
-          onValueChange={(value) => updateSetting('calendarShowOffer', value)}
-        />
-        <SettingSwitch
-          label="Cadouri - finalizate"
-          value={settings.calendarShowCompleted}
-          onValueChange={(value) =>
-            updateSetting('calendarShowCompleted', value)
-          }
-        />
-      </View>
+        <View style={styles.divider} />
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>🤖 Ajutor AI</Text>
-        <View style={styles.inputBlock}>
-          <Text style={styles.inputLabel}>Numar implicit de produse sugerate</Text>
+        {/* Password */}
+        <Text style={styles.sectionLabel}>Schimba parola</Text>
+        <Text style={styles.inputLabel}>Parola curenta</Text>
+        <View style={styles.passwordRow}>
           <TextInput
-            style={styles.input}
-            keyboardType="numeric"
-            value={settings.aiDefaultProductCount}
-            onChangeText={(value) =>
-              updateSetting('aiDefaultProductCount', normalizeNumericInput(value))
-            }
-            placeholder="Ex: 1"
+            style={[styles.input, styles.flex1]}
+            value={currentPassword}
+            onChangeText={setCurrentPassword}
+            placeholder="Parola curenta"
+            placeholderTextColor="#9ca3af"
+            secureTextEntry={!showCurrentPw}
+            editable={!savingPassword}
+          />
+          <Pressable
+            style={styles.eyeButton}
+            onPress={() => setShowCurrentPw((v) => !v)}
+          >
+            <Text style={styles.eyeText}>{showCurrentPw ? '\uD83D\uDE48' : '\uD83D\uDC41'}</Text>
+          </Pressable>
+        </View>
+        <Text style={styles.inputLabel}>Parola noua</Text>
+        <View style={styles.passwordRow}>
+          <TextInput
+            style={[styles.input, styles.flex1]}
+            value={newPassword}
+            onChangeText={setNewPassword}
+            placeholder="Parola noua (min. 6 caractere)"
+            placeholderTextColor="#9ca3af"
+            secureTextEntry={!showNewPw}
+            editable={!savingPassword}
+          />
+          <Pressable
+            style={styles.eyeButton}
+            onPress={() => setShowNewPw((v) => !v)}
+          >
+            <Text style={styles.eyeText}>{showNewPw ? '\uD83D\uDE48' : '\uD83D\uDC41'}</Text>
+          </Pressable>
+        </View>
+        <Text style={styles.inputLabel}>Confirma parola noua</Text>
+        <TextInput
+          style={styles.input}
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          placeholder="Repeta parola noua"
+          placeholderTextColor="#9ca3af"
+          secureTextEntry
+          editable={!savingPassword}
+          onSubmitEditing={savePassword}
+          returnKeyType="done"
+        />
+        {!!passwordError && <Text style={styles.errorText}>{passwordError}</Text>}
+        {!!passwordMessage && <Text style={styles.successText}>{passwordMessage}</Text>}
+        <Pressable
+          style={[styles.saveSmallButton, savingPassword && styles.disabledButton]}
+          onPress={savePassword}
+          disabled={savingPassword}
+        >
+          {savingPassword ? (
+            <ActivityIndicator color="#ffffff" size="small" />
+          ) : (
+            <Text style={styles.saveSmallButtonText}>Schimba parola</Text>
+          )}
+        </Pressable>
+        </>
+      )}
+      </View>
+
+      <View style={styles.card}>
+        <Pressable
+          style={styles.cardHeader}
+          onPress={() => onToggleSection('notifications')}
+        >
+          <Text style={styles.cardTitle}>Notificari si remindere</Text>
+          <Text style={styles.expandIcon}>{notificationsOpen ? '▾' : '▸'}</Text>
+        </Pressable>
+
+        {notificationsOpen && (
+          <>
+            {/* Master toggle */}
+        <View style={[styles.switchRow, styles.masterSwitchRow]}>
+          <Text style={styles.masterSwitchLabel}>Activeaza toate notificarile</Text>
+          <Switch
+            value={settings.notificationsEnabled}
+            onValueChange={toggleAll}
+            trackColor={{ true: '#be123c' }}
           />
         </View>
-        <SettingSwitch
-          label="Pastreaza produsele deja adaugate cand cer ajutor AI"
-          value={settings.aiKeepProductsByDefault}
-          onValueChange={(value) =>
-            updateSetting('aiKeepProductsByDefault', value)
-          }
-        />
-      </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>🧹 Date locale</Text>
-        <Text style={styles.cardText}>
-          Poti curata datele temporare salvate local, fara sa stergi cadourile
-          sau magazinele din baza de date.
-        </Text>
-        <Pressable style={styles.secondaryButton} onPress={clearLocalCache}>
-          <Text style={styles.secondaryButtonText}>Curata cache calendar</Text>
-        </Pressable>
-        <Pressable style={styles.secondaryButton} onPress={resetSettings}>
-          <Text style={styles.secondaryButtonText}>Reseteaza setarile</Text>
-        </Pressable>
-      </View>
+        <View style={styles.divider} />
 
-      {!!message && (
-        <View style={styles.messageBox}>
-          <Text style={styles.messageText}>{message}</Text>
+        {/* Remindere cadouri */}
+        <Text style={styles.notifGroupLabel}>Remindere cadouri</Text>
+
+        <View style={styles.switchRow}>
+          <Text style={[styles.switchLabel, !settings.notificationsEnabled && styles.disabledText]}>
+            Reminder cumparare cadou
+          </Text>
+          <Switch
+            value={settings.notifyBuyReminder && settings.notificationsEnabled}
+            onValueChange={(v) => updateSetting('notifyBuyReminder', v)}
+            disabled={!settings.notificationsEnabled}
+          />
         </View>
-      )}
 
-      <Pressable
-        style={[styles.saveButton, saving && styles.disabledButton]}
-        onPress={saveSettings}
-        disabled={saving}
-      >
-        <Text style={styles.saveButtonText}>
-          {saving ? 'Se salveaza...' : 'Salveaza setarile'}
-        </Text>
-      </Pressable>
+        <View style={styles.switchRow}>
+          <Text style={[styles.switchLabel, !settings.notificationsEnabled && styles.disabledText]}>
+            Reminder oferire cadou
+          </Text>
+          <Switch
+            value={settings.notifyOfferReminder && settings.notificationsEnabled}
+            onValueChange={(v) => updateSetting('notifyOfferReminder', v)}
+            disabled={!settings.notificationsEnabled}
+          />
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Alerte preturi */}
+        <Text style={styles.notifGroupLabel}>Alerte preturi</Text>
+
+        <View style={styles.switchRow}>
+          <Text style={[styles.switchLabel, !settings.notificationsEnabled && styles.disabledText]}>
+            Pret crescut
+          </Text>
+          <Switch
+            value={settings.notifyPriceUp && settings.notificationsEnabled}
+            onValueChange={(v) => updateSetting('notifyPriceUp', v)}
+            disabled={!settings.notificationsEnabled}
+          />
+        </View>
+
+        <View style={styles.switchRow}>
+          <Text style={[styles.switchLabel, !settings.notificationsEnabled && styles.disabledText]}>
+            Pret scazut
+          </Text>
+          <Switch
+            value={settings.notifyPriceDown && settings.notificationsEnabled}
+            onValueChange={(v) => updateSetting('notifyPriceDown', v)}
+            disabled={!settings.notificationsEnabled}
+          />
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Zile de nastere */}
+        <Text style={styles.notifGroupLabel}>Zile de nastere</Text>
+
+        <View style={styles.switchRow}>
+          <Text style={[styles.switchLabel, !settings.notificationsEnabled && styles.disabledText]}>
+            Notificare ziua de nastere
+          </Text>
+          <Switch
+            value={settings.notifyBirthdays && settings.notificationsEnabled}
+            onValueChange={(v) => updateSetting('notifyBirthdays', v)}
+            disabled={!settings.notificationsEnabled}
+          />
+        </View>
+
+        {!!settingsMessage && <Text style={styles.successText}>{settingsMessage}</Text>}
+        <Pressable
+          style={[styles.saveSmallButton, savingSettings && styles.disabledButton]}
+          onPress={saveSettings}
+          disabled={savingSettings}
+        >
+          {savingSettings ? (
+            <ActivityIndicator color="#ffffff" size="small" />
+          ) : (
+            <Text style={styles.saveSmallButtonText}>Salveaza setarile</Text>
+          )}
+        </Pressable>
+          </>
+        )}
+      </View>
 
       <Pressable style={styles.logoutButton} onPress={onLogout}>
-        <Text style={styles.logoutButtonText}>Logout</Text>
+        <Text style={styles.logoutButtonText}>Deconecteaza-te</Text>
       </Pressable>
     </ScrollView>
-  );
-}
-
-function SettingSwitch({
-  label,
-  value,
-  onValueChange,
-}: {
-  label: string;
-  value: boolean;
-  onValueChange: (value: boolean) => void;
-}) {
-  return (
-    <View style={styles.switchRow}>
-      <Text style={styles.switchLabel}>{label}</Text>
-      <Switch value={value} onValueChange={onValueChange} />
-    </View>
   );
 }
 
@@ -345,106 +580,228 @@ const styles = StyleSheet.create({
   container: {
     padding: 16,
     gap: 16,
-    paddingBottom: 32,
+    paddingBottom: 40,
     backgroundColor: '#fff7ed',
   },
-  title: {
+  pageTitle: {
     fontSize: 28,
-    fontWeight: '800',
+    fontWeight: '900',
     color: '#be123c',
-    marginBottom: 2,
   },
   card: {
     backgroundColor: '#fff',
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: '#fce7e0',
-    shadowColor: '#be123c',
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
+    gap: 10,
   },
   cardTitle: {
     fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 10,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 2,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingVertical: 8,
+  },
+  expandIcon: {
+    fontSize: 16,
+    color: '#6b7280',
+    fontWeight: '800',
+  },
+  profileRow: {
+    flexDirection: 'row',
+    gap: 14,
+    alignItems: 'flex-start',
+  },
+  avatarWrap: {
+    flexShrink: 0,
+  },
+  avatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+  },
+  avatarFallback: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#be123c',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitials: {
+    color: '#ffffff',
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  profileInfo: {
+    flex: 1,
+    gap: 3,
+  },
+  profileName: {
+    fontSize: 17,
+    fontWeight: '900',
     color: '#111827',
   },
-  cardText: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: '#9ca3af',
-    marginBottom: 12,
-  },
-  metaText: {
-    color: '#9ca3af',
+  profileEmail: {
     fontSize: 13,
-    fontWeight: '500',
-    marginTop: 4,
+    color: '#6b7280',
+    fontWeight: '600',
   },
-  inputGrid: {
+  profileMeta: {
+    fontSize: 13,
+    color: '#6b7280',
+    fontWeight: '500',
+  },
+  photoSection: {
     flexDirection: 'row',
-    gap: 12,
+    alignItems: 'center',
+    gap: 14,
+  },
+  photoPreviewWrap: {
+    flexShrink: 0,
+  },
+  photoPreview: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+  },
+  photoPreviewFallback: {
+    backgroundColor: '#be123c',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoButtonGroup: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  photoButton: {
+    flex: 1,
+    backgroundColor: '#fff7ed',
+    borderColor: '#fce7e0',
+    borderWidth: 1.5,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  photoDeleteButton: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+  },
+  photoButtonHover: {
+    backgroundColor: '#fff1f2',
+  },
+  photoButtonPressed: {
+    transform: [{ scale: 0.98 }],
+  },
+  photoButtonText: {
+    color: '#be123c',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  photoDeleteButtonText: {
+    color: '#b91c1c',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#fce7e0',
+    marginVertical: 4,
+  },
+  sectionLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#374151',
+  },
+  inputRow: {
+    flexDirection: 'row',
+    gap: 10,
   },
   inputBlock: {
     flex: 1,
     minWidth: 0,
-    marginBottom: 10,
+    gap: 4,
   },
   inputLabel: {
     color: '#374151',
     fontSize: 13,
     fontWeight: '700',
-    marginBottom: 6,
   },
   input: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    minHeight: 46,
+    borderWidth: 1.5,
+    borderColor: '#fce7e0',
     borderRadius: 10,
     paddingHorizontal: 14,
     color: '#111827',
-    backgroundColor: '#fafafa',
+    backgroundColor: '#fff7ed',
     fontSize: 14,
+  },
+  flex1: {
+    flex: 1,
+  },
+  passwordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  eyeButton: {
+    padding: 8,
+  },
+  eyeText: {
+    fontSize: 18,
   },
   hintText: {
     color: '#9ca3af',
     fontSize: 12,
     fontWeight: '500',
-    marginTop: 5,
   },
-  dropdown: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+  saveSmallButton: {
+    backgroundColor: '#be123c',
     borderRadius: 10,
-    paddingHorizontal: 12,
-    backgroundColor: '#fafafa',
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 2,
   },
-  dropdownContainer: {
-    borderRadius: 10,
-    borderColor: '#e5e7eb',
-  },
-  dropdownPlaceholder: {
-    color: '#9ca3af',
+  saveSmallButtonText: {
+    color: '#ffffff',
     fontSize: 14,
+    fontWeight: '900',
   },
-  dropdownSelectedText: {
-    color: '#111827',
-    fontSize: 14,
-    fontWeight: '600',
+  disabledButton: {
+    opacity: 0.6,
+  },
+  errorText: {
+    color: '#b91c1c',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  successText: {
+    color: '#15803d',
+    fontSize: 13,
+    fontWeight: '700',
   },
   switchRow: {
-    minHeight: 50,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#f9f1ee',
-    paddingVertical: 8,
+    paddingVertical: 4,
+  },
+  masterSwitchRow: {
+    paddingVertical: 6,
+  },
+  masterSwitchLabel: {
+    flex: 1,
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '800',
   },
   switchLabel: {
     flex: 1,
@@ -452,42 +809,65 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  secondaryButton: {
-    backgroundColor: '#f9f1ee',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#fce7e0',
-    paddingVertical: 12,
+  switchLabelWithBadge: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
+    gap: 8,
   },
-  secondaryButtonText: {
+  disabledText: {
+    color: '#9ca3af',
+  },
+  notifGroupLabel: {
+    fontSize: 12,
+    fontWeight: '800',
     color: '#be123c',
-    fontWeight: '700',
-    fontSize: 14,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 2,
+    marginBottom: 2,
   },
-  messageBox: {
-    borderWidth: 1,
-    borderColor: '#bbf7d0',
-    backgroundColor: '#f0fdf4',
-    borderRadius: 10,
-    padding: 14,
-  },
-  messageText: {
-    color: '#15803d',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  saveButton: {
-    backgroundColor: '#be123c',
-    paddingVertical: 14,
-    borderRadius: 12,
+  reminderDaysRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
+    paddingLeft: 4,
+    marginTop: -4,
+    marginBottom: 4,
   },
-  saveButtonText: {
-    color: '#fff',
+  daysInput: {
+    width: 60,
+    height: 38,
+    borderWidth: 1.5,
+    borderColor: '#fce7e0',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    color: '#111827',
+    backgroundColor: '#fff7ed',
+    fontSize: 14,
     fontWeight: '700',
-    fontSize: 15,
+    textAlign: 'center',
+  },
+  daysLabel: {
+    color: '#6b7280',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  priceTag: {
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  priceTagUp: {
+    backgroundColor: '#fee2e2',
+  },
+  priceTagDown: {
+    backgroundColor: '#dcfce7',
+  },
+  priceTagText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#374151',
   },
   logoutButton: {
     backgroundColor: '#f3f4f6',
@@ -501,8 +881,5 @@ const styles = StyleSheet.create({
     color: '#374151',
     fontWeight: '700',
     fontSize: 15,
-  },
-  disabledButton: {
-    opacity: 0.6,
   },
 });

@@ -15,6 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { createLovedOne, updateLovedOne } from '../services/lovedOnesApi';
 import { uploadImageApi } from '../services/uploadApi';
 import { LovedOne } from '../types/lovedOnes';
+import { getModalBackdropResponder } from '../utils/modalBackdrop';
 
 const MONTHS = [
   { label: 'Ianuarie', value: 1 },
@@ -261,7 +262,7 @@ export default function AddLovedOneModal({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
-      <View style={styles.overlay}>
+      <View style={styles.overlay} {...getModalBackdropResponder(handleClose)}>
         <View style={styles.modalCard}>
           <View style={styles.handle} />
 
@@ -338,6 +339,10 @@ export default function AddLovedOneModal({
             />
 
             <Text style={styles.label}>Vârstă estimată</Text>
+            <Text style={styles.fieldHint}>
+              Completează acest câmp doar dacă nu știi anul nașterii. Dacă alegi
+              un an, vârsta se calculează automat.
+            </Text>
             <Dropdown
               style={styles.dropdown}
               containerStyle={styles.dropdownContainer}
@@ -355,7 +360,10 @@ export default function AddLovedOneModal({
               onChange={(item) => handleEstimatedAgeChange(item.value)}
             />
 
-            <Text style={styles.label}>Gen</Text>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Gen</Text>
+              <Text style={styles.optionalBadge}>Opțional</Text>
+            </View>
             <View style={styles.genderRow}>
               {['male', 'female', 'unknown'].map((g) => (
                 <Pressable
@@ -378,7 +386,10 @@ export default function AddLovedOneModal({
               ))}
             </View>
 
-            <Text style={styles.label}>Descriere</Text>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Descriere</Text>
+              <Text style={styles.optionalBadge}>Opțional</Text>
+            </View>
             <TextInput
               placeholder="Preferințe, hobby-uri..."
               style={[styles.input, styles.textArea]}
@@ -387,7 +398,10 @@ export default function AddLovedOneModal({
               onChangeText={setNotes}
             />
 
-            <Text style={styles.label}>Poză</Text>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Poză</Text>
+              <Text style={styles.optionalBadge}>Opțional</Text>
+            </View>
             <Pressable style={styles.imageButton} onPress={pickImage}>
               <Text style={styles.imageButtonText}>
                 {currentImageUrl || imageUri ? 'Schimbă poza' : 'Alege poză'}
@@ -481,6 +495,31 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#374151',
     marginBottom: 6,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 6,
+  },
+  optionalBadge: {
+    backgroundColor: '#f3f4f6',
+    borderColor: '#e5e7eb',
+    borderWidth: 1,
+    borderRadius: 8,
+    color: '#6b7280',
+    fontSize: 11,
+    fontWeight: '800',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  fieldHint: {
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+    marginBottom: 8,
   },
   input: {
     borderWidth: 1,

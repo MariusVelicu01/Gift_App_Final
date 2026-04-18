@@ -53,17 +53,26 @@ export type GiftPlanProduct = {
   affiliateUrl?: string;
   imageUrl?: string;
   price: number;
+  priceBeforePromo?: number;
   originalPrice?: number;
   discount?: number;
   discountPercent?: number;
   hasDiscount?: boolean;
+  hasPromoCode?: boolean;
+  promoCode?: string;
+  promoDiscount?: number;
+  promoDiscountPercent?: number;
+  promoNote?: string;
   currency: string;
   addedAt: string;
   isPurchased?: boolean;
   purchasedAt?: string;
   purchasedStoreName?: string;
   purchasePrice?: number;
+  purchaseImageUrl?: string;
   purchasedFromImportedStore?: boolean;
+  selectedAsCheapestOffer?: boolean;
+  manualSearchFallback?: boolean;
 };
 
 export type ProductReaction = {

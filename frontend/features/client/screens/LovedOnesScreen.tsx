@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -8,21 +8,48 @@ import {
   Image,
 } from 'react-native';
 import { useAuth } from '../../../context/AuthContext';
-import { getLovedOnes } from '../../../services/lovedOnesApi';
+import { getLovedOnesCache, subscribeLovedOnesCache, invalidateLovedOnesCache } from '../../../services/lovedOnesCache';
+import { invalidateCalendarCache } from '../../../services/calendarCache';
+import { pushAppBackEntry } from '../../../services/navigationHistory';
 import AddLovedOneModal from '../../../components/AddLovedOneModal';
 import LovedOneDetailsScreen from './LovedOneDetailsScreen';
 import { LovedOne } from '../../../types/lovedOnes';
+import { PriceAlertTarget } from '../../../types/priceAlerts';
 
-export default function LovedOnesScreen() {
+type Props = {
+  priceAlertTarget?: PriceAlertTarget | null;
+  onPriceAlertTargetConsumed?: () => void;
+  giftDetailsTarget?: {
+    lovedOneId: string;
+    giftPlanId: string;
+  } | null;
+  onGiftDetailsTargetConsumed?: () => void;
+  lovedOneTarget?: { lovedOneId: string } | null;
+  onLovedOneTargetConsumed?: () => void;
+  resetRef?: React.MutableRefObject<(() => void) | null>;
+};
+
+export default function LovedOnesScreen({
+  priceAlertTarget,
+  onPriceAlertTargetConsumed,
+  giftDetailsTarget,
+  onGiftDetailsTargetConsumed,
+  lovedOneTarget,
+  onLovedOneTargetConsumed,
+  resetRef,
+}: Props) {
   const { token } = useAuth();
   const [data, setData] = useState<LovedOne[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedLovedOneId, setSelectedLovedOneId] = useState<string | null>(null);
+  const selectedLovedOneBackRef = useRef<ReturnType<typeof pushAppBackEntry> | null>(
+    null
+  );
 
   const loadLovedOnes = async () => {
     try {
       if (!token) return;
-      const response = await getLovedOnes(token);
+      const response = await getLovedOnesCache(token);
       setData(response);
     } catch (error) {
       console.error('LOAD LOVED ONES ERROR:', error);
@@ -31,13 +58,109 @@ export default function LovedOnesScreen() {
 
   useEffect(() => {
     loadLovedOnes();
+    if (!token) return;
+    return subscribeLovedOnesCache(loadLovedOnes);
   }, [token]);
 
+  useEffect(() => {
+    if (!resetRef) return;
+
+    const resetHandler = () => {
+      setSelectedLovedOneId(null);
+      loadLovedOnes();
+      onPriceAlertTargetConsumed?.();
+      onGiftDetailsTargetConsumed?.();
+      onLovedOneTargetConsumed?.();
+    };
+
+    resetRef.current = resetHandler;
+
+    return () => {
+      if (resetRef.current === resetHandler) {
+        resetRef.current = null;
+      }
+    };
+  }, [loadLovedOnes, onGiftDetailsTargetConsumed, onLovedOneTargetConsumed, onPriceAlertTargetConsumed, resetRef]);
+
+  useEffect(() => {
+    if (priceAlertTarget) {
+      setSelectedLovedOneId(priceAlertTarget.alert.lovedOneId);
+      return;
+    }
+
+    if (giftDetailsTarget) {
+      setSelectedLovedOneId(giftDetailsTarget.lovedOneId);
+      return;
+    }
+
+    if (lovedOneTarget) {
+      setSelectedLovedOneId(lovedOneTarget.lovedOneId);
+    }
+  }, [giftDetailsTarget, lovedOneTarget, priceAlertTarget]);
+
+  useEffect(() => {
+    if (!selectedLovedOneId) return;
+
+    const entry = pushAppBackEntry(() => {
+      setSelectedLovedOneId(null);
+      loadLovedOnes();
+    });
+    selectedLovedOneBackRef.current = entry;
+
+    return () => {
+      entry.remove();
+      if (selectedLovedOneBackRef.current === entry) {
+        selectedLovedOneBackRef.current = null;
+      }
+    };
+  }, [selectedLovedOneId]);
+
+  const goBackFromDetails = () => {
+    if (selectedLovedOneBackRef.current?.goBack()) return;
+
+    setSelectedLovedOneId(null);
+    loadLovedOnes();
+  };
+
   if (selectedLovedOneId) {
+    const priceAlertMatches =
+      priceAlertTarget?.alert.lovedOneId === selectedLovedOneId;
+    const giftTargetMatches =
+      giftDetailsTarget?.lovedOneId === selectedLovedOneId;
+
+    const lovedOneTargetMatches = lovedOneTarget?.lovedOneId === selectedLovedOneId;
+
     return (
       <LovedOneDetailsScreen
+        key={selectedLovedOneId}
         lovedOneId={selectedLovedOneId}
-        onBack={() => setSelectedLovedOneId(null)}
+        onBack={goBackFromDetails}
+        initialGiftPlanId={
+          priceAlertMatches
+            ? priceAlertTarget.alert.giftPlanId
+            : giftTargetMatches
+            ? giftDetailsTarget.giftPlanId
+            : null
+        }
+        initialProductId={
+          priceAlertMatches
+            ? priceAlertTarget.alert.productId
+            : null
+        }
+        priceAlert={
+          priceAlertMatches
+            ? priceAlertTarget.alert
+            : null
+        }
+        onPriceAlertConsumed={onPriceAlertTargetConsumed}
+        onGiftPlanTargetConsumed={
+          giftTargetMatches
+            ? onGiftDetailsTargetConsumed
+            : lovedOneTargetMatches
+            ? onLovedOneTargetConsumed
+            : undefined
+        }
+        backLabel="Inapoi la persoane"
       />
     );
   }
@@ -93,6 +216,7 @@ export default function LovedOnesScreen() {
                 </Text>
               )}
             </View>
+
           </Pressable>
         ))
       )}
@@ -100,7 +224,10 @@ export default function LovedOnesScreen() {
       <AddLovedOneModal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
-        onSaved={loadLovedOnes}
+        onSaved={() => {
+          invalidateCalendarCache();
+          invalidateLovedOnesCache();
+        }}
       />
     </ScrollView>
   );

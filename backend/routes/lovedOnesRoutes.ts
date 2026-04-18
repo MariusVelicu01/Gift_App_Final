@@ -3,6 +3,7 @@ import {
   create,
   getAll,
   getOne,
+  remove,
   update,
 } from '../controllers/lovedOnesController';
 import {
@@ -33,5 +34,6 @@ router.delete('/:lovedOneId/gift-plans/:giftPlanId', removeGiftPlan);
 router.get('/:id', getOne);
 router.post('/', create);
 router.put('/:id', update);
+router.delete('/:id', remove);
 
 export default router;

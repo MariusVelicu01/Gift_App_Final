@@ -2,6 +2,7 @@ import { getGiftPlans } from './giftPlansApi';
 import { getLovedOnes } from './lovedOnesApi';
 import { GiftPlan } from '../types/giftPlans';
 import { LovedOne } from '../types/lovedOnes';
+import { clearLovedOnesCache } from './lovedOnesCache';
 
 export type CalendarCacheData = {
   lovedOnes: LovedOne[];
@@ -11,6 +12,7 @@ export type CalendarCacheData = {
 let cachedToken: string | null = null;
 let cachedCalendarData: CalendarCacheData | null = null;
 let pendingCalendarLoad: Promise<CalendarCacheData> | null = null;
+const calendarCacheListeners = new Set<() => void>();
 
 async function fetchCalendarData(token: string): Promise<CalendarCacheData> {
   const lovedOnes = await getLovedOnes(token);
@@ -67,4 +69,18 @@ export function clearCalendarCache() {
   cachedToken = null;
   cachedCalendarData = null;
   pendingCalendarLoad = null;
+}
+
+export function invalidateCalendarCache() {
+  clearCalendarCache();
+  clearLovedOnesCache();
+  calendarCacheListeners.forEach((listener) => listener());
+}
+
+export function subscribeCalendarCache(listener: () => void) {
+  calendarCacheListeners.add(listener);
+
+  return () => {
+    calendarCacheListeners.delete(listener);
+  };
 }
