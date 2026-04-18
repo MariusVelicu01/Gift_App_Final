@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../../../context/AuthContext';
 import { changePasswordRequest, updateProfileRequest } from '../../../services/authApi';
+import { C, R, S } from '../../../constants/theme';
 
 type SettingsSection = 'personalData' | 'notifications';
 
@@ -479,7 +480,7 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
           <Switch
             value={settings.notificationsEnabled}
             onValueChange={toggleAll}
-            trackColor={{ true: '#be123c' }}
+            trackColor={{ true: C.accent }}
           />
         </View>
 
@@ -581,25 +582,29 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 16,
     paddingBottom: 40,
-    backgroundColor: '#fff7ed',
+    backgroundColor: C.bg,
   },
   pageTitle: {
+    fontFamily: 'serif',
     fontSize: 28,
-    fontWeight: '900',
-    color: '#be123c',
+    fontWeight: '400',
+    color: C.text,
+    letterSpacing: -0.5,
   },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: C.surface,
     padding: 16,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#fce7e0',
+    borderRadius: R.xl,
+    borderWidth: 0.5,
+    borderColor: C.border,
     gap: 10,
+    ...S.card,
   },
   cardTitle: {
+    fontFamily: 'serif',
     fontSize: 16,
-    fontWeight: '800',
-    color: '#111827',
+    fontWeight: '400',
+    color: C.text,
     marginBottom: 2,
   },
   cardHeader: {
@@ -611,8 +616,7 @@ const styles = StyleSheet.create({
   },
   expandIcon: {
     fontSize: 16,
-    color: '#6b7280',
-    fontWeight: '800',
+    color: C.textFaint,
   },
   profileRow: {
     flexDirection: 'row',
@@ -631,33 +635,33 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#be123c',
+    backgroundColor: C.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitials: {
-    color: '#ffffff',
+    fontFamily: 'serif',
+    color: C.accent,
     fontSize: 22,
-    fontWeight: '900',
+    fontWeight: '500',
   },
   profileInfo: {
     flex: 1,
     gap: 3,
   },
   profileName: {
+    fontFamily: 'serif',
     fontSize: 17,
-    fontWeight: '900',
-    color: '#111827',
+    fontWeight: '400',
+    color: C.text,
   },
   profileEmail: {
     fontSize: 13,
-    color: '#6b7280',
-    fontWeight: '600',
+    color: C.textDim,
   },
   profileMeta: {
     fontSize: 13,
-    color: '#6b7280',
-    fontWeight: '500',
+    color: C.textFaint,
   },
   photoSection: {
     flexDirection: 'row',
@@ -673,7 +677,7 @@ const styles = StyleSheet.create({
     borderRadius: 28,
   },
   photoPreviewFallback: {
-    backgroundColor: '#be123c',
+    backgroundColor: C.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -684,40 +688,40 @@ const styles = StyleSheet.create({
   },
   photoButton: {
     flex: 1,
-    backgroundColor: '#fff7ed',
-    borderColor: '#fce7e0',
-    borderWidth: 1.5,
-    borderRadius: 10,
+    backgroundColor: C.surface2,
+    borderColor: C.border,
+    borderWidth: 0.5,
+    borderRadius: R.md,
     paddingVertical: 12,
     alignItems: 'center',
   },
   photoDeleteButton: {
-    backgroundColor: '#fef2f2',
-    borderColor: '#fecaca',
+    backgroundColor: C.dangerBg,
+    borderColor: C.border,
   },
   photoButtonHover: {
-    backgroundColor: '#fff1f2',
+    backgroundColor: C.accentSoft,
   },
   photoButtonPressed: {
     transform: [{ scale: 0.98 }],
   },
   photoButtonText: {
-    color: '#be123c',
+    color: C.accent,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   photoDeleteButtonText: {
-    color: '#b91c1c',
+    color: C.danger,
   },
   divider: {
-    height: 1,
-    backgroundColor: '#fce7e0',
+    height: 0.5,
+    backgroundColor: C.border,
     marginVertical: 4,
   },
   sectionLabel: {
     fontSize: 14,
-    fontWeight: '800',
-    color: '#374151',
+    fontWeight: '600',
+    color: C.textDim,
   },
   inputRow: {
     flexDirection: 'row',
@@ -729,18 +733,18 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   inputLabel: {
-    color: '#374151',
+    color: C.textDim,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
   },
   input: {
     minHeight: 46,
-    borderWidth: 1.5,
-    borderColor: '#fce7e0',
-    borderRadius: 10,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    borderRadius: R.md,
     paddingHorizontal: 14,
-    color: '#111827',
-    backgroundColor: '#fff7ed',
+    color: C.text,
+    backgroundColor: C.surface2,
     fontSize: 14,
   },
   flex1: {
@@ -758,34 +762,33 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
   hintText: {
-    color: '#9ca3af',
+    color: C.textFaint,
     fontSize: 12,
-    fontWeight: '500',
   },
   saveSmallButton: {
-    backgroundColor: '#be123c',
-    borderRadius: 10,
+    backgroundColor: C.accent,
+    borderRadius: R.md,
     paddingVertical: 12,
     alignItems: 'center',
     marginTop: 2,
   },
   saveSmallButtonText: {
-    color: '#ffffff',
+    color: C.accentInk,
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   disabledButton: {
     opacity: 0.6,
   },
   errorText: {
-    color: '#b91c1c',
+    color: C.danger,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   successText: {
-    color: '#15803d',
+    color: C.sage,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   switchRow: {
     flexDirection: 'row',
@@ -799,15 +802,14 @@ const styles = StyleSheet.create({
   },
   masterSwitchLabel: {
     flex: 1,
-    color: '#111827',
+    color: C.text,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   switchLabel: {
     flex: 1,
-    color: '#374151',
+    color: C.textDim,
     fontSize: 14,
-    fontWeight: '600',
   },
   switchLabelWithBadge: {
     flex: 1,
@@ -816,14 +818,14 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   disabledText: {
-    color: '#9ca3af',
+    color: C.textFaint,
   },
   notifGroupLabel: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#be123c',
+    fontSize: 11,
+    fontWeight: '600',
+    color: C.accent,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 1,
     marginTop: 2,
     marginBottom: 2,
   },
@@ -838,48 +840,47 @@ const styles = StyleSheet.create({
   daysInput: {
     width: 60,
     height: 38,
-    borderWidth: 1.5,
-    borderColor: '#fce7e0',
-    borderRadius: 8,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    borderRadius: R.sm,
     paddingHorizontal: 10,
-    color: '#111827',
-    backgroundColor: '#fff7ed',
+    color: C.text,
+    backgroundColor: C.surface2,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
     textAlign: 'center',
   },
   daysLabel: {
-    color: '#6b7280',
+    color: C.textDim,
     fontSize: 13,
-    fontWeight: '500',
   },
   priceTag: {
-    borderRadius: 6,
+    borderRadius: R.xs,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
   priceTagUp: {
-    backgroundColor: '#fee2e2',
+    backgroundColor: C.dangerBg,
   },
   priceTagDown: {
-    backgroundColor: '#dcfce7',
+    backgroundColor: C.sageBg,
   },
   priceTagText: {
     fontSize: 10,
-    fontWeight: '900',
-    color: '#374151',
+    fontWeight: '600',
+    color: C.textDim,
   },
   logoutButton: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: C.surface2,
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: R.xl,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderWidth: 0.5,
+    borderColor: C.border,
   },
   logoutButtonText: {
-    color: '#374151',
-    fontWeight: '700',
+    color: C.textDim,
+    fontWeight: '600',
     fontSize: 15,
   },
 });

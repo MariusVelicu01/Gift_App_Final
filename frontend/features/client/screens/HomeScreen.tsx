@@ -16,6 +16,7 @@ import { getPartnerStoresCache, subscribePartnerStoresCache } from '../../../ser
 import { GiftPlan } from '../../../types/giftPlans';
 import { LovedOne } from '../../../types/lovedOnes';
 import { PartnerStore, ProductImportItem } from '../../../types/partnerStores';
+import { C, R, S } from '../../../constants/theme';
 
 type Promotion = {
   product: ProductImportItem;
@@ -37,37 +38,22 @@ type Props = {
 
 function getTodayKey() {
   const today = new Date();
-  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(
-    2,
-    '0'
-  )}-${String(today.getDate()).padStart(2, '0')}`;
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 }
 
 function dateKeyToDate(dateKey?: string) {
   if (!dateKey) return null;
-
   const [year, month, day] = dateKey.split('-').map(Number);
   const date = new Date(year, month - 1, day);
-
-  if (
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day
-  ) {
-    return null;
-  }
-
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
   return date;
 }
 
 function daysUntil(dateKey?: string) {
   const date = dateKeyToDate(dateKey);
   const today = dateKeyToDate(getTodayKey());
-
   if (!date || !today) return null;
-
-  const diff = date.getTime() - today.getTime();
-  return Math.floor(diff / (24 * 60 * 60 * 1000));
+  return Math.floor((date.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
 }
 
 function formatDate(dateKey?: string) {
@@ -82,9 +68,7 @@ function formatMoney(value: number, currency = 'RON') {
 
 function openProductLink(affiliateUrl?: string, productUrl?: string) {
   const targetUrl = affiliateUrl || productUrl;
-
   if (!targetUrl) return;
-
   Linking.openURL(targetUrl).catch((error) => {
     console.error('OPEN PROMOTION LINK ERROR:', error);
   });
@@ -96,21 +80,17 @@ export default function HomeScreen({ firstName, onOpenGift }: Props) {
   const isCompact = width < 760;
   const [loading, setLoading] = useState(true);
   const [lovedOnes, setLovedOnes] = useState<LovedOne[]>([]);
-  const [giftPlansByLovedOne, setGiftPlansByLovedOne] = useState<
-    Record<string, GiftPlan[]>
-  >({});
+  const [giftPlansByLovedOne, setGiftPlansByLovedOne] = useState<Record<string, GiftPlan[]>>({});
   const [partnerStores, setPartnerStores] = useState<PartnerStore[]>([]);
 
   const load = async () => {
     try {
       if (!token) return;
-
       setLoading(true);
       const [calendarData, stores] = await Promise.all([
         getCalendarCache(token),
         getPartnerStoresCache(token),
       ]);
-
       setLovedOnes(calendarData.lovedOnes);
       setGiftPlansByLovedOne(calendarData.giftPlansByLovedOne);
       setPartnerStores(stores);
@@ -126,18 +106,12 @@ export default function HomeScreen({ firstName, onOpenGift }: Props) {
     if (!token) return;
     const unsubCalendar = subscribeCalendarCache(load);
     const unsubStores = subscribePartnerStoresCache(load);
-    return () => {
-      unsubCalendar();
-      unsubStores();
-    };
+    return () => { unsubCalendar(); unsubStores(); };
   }, [token]);
 
   const allGiftPlans = useMemo(() => {
     return lovedOnes.flatMap((lovedOne) =>
-      (giftPlansByLovedOne[lovedOne.id] || []).map((giftPlan) => ({
-        lovedOne,
-        giftPlan,
-      }))
+      (giftPlansByLovedOne[lovedOne.id] || []).map((giftPlan) => ({ lovedOne, giftPlan }))
     );
   }, [giftPlansByLovedOne, lovedOnes]);
 
@@ -150,32 +124,17 @@ export default function HomeScreen({ firstName, onOpenGift }: Props) {
     return activeGiftPlans
       .map((entry) => ({
         ...entry,
-        daysLeft: daysUntil(
-          entry.giftPlan.purchaseDeadlineDate || entry.giftPlan.deadlineDate
-        ),
+        daysLeft: daysUntil(entry.giftPlan.purchaseDeadlineDate || entry.giftPlan.deadlineDate),
       }))
-      .filter(
-        (entry) =>
-          entry.giftPlan.status === 'planned' &&
-          entry.daysLeft !== null &&
-          entry.daysLeft <= 14
-      )
+      .filter((entry) => entry.giftPlan.status === 'planned' && entry.daysLeft !== null && entry.daysLeft <= 14)
       .sort((a, b) => Number(a.daysLeft) - Number(b.daysLeft))
       .slice(0, 4);
   }, [activeGiftPlans]);
 
   const soonOfferPlans = useMemo(() => {
     return activeGiftPlans
-      .map((entry) => ({
-        ...entry,
-        daysLeft: daysUntil(entry.giftPlan.deadlineDate),
-      }))
-      .filter(
-        (entry) =>
-          entry.daysLeft !== null &&
-          entry.daysLeft >= 0 &&
-          entry.daysLeft <= 30
-      )
+      .map((entry) => ({ ...entry, daysLeft: daysUntil(entry.giftPlan.deadlineDate) }))
+      .filter((entry) => entry.daysLeft !== null && entry.daysLeft >= 0 && entry.daysLeft <= 30)
       .sort((a, b) => Number(a.daysLeft) - Number(b.daysLeft))
       .slice(0, 4);
   }, [activeGiftPlans]);
@@ -187,39 +146,18 @@ export default function HomeScreen({ firstName, onOpenGift }: Props) {
           const currentPrice = Number(product.price?.current);
           const discountPercent = Number(product.price?.discountPercent || 0);
           const originalPrice = Number(product.price?.original);
-
-          if (
-            !Number.isFinite(currentPrice) ||
-            currentPrice <= 0 ||
-            !product.price?.hasDiscount ||
-            discountPercent <= 0
-          ) {
-            return null;
-          }
-
-          return {
-            product,
-            store,
-            currentPrice,
-            originalPrice: Number.isFinite(originalPrice)
-              ? originalPrice
-              : undefined,
-            discountPercent,
-          };
+          if (!Number.isFinite(currentPrice) || currentPrice <= 0 || !product.price?.hasDiscount || discountPercent <= 0) return null;
+          return { product, store, currentPrice, originalPrice: Number.isFinite(originalPrice) ? originalPrice : undefined, discountPercent };
         })
       )
       .filter(Boolean) as Promotion[];
-
-    return [...allDiscounted]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 5);
+    return [...allDiscounted].sort(() => Math.random() - 0.5).slice(0, 5);
   }, [partnerStores]);
-
 
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color={C.accent} />
         <Text style={styles.loadingText}>Se incarca pagina de start...</Text>
       </View>
     );
@@ -227,24 +165,29 @@ export default function HomeScreen({ firstName, onOpenGift }: Props) {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.heroBanner} />
-
-      <View>
-        <Text style={styles.title}>🎁 Acasa</Text>
-        <Text style={styles.subtitle}>Bun venit, {firstName}.</Text>
+      {/* Hero greeting */}
+      <View style={styles.hero}>
+        <Text style={styles.heroKicker}>Bun venit</Text>
+        <Text style={styles.heroTitle}>
+          {firstName},{' '}
+          <Text style={styles.heroAccent}>{activeGiftPlans.length} cadouri active</Text>
+        </Text>
+        <Text style={styles.heroSub}>asteapta atentia ta.</Text>
       </View>
 
-      <View style={styles.summaryCard}>
-        <Text style={styles.summaryValue}>{activeGiftPlans.length}</Text>
-        <Text style={styles.summaryLabel}>🎀 cadouri active</Text>
+      {/* Stat card */}
+      <View style={styles.statCard}>
+        <Text style={styles.statValue}>{activeGiftPlans.length}</Text>
+        <Text style={styles.statLabel}>cadouri active</Text>
       </View>
 
+      {/* Buy soon */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>🛒 Ai de cumparat in curand</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.cardTitle}>De cumparat in curand</Text>
+        </View>
         {urgentBuyPlans.length === 0 ? (
-          <Text style={styles.cardText}>
-            Nu ai deadline-uri de cumparare urgente in urmatoarele 14 zile.
-          </Text>
+          <Text style={styles.cardText}>Nu ai deadline-uri de cumparare urgente in urmatoarele 14 zile.</Text>
         ) : (
           urgentBuyPlans.map(({ lovedOne, giftPlan, daysLeft }) => (
             <Pressable
@@ -254,34 +197,31 @@ export default function HomeScreen({ firstName, onOpenGift }: Props) {
                 hovered && styles.giftRowHover,
                 pressed && styles.giftRowPressed,
               ]}
-              onPress={() =>
-                onOpenGift?.({
-                  lovedOneId: lovedOne.id,
-                  giftPlanId: giftPlan.id,
-                })
-              }
+              onPress={() => onOpenGift?.({ lovedOneId: lovedOne.id, giftPlanId: giftPlan.id })}
             >
               <View style={styles.giftInfo}>
                 <Text style={styles.giftTitle}>{giftPlan.purpose}</Text>
                 <Text style={styles.giftMeta}>
-                  {lovedOne.name} - cumpara pana la{' '}
-                  {formatDate(giftPlan.purchaseDeadlineDate || giftPlan.deadlineDate)}
+                  {lovedOne.name} · pana la {formatDate(giftPlan.purchaseDeadlineDate || giftPlan.deadlineDate)}
                 </Text>
               </View>
-              <Text style={styles.buyBadge}>
-                {Number(daysLeft) < 0 ? 'intarziat' : `${daysLeft} zile`}
-              </Text>
+              <View style={styles.buyBadge}>
+                <Text style={styles.buyBadgeText}>
+                  {Number(daysLeft) < 0 ? 'intarziat' : `${daysLeft}z`}
+                </Text>
+              </View>
             </Pressable>
           ))
         )}
       </View>
 
+      {/* Offer soon */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>🎉 Urmeaza sa oferi</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.cardTitle}>Urmeaza sa oferi</Text>
+        </View>
         {soonOfferPlans.length === 0 ? (
-          <Text style={styles.cardText}>
-            Nu ai cadouri de oferit in urmatoarele 30 de zile.
-          </Text>
+          <Text style={styles.cardText}>Nu ai cadouri de oferit in urmatoarele 30 de zile.</Text>
         ) : (
           soonOfferPlans.map(({ lovedOne, giftPlan, daysLeft }) => (
             <Pressable
@@ -291,37 +231,35 @@ export default function HomeScreen({ firstName, onOpenGift }: Props) {
                 hovered && styles.giftRowHover,
                 pressed && styles.giftRowPressed,
               ]}
-              onPress={() =>
-                onOpenGift?.({
-                  lovedOneId: lovedOne.id,
-                  giftPlanId: giftPlan.id,
-                })
-              }
+              onPress={() => onOpenGift?.({ lovedOneId: lovedOne.id, giftPlanId: giftPlan.id })}
             >
               <View style={styles.giftInfo}>
                 <Text style={styles.giftTitle}>{giftPlan.purpose}</Text>
                 <Text style={styles.giftMeta}>
-                  {lovedOne.name} - ofera pe {formatDate(giftPlan.deadlineDate)}
+                  {lovedOne.name} · pe {formatDate(giftPlan.deadlineDate)}
                 </Text>
               </View>
-              <Text style={styles.offerBadge}>
-                {daysLeft === 0 ? 'azi' : `${daysLeft} zile`}
-              </Text>
+              <View style={styles.offerBadge}>
+                <Text style={styles.offerBadgeText}>
+                  {daysLeft === 0 ? 'azi' : `${daysLeft}z`}
+                </Text>
+              </View>
             </Pressable>
           ))
         )}
       </View>
 
+      {/* Promotions */}
       <View style={styles.card}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.cardTitle}>🏷️ Promotii din magazine partenere</Text>
-          <Text style={styles.sectionMeta}>{promotions.length} oferte</Text>
+          <Text style={styles.cardTitle}>Promotii din magazine partenere</Text>
+          <View style={styles.countPill}>
+            <Text style={styles.countPillText}>{promotions.length} oferte</Text>
+          </View>
         </View>
 
         {promotions.length === 0 ? (
-          <Text style={styles.cardText}>
-            Nu sunt promotii importate momentan din magazinele partenere.
-          </Text>
+          <Text style={styles.cardText}>Nu sunt promotii importate momentan.</Text>
         ) : (
           promotions.map((promotion, index) => (
             <Pressable
@@ -332,47 +270,31 @@ export default function HomeScreen({ firstName, onOpenGift }: Props) {
                 hovered && styles.promotionRowHover,
                 pressed && styles.promotionRowPressed,
               ]}
-              onPress={() =>
-                openProductLink(
-                  promotion.product.affiliateUrl,
-                  promotion.product.productUrl
-                )
-              }
-              disabled={
-                !promotion.product.affiliateUrl && !promotion.product.productUrl
-              }
+              onPress={() => openProductLink(promotion.product.affiliateUrl, promotion.product.productUrl)}
+              disabled={!promotion.product.affiliateUrl && !promotion.product.productUrl}
             >
               {promotion.product.imageUrl ? (
-                <Image
-                  source={{ uri: promotion.product.imageUrl }}
-                  style={styles.productImage}
-                />
+                <Image source={{ uri: promotion.product.imageUrl }} style={styles.productImage} />
               ) : (
                 <View style={styles.productPlaceholder} />
               )}
 
               <View style={styles.promotionInfo}>
-                <Text style={styles.productName} numberOfLines={1}>
-                  {promotion.product.name}
-                </Text>
+                <Text style={styles.productName} numberOfLines={1}>{promotion.product.name}</Text>
                 <Text style={styles.productMeta} numberOfLines={1}>
-                  {promotion.store.displayName}
-                  {promotion.product.brand ? ` - ${promotion.product.brand}` : ''}
+                  {promotion.store.displayName}{promotion.product.brand ? ` · ${promotion.product.brand}` : ''}
                 </Text>
                 {!!promotion.product.category && (
                   <Text style={styles.productMeta} numberOfLines={1}>
-                    {promotion.product.category}
-                    {promotion.product.subcategory
-                      ? ` / ${promotion.product.subcategory}`
-                      : ''}
+                    {promotion.product.category}{promotion.product.subcategory ? ` / ${promotion.product.subcategory}` : ''}
                   </Text>
                 )}
               </View>
 
               <View style={styles.priceBlock}>
-                <Text style={styles.discountBadge}>
-                  -{Math.round(promotion.discountPercent)}%
-                </Text>
+                <View style={styles.discountBadge}>
+                  <Text style={styles.discountBadgeText}>-{Math.round(promotion.discountPercent)}%</Text>
+                </View>
                 <Text style={styles.productPrice}>
                   {formatMoney(promotion.currentPrice, promotion.store.currency)}
                 </Text>
@@ -386,7 +308,6 @@ export default function HomeScreen({ firstName, onOpenGift }: Props) {
           ))
         )}
       </View>
-
     </ScrollView>
   );
 }
@@ -394,113 +315,136 @@ export default function HomeScreen({ firstName, onOpenGift }: Props) {
 const styles = StyleSheet.create({
   container: {
     padding: 16,
-    gap: 16,
+    gap: 14,
     paddingBottom: 32,
-    backgroundColor: '#fff7ed',
+    backgroundColor: C.bg,
   },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
+    backgroundColor: C.bg,
   },
   loadingText: {
-    color: '#9ca3af',
+    color: C.textDim,
     marginTop: 10,
     fontWeight: '500',
   },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#be123c',
-    marginBottom: 2,
+
+  // Hero
+  hero: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
   },
-  subtitle: {
-    color: '#9ca3af',
-    fontSize: 14,
+  heroKicker: {
+    fontSize: 11,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: C.textFaint,
     fontWeight: '500',
-    marginTop: 2,
-  },
-  heroBanner: {
-    width: '100%',
-    height: 180,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#fce7e0',
-    borderStyle: 'dashed',
-    backgroundColor: '#fff1f2',
-  },
-  summaryCard: {
-    borderWidth: 1,
-    borderColor: '#fce7e0',
-    borderRadius: 12,
-    backgroundColor: '#fff1f2',
-    padding: 14,
-    shadowColor: '#be123c',
-    shadowOpacity: 0.07,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
-  },
-  summaryValue: {
-    color: '#be123c',
-    fontSize: 22,
-    fontWeight: '800',
     marginBottom: 4,
   },
-  summaryLabel: {
-    color: '#9ca3af',
-    fontSize: 11,
-    fontWeight: '600',
+  heroTitle: {
+    fontFamily: 'serif',
+    fontSize: 32,
+    fontWeight: '400',
+    color: C.text,
+    lineHeight: 38,
+    letterSpacing: -0.5,
   },
-  card: {
-    backgroundColor: '#fff',
+  heroAccent: {
+    fontFamily: 'serif',
+    fontStyle: 'italic',
+    color: C.accent,
+  },
+  heroSub: {
+    fontFamily: 'serif',
+    fontSize: 32,
+    fontWeight: '400',
+    color: C.text,
+    lineHeight: 38,
+    letterSpacing: -0.5,
+  },
+
+  // Stat card
+  statCard: {
+    backgroundColor: C.accent,
     padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#fce7e0',
-    shadowColor: '#be123c',
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 1,
+    borderRadius: R.xl,
+    gap: 4,
+  },
+  statValue: {
+    fontFamily: 'serif',
+    fontSize: 36,
+    fontWeight: '400',
+    color: C.accentInk,
+    lineHeight: 40,
+    letterSpacing: -0.5,
+  },
+  statLabel: {
+    fontSize: 11,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.78)',
+    fontWeight: '500',
+  },
+
+  // Cards
+  card: {
+    backgroundColor: C.surface,
+    padding: 16,
+    borderRadius: R.xl,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    ...S.card,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   cardTitle: {
     flex: 1,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  sectionMeta: {
-    color: '#16a34a',
-    fontSize: 12,
-    fontWeight: '700',
+    fontFamily: 'serif',
+    fontSize: 18,
+    fontWeight: '400',
+    color: C.text,
+    letterSpacing: -0.2,
   },
   cardText: {
     fontSize: 14,
     lineHeight: 21,
-    color: '#9ca3af',
+    color: C.textDim,
   },
+  countPill: {
+    backgroundColor: C.surface2,
+    borderRadius: R.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  countPillText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: C.textDim,
+  },
+
+  // Gift rows
   giftRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#f9f1ee',
+    borderTopWidth: 0.5,
+    borderTopColor: C.border,
     paddingVertical: 10,
     paddingHorizontal: 4,
-    borderRadius: 8,
+    borderRadius: R.sm,
   },
   giftRowHover: {
-    backgroundColor: '#fff1f2',
+    backgroundColor: C.accentSoft,
     transform: [{ translateY: -1 }],
   },
   giftRowPressed: {
@@ -511,51 +455,55 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   giftTitle: {
-    color: '#111827',
+    color: C.text,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '500',
     marginBottom: 3,
   },
   giftMeta: {
-    color: '#9ca3af',
-    fontSize: 13,
-    fontWeight: '500',
+    color: C.textDim,
+    fontSize: 12,
+    fontWeight: '400',
   },
   buyBadge: {
-    overflow: 'hidden',
-    borderRadius: 20,
-    backgroundColor: '#dbeafe',
-    color: '#1d4ed8',
-    fontSize: 11,
-    fontWeight: '700',
+    backgroundColor: C.warnBg,
+    borderRadius: R.pill,
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 4,
+  },
+  buyBadgeText: {
+    color: C.warn,
+    fontSize: 11,
+    fontWeight: '600',
   },
   offerBadge: {
-    overflow: 'hidden',
-    borderRadius: 20,
-    backgroundColor: '#ccfbf1',
-    color: '#0f766e',
-    fontSize: 11,
-    fontWeight: '700',
+    backgroundColor: C.sageBg,
+    borderRadius: R.pill,
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 4,
   },
+  offerBadgeText: {
+    color: C.sage,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+
+  // Promotions
   promotionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#f9f1ee',
+    gap: 12,
+    borderTopWidth: 0.5,
+    borderTopColor: C.border,
     paddingVertical: 10,
     paddingHorizontal: 2,
-    borderRadius: 8,
+    borderRadius: R.sm,
   },
   promotionRowCompact: {
     alignItems: 'flex-start',
   },
   promotionRowHover: {
-    backgroundColor: '#fff1f2',
+    backgroundColor: C.accentSoft,
     transform: [{ translateY: -1 }],
   },
   promotionRowPressed: {
@@ -564,29 +512,29 @@ const styles = StyleSheet.create({
   productImage: {
     width: 56,
     height: 56,
-    borderRadius: 10,
-    backgroundColor: '#f3f4f6',
+    borderRadius: R.md,
+    backgroundColor: C.surface2,
   },
   productPlaceholder: {
     width: 56,
     height: 56,
-    borderRadius: 10,
-    backgroundColor: '#f3f4f6',
+    borderRadius: R.md,
+    backgroundColor: C.surface2,
   },
   promotionInfo: {
     flex: 1,
     minWidth: 0,
   },
   productName: {
-    color: '#111827',
-    fontSize: 14,
-    fontWeight: '700',
+    color: C.text,
+    fontSize: 13,
+    fontWeight: '500',
     marginBottom: 3,
   },
   productMeta: {
-    color: '#9ca3af',
+    color: C.textDim,
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '400',
     marginTop: 2,
   },
   priceBlock: {
@@ -595,24 +543,26 @@ const styles = StyleSheet.create({
     maxWidth: 110,
   },
   discountBadge: {
-    overflow: 'hidden',
-    borderRadius: 20,
-    backgroundColor: '#fee2e2',
-    color: '#dc2626',
-    fontSize: 11,
-    fontWeight: '700',
+    backgroundColor: C.accentSoft,
+    borderRadius: R.pill,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
+  discountBadgeText: {
+    color: C.accent,
+    fontSize: 11,
+    fontWeight: '600',
+  },
   productPrice: {
-    color: '#16a34a',
+    fontFamily: 'serif',
+    color: C.text,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
   },
   originalPrice: {
-    color: '#d1d5db',
+    color: C.textFaint,
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '400',
     textDecorationLine: 'line-through',
   },
 });

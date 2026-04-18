@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { C, R, S } from '../../../constants/theme';
 
 import HomeScreen from './HomeScreen';
 import PartnerStoresScreen from './PartnerStoresScreen';
@@ -108,8 +109,8 @@ function TabButton({ label, isActive, onPress }: TabButtonProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f9fafb',
-    borderRadius: 16,
+    backgroundColor: C.bg,
+    borderRadius: R.xl,
     overflow: 'hidden',
   },
   content: {
@@ -121,27 +122,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 8,
     paddingVertical: 10,
-    backgroundColor: '#ffffff',
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
+    backgroundColor: C.surface,
+    borderTopWidth: 0.5,
+    borderTopColor: C.border,
   },
   tabButton: {
     flex: 1,
     marginHorizontal: 4,
     paddingVertical: 10,
-    borderRadius: 10,
+    borderRadius: R.pill,
     alignItems: 'center',
     justifyContent: 'center',
   },
   tabButtonActive: {
-    backgroundColor: '#111827',
+    backgroundColor: C.accent,
   },
   tabButtonText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#6b7280',
+    color: C.textDim,
   },
   tabButtonTextActive: {
-    color: '#ffffff',
+    color: C.accentInk,
   },
 });

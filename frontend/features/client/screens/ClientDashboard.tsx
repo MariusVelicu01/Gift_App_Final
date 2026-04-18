@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  Platform,
   Pressable,
   SafeAreaView,
   StyleSheet,
@@ -8,6 +9,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { C } from '../../../constants/theme';
 import HomeScreen from './HomeScreen';
 import LovedOnesScreen from './LovedOnesScreen';
 import CalendarScreen from './CalendarScreen';
@@ -632,19 +634,21 @@ export default function ClientDashboard({ firstName, onLogout }: Props) {
       <View style={[styles.container, isWide && styles.containerWide]}>
         <View style={styles.content}>{currentScreen}</View>
 
-        <View style={styles.bottomNav}>
-          {TABS.map((tab) => (
-            <TabButton
-              key={tab.id}
-              icon={tab.icon}
-              label={tab.label}
-              isActive={activeTab === tab.id}
-              badgeCount={
-                tab.id === 'notifications' ? unreadNotificationsCount : 0
-              }
-              onPress={() => navigateToTab(tab.id)}
-            />
-          ))}
+        <View style={styles.bottomNavOuter}>
+          <View style={styles.bottomNav}>
+            {TABS.map((tab) => (
+              <TabButton
+                key={tab.id}
+                icon={tab.icon}
+                label={tab.label}
+                isActive={activeTab === tab.id}
+                badgeCount={
+                  tab.id === 'notifications' ? unreadNotificationsCount : 0
+                }
+                onPress={() => navigateToTab(tab.id)}
+              />
+            ))}
+          </View>
         </View>
       </View>
     </SafeAreaView>
@@ -669,13 +673,13 @@ function TabButton({
       onPress={onPress}
       style={({ hovered, pressed }) => [
         styles.tabButton,
-        hovered && styles.tabButtonHover,
+        hovered && !isActive && styles.tabButtonHover,
         pressed && styles.tabButtonPressed,
         isActive && styles.tabButtonActive,
       ]}
     >
       <View style={styles.tabIconWrap}>
-        <Text style={styles.tabIcon}>{icon}</Text>
+        <Text style={[styles.tabIcon, isActive && styles.tabIconActive]}>{icon}</Text>
         {badgeCount > 0 && (
           <View style={styles.tabBadge}>
             <Text style={styles.tabBadgeText}>
@@ -694,45 +698,56 @@ function TabButton({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#fff7ed',
+    backgroundColor: C.bg,
   },
   container: {
     flex: 1,
     width: '100%',
     minHeight: 500,
-    backgroundColor: '#fff7ed',
+    backgroundColor: C.bg,
   },
   containerWide: {},
   content: {
     flex: 1,
   },
+  bottomNavOuter: {
+    paddingHorizontal: 12,
+    paddingBottom: Platform.OS === 'ios' ? 8 : 10,
+    paddingTop: 6,
+    backgroundColor: C.bg,
+  },
   bottomNav: {
     flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: '#fce7e0',
-    backgroundColor: '#ffffff',
-    paddingTop: 8,
-    paddingBottom: 12,
+    backgroundColor: C.surface,
+    borderRadius: 22,
+    paddingVertical: 6,
     paddingHorizontal: 4,
     justifyContent: 'space-between',
+    borderWidth: 0.5,
+    borderColor: C.border,
+    shadowColor: '#1F1B16',
+    shadowOpacity: 0.07,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
   tabButton: {
     flex: 1,
     marginHorizontal: 2,
     paddingVertical: 6,
     paddingHorizontal: 4,
-    borderRadius: 10,
+    borderRadius: 16,
     alignItems: 'center',
     gap: 3,
   },
   tabButtonHover: {
-    backgroundColor: '#fff1f2',
+    backgroundColor: C.surface2,
   },
   tabButtonPressed: {
     transform: [{ scale: 0.95 }],
   },
   tabButtonActive: {
-    backgroundColor: '#be123c',
+    backgroundColor: C.accent,
   },
   tabIconWrap: {
     minWidth: 28,
@@ -743,33 +758,36 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 22,
   },
+  tabIconActive: {
+    // emoji color can't be changed; tint handled by active bg
+  },
   tabBadge: {
     position: 'absolute',
     top: -5,
     right: -7,
-    minWidth: 18,
-    height: 18,
+    minWidth: 17,
+    height: 17,
     borderRadius: 9,
-    backgroundColor: '#f97316',
+    backgroundColor: C.accent,
     borderWidth: 2,
-    borderColor: '#ffffff',
+    borderColor: C.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
   },
   tabBadgeText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '900',
+    color: C.accentInk,
+    fontSize: 9,
+    fontWeight: '700',
   },
   tabLabel: {
     fontSize: 10,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontWeight: '500',
+    color: C.textDim,
     letterSpacing: 0.2,
   },
   tabLabelActive: {
-    color: '#ffffff',
+    color: C.accentInk,
     fontWeight: '700',
   },
 });

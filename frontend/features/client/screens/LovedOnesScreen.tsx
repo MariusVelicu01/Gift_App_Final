@@ -15,6 +15,7 @@ import AddLovedOneModal from '../../../components/AddLovedOneModal';
 import LovedOneDetailsScreen from './LovedOneDetailsScreen';
 import { LovedOne } from '../../../types/lovedOnes';
 import { PriceAlertTarget } from '../../../types/priceAlerts';
+import { C, R, S } from '../../../constants/theme';
 
 type Props = {
   priceAlertTarget?: PriceAlertTarget | null;
@@ -167,11 +168,16 @@ export default function LovedOnesScreen({
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>🎁 Persoane dragi</Text>
-
-      <Pressable style={styles.addButton} onPress={() => setModalVisible(true)}>
-        <Text style={styles.addButtonText}>+ Adaugă persoană</Text>
-      </Pressable>
+      {/* Header */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.title}>Persoane dragi</Text>
+          <Text style={styles.subtitle}>{data.length} persoane urmarite</Text>
+        </View>
+        <Pressable style={styles.addButton} onPress={() => setModalVisible(true)}>
+          <Text style={styles.addButtonText}>+ Adaugă</Text>
+        </Pressable>
+      </View>
 
       {data.length === 0 ? (
         <View style={styles.emptyCard}>
@@ -196,27 +202,23 @@ export default function LovedOnesScreen({
             ) : (
               <View style={styles.imagePlaceholder}>
                 <Text style={styles.imagePlaceholderText}>
-                  {item.name?.charAt(0)?.toUpperCase() || '?'}
+                  {item.name?.slice(0, 2)?.toUpperCase() || '?'}
                 </Text>
               </View>
             )}
 
             <View style={styles.infoBlock}>
               <Text style={styles.name}>{item.name}</Text>
-
               <Text style={styles.meta}>
-                Data: {String(item.day).padStart(2, '0')}.
-                {String(item.month).padStart(2, '0')}
+                {String(item.day).padStart(2, '0')}.{String(item.month).padStart(2, '0')}
                 {item.year ? `.${item.year}` : ''}
               </Text>
-
               {!!item.estimatedAgeRange && (
-                <Text style={styles.meta}>
-                  Vârstă estimată: {item.estimatedAgeRange}
-                </Text>
+                <Text style={styles.meta}>Vârstă: {item.estimatedAgeRange}</Text>
               )}
             </View>
 
+            <Text style={styles.chevron}>›</Text>
           </Pressable>
         ))
       )}
@@ -236,102 +238,120 @@ export default function LovedOnesScreen({
 const styles = StyleSheet.create({
   container: {
     padding: 16,
-    gap: 14,
-    backgroundColor: '#fff7ed',
+    gap: 12,
+    backgroundColor: C.bg,
     paddingBottom: 32,
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
   title: {
+    fontFamily: 'serif',
     fontSize: 28,
-    fontWeight: '800',
-    color: '#be123c',
-    marginBottom: 2,
+    fontWeight: '400',
+    color: C.text,
+    letterSpacing: -0.5,
+  },
+  subtitle: {
+    fontSize: 13,
+    color: C.textDim,
+    marginTop: 3,
   },
   addButton: {
-    backgroundColor: '#be123c',
-    paddingVertical: 14,
-    borderRadius: 12,
+    backgroundColor: C.accent,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: R.pill,
     alignItems: 'center',
   },
   addButtonText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 15,
+    color: C.accentInk,
+    fontWeight: '600',
+    fontSize: 13,
   },
   emptyCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#fce7e0',
-    padding: 24,
+    backgroundColor: C.surface,
+    borderRadius: R.xl,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    borderStyle: 'dashed',
+    padding: 28,
     alignItems: 'center',
   },
   emptyTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111827',
+    fontFamily: 'serif',
+    fontSize: 18,
+    fontWeight: '400',
+    color: C.text,
     marginBottom: 6,
     textAlign: 'center',
   },
   emptyText: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: C.textDim,
     textAlign: 'center',
     lineHeight: 20,
   },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#fce7e0',
+    backgroundColor: C.surface,
+    borderRadius: R.xl,
+    borderWidth: 0.5,
+    borderColor: C.border,
     padding: 14,
     flexDirection: 'row',
     gap: 14,
-    alignItems: 'flex-start',
-    shadowColor: '#be123c',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
+    alignItems: 'center',
+    ...S.card,
   },
   cardHover: {
-    backgroundColor: '#fff1f2',
+    backgroundColor: C.surface2,
     transform: [{ translateY: -2 }],
   },
   cardPressed: {
     transform: [{ scale: 0.99 }],
   },
   image: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
   },
   imagePlaceholder: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#ffe4e6',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: C.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   imagePlaceholderText: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#be123c',
+    fontFamily: 'serif',
+    fontSize: 18,
+    fontWeight: '500',
+    color: C.accent,
   },
   infoBlock: {
     flex: 1,
     justifyContent: 'center',
   },
   name: {
+    fontFamily: 'serif',
     fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 5,
+    fontWeight: '400',
+    color: C.text,
+    marginBottom: 4,
+    letterSpacing: -0.2,
   },
   meta: {
-    fontSize: 13,
-    color: '#9ca3af',
-    marginBottom: 3,
-    fontWeight: '500',
+    fontSize: 12,
+    color: C.textDim,
+    marginBottom: 2,
+  },
+  chevron: {
+    fontSize: 22,
+    color: C.textFaint,
+    lineHeight: 26,
   },
 });
