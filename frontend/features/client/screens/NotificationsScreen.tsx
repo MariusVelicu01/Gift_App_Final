@@ -14,7 +14,6 @@ import { C, R, S } from '../../../constants/theme';
 type Props = {
   alerts: AppNotification[];
   onOpenAlert: (alert: AppNotification) => void;
-  onRefresh: () => void;
   onMarkAllRead: () => void;
   onDeleteAlerts: (mode: 'read' | 'all') => void;
 };
@@ -73,7 +72,6 @@ function getDeadlineText(alert: DeadlineAlert) {
 export default function NotificationsScreen({
   alerts,
   onOpenAlert,
-  onRefresh,
   onMarkAllRead,
   onDeleteAlerts,
 }: Props) {
@@ -90,23 +88,10 @@ export default function NotificationsScreen({
     <>
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.headerRow}>
-          <View style={styles.headerTextBlock}>
-            <Text style={styles.title}>Notificari</Text>
-            <Text style={styles.subtitle}>
-              Alerte preturi, remindere cadouri si zile de nastere.
-            </Text>
-          </View>
-
-          <Pressable
-            style={({ hovered, pressed }) => [
-              styles.refreshButton,
-              hovered && styles.refreshButtonHover,
-              pressed && styles.refreshButtonPressed,
-            ]}
-            onPress={onRefresh}
-          >
-            <Text style={styles.refreshButtonText}>Actualizeaza</Text>
-          </Pressable>
+          <Text style={styles.title}>Notificari</Text>
+          <Text style={styles.subtitle}>
+            Alerte preturi, remindere cadouri si zile de nastere.
+          </Text>
         </View>
 
         <View style={styles.summaryRow}>
@@ -125,7 +110,7 @@ export default function NotificationsScreen({
             style={({ hovered, pressed }) => [
               styles.secondaryActionButton,
               hovered && styles.secondaryActionButtonHover,
-              pressed && styles.refreshButtonPressed,
+              pressed && styles.actionButtonPressed,
               unreadCount === 0 && styles.disabledButton,
             ]}
             onPress={onMarkAllRead}
@@ -140,7 +125,7 @@ export default function NotificationsScreen({
             style={({ hovered, pressed }) => [
               styles.deleteButton,
               hovered && styles.deleteButtonHover,
-              pressed && styles.refreshButtonPressed,
+              pressed && styles.actionButtonPressed,
               alerts.length === 0 && styles.disabledButton,
             ]}
             onPress={() => setDeleteConfirmVisible(true)}
@@ -414,13 +399,7 @@ const styles = StyleSheet.create({
     backgroundColor: C.bg,
   },
   headerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  headerTextBlock: {
-    flex: 1,
+    gap: 4,
   },
   title: {
     fontFamily: 'serif',
@@ -433,26 +412,6 @@ const styles = StyleSheet.create({
     color: C.textDim,
     fontSize: 14,
     lineHeight: 20,
-    marginTop: 4,
-  },
-  refreshButton: {
-    backgroundColor: C.surface,
-    borderColor: C.border,
-    borderRadius: R.md,
-    borderWidth: 0.5,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  refreshButtonHover: {
-    backgroundColor: C.accentSoft,
-  },
-  refreshButtonPressed: {
-    transform: [{ scale: 0.98 }],
-  },
-  refreshButtonText: {
-    color: C.accent,
-    fontSize: 12,
-    fontWeight: '600',
   },
   summaryRow: {
     flexDirection: 'row',
@@ -523,6 +482,9 @@ const styles = StyleSheet.create({
     color: C.danger,
     fontSize: 13,
     fontWeight: '600',
+  },
+  actionButtonPressed: {
+    transform: [{ scale: 0.98 }],
   },
   disabledButton: {
     opacity: 0.45,

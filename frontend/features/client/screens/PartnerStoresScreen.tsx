@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -13,6 +13,7 @@ import {
 import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
 import { getPartnerStoresCache, subscribePartnerStoresCache } from '../../../services/partnerStoresCache';
+import { pushAppBackEntry } from '../../../services/navigationHistory';
 import { PartnerStore } from '../../../types/partnerStores';
 import { C, R, S } from '../../../constants/theme';
 
@@ -45,6 +46,14 @@ function openStoreLink(domain?: string) {
   });
 }
 
+function formatDateKey(value?: string) {
+  const match = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(String(value || ''));
+
+  if (!match) return '-';
+
+  return `${match[3]}.${match[2]}.${match[1]}`;
+}
+
 function shuffleProducts<T>(items: T[]) {
   return [...items].sort(() => Math.random() - 0.5);
 }
@@ -74,17 +83,40 @@ export default function PartnerStoresScreen({ resetRef }: Props) {
   const [stores, setStores] = useState<PartnerStore[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStore, setSelectedStore] = useState<PartnerStore | null>(null);
-  const [featuredProducts, setFeaturedProducts] = useState<PartnerStore['products']>(
-    []
-  );
+  const [featuredProducts, setFeaturedProducts] = useState<PartnerStore['products']>([]);
   const [searchText, setSearchText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const selectedStoreBackRef = useRef<ReturnType<typeof pushAppBackEntry> | null>(null);
+
+  useEffect(() => {
+    if (!selectedStore) return;
+
+    const entry = pushAppBackEntry(() => {
+      setSelectedStore(null);
+    });
+    selectedStoreBackRef.current = entry;
+
+    return () => {
+      entry.remove();
+      if (selectedStoreBackRef.current === entry) {
+        selectedStoreBackRef.current = null;
+      }
+    };
+  }, [selectedStore?.id]);
+
+  const goBackFromStore = () => {
+    if (selectedStoreBackRef.current?.goBack()) return;
+    setSelectedStore(null);
+  };
 
   useEffect(() => {
     if (!resetRef) return;
 
     const resetHandler = () => {
+      selectedStoreBackRef.current?.remove();
+      selectedStoreBackRef.current = null;
       setSelectedStore(null);
+      setFeaturedProducts([]);
       setSearchText('');
       setSelectedCategory('all');
     };
@@ -102,7 +134,7 @@ export default function PartnerStoresScreen({ resetRef }: Props) {
     try {
       if (!token) return;
       setLoading(true);
-      const data = await getPartnerStoresCache(token);
+      const data = await getPartnerStoresCache(token, { forceRefresh: true });
       setStores(data);
     } catch (error) {
       console.error('LOAD PARTNER STORES ERROR:', error);
@@ -184,29 +216,31 @@ export default function PartnerStoresScreen({ resetRef }: Props) {
   };
 
   const openStoreDetails = (store: PartnerStore) => {
-    setFeaturedProducts(pickFeaturedProducts(store));
     setSelectedStore(store);
+    setFeaturedProducts(pickFeaturedProducts(store));
   };
 
   if (selectedStore) {
     return (
       <ScrollView contentContainerStyle={styles.container}>
-        <Pressable style={styles.backButton} onPress={() => setSelectedStore(null)}>
+        <Pressable style={styles.backButton} onPress={goBackFromStore}>
           <Text style={styles.backButtonText}>Inapoi la magazine</Text>
         </Pressable>
 
         <View style={styles.card}>
-          {selectedStore.brandImageUri ? (
-            <Image source={{ uri: selectedStore.brandImageUri }} style={styles.brandImageLarge} />
-          ) : (
-            <View style={styles.brandPlaceholderLarge}>
-              <Text style={styles.brandPlaceholderText}>
-                {selectedStore.displayName.charAt(0).toUpperCase()}
-              </Text>
-            </View>
-          )}
+          <View style={styles.storeHero}>
+            {selectedStore.brandImageUri ? (
+              <Image source={{ uri: selectedStore.brandImageUri }} style={styles.brandImageLarge} />
+            ) : (
+              <View style={styles.brandPlaceholderLarge}>
+                <Text style={styles.brandPlaceholderText}>
+                  {selectedStore.displayName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+          </View>
 
-          <Text style={styles.title}>{selectedStore.displayName}</Text>
+          <Text style={styles.storeDetailTitle}>{selectedStore.displayName}</Text>
           {!!selectedStore.merchant?.domain && (
             <Pressable
               style={styles.storeLinkButton}
@@ -218,10 +252,8 @@ export default function PartnerStoresScreen({ resetRef }: Props) {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Produse recomandate</Text>
-          <Text style={styles.cardText}>
-            Selectam de fiecare data 5 produse diferite, cu accent pe ofertele
-            reduse.
+          <Text style={styles.cardTitle}>
+            Produse recomandate
           </Text>
 
           {selectedStore.products.length === 0 ? (
@@ -232,22 +264,31 @@ export default function PartnerStoresScreen({ resetRef }: Props) {
             featuredProducts.map((product, index) => (
               <Pressable
                 key={`${product.id || product.sku || product.name}-${index}`}
-                style={styles.productRow}
+                style={({ pressed }) => [
+                  styles.productRow,
+                  pressed && styles.productRowPressed,
+                ]}
                 onPress={() => openProductLink(product.affiliateUrl, product.productUrl)}
                 disabled={!product.affiliateUrl && !product.productUrl}
               >
-                {!!product.imageUrl && (
+                {product.imageUrl ? (
                   <Image source={{ uri: product.imageUrl }} style={styles.productImage} />
+                ) : (
+                  <View style={styles.productImagePlaceholder}>
+                    <Text style={styles.productImagePlaceholderText}>
+                      {String(product.name || '').charAt(0).toUpperCase() || '?'}
+                    </Text>
+                  </View>
                 )}
                 <View style={styles.productInfo}>
-                  <Text style={styles.productName}>{product.name}</Text>
+                  <Text style={styles.productName} numberOfLines={2}>{product.name}</Text>
                   {!!product.brand && (
-                    <Text style={styles.productMeta}>Brand: {product.brand}</Text>
+                    <Text style={styles.productMeta}>{product.brand}</Text>
                   )}
                   {!!product.category && (
                     <Text style={styles.productMeta}>
                       {product.category}
-                      {product.subcategory ? ` / ${product.subcategory}` : ''}
+                      {product.subcategory ? ` · ${product.subcategory}` : ''}
                     </Text>
                   )}
                   {!!product.availability?.stockStatus && (
@@ -256,7 +297,7 @@ export default function PartnerStoresScreen({ resetRef }: Props) {
                     </Text>
                   )}
                   {!!product.affiliateUrl && (
-                    <Text style={styles.productLinkText}>Deschide oferta afiliata</Text>
+                    <Text style={styles.productLinkText}>Deschide oferta →</Text>
                   )}
                 </View>
                 <View style={styles.priceBlock}>
@@ -497,12 +538,20 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: R.md,
+    resizeMode: 'contain',
+    backgroundColor: C.surface2,
+  },
+  storeHero: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginBottom: 4,
   },
   brandImageLarge: {
-    width: 110,
-    height: 110,
+    width: 160,
+    height: 160,
     borderRadius: R.lg,
-    marginBottom: 14,
+    resizeMode: 'contain',
+    backgroundColor: C.surface2,
   },
   brandPlaceholder: {
     width: 68,
@@ -515,21 +564,18 @@ const styles = StyleSheet.create({
     borderColor: C.border,
   },
   brandPlaceholderLarge: {
-    width: 110,
-    height: 110,
+    width: 160,
+    height: 160,
     borderRadius: R.lg,
     backgroundColor: C.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 14,
-    borderWidth: 0.5,
-    borderColor: C.border,
   },
   brandPlaceholderText: {
     fontFamily: 'serif',
     color: C.accent,
-    fontSize: 28,
-    fontWeight: '500',
+    fontSize: 48,
+    fontWeight: '400',
   },
   storeInfo: { flex: 1 },
   storeName: {
@@ -544,8 +590,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 4,
   },
+  storeDetailTitle: {
+    fontFamily: 'serif',
+    fontSize: 26,
+    fontWeight: '400',
+    color: C.text,
+    textAlign: 'center',
+    letterSpacing: -0.5,
+    marginBottom: 12,
+  },
   storeLinkButton: {
-    marginTop: 10,
+    marginTop: 4,
     backgroundColor: C.accent,
     borderRadius: R.pill,
     paddingVertical: 12,
@@ -563,11 +618,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
+  productRowPressed: {
+    opacity: 0.75,
+  },
   productImage: {
-    width: 56,
-    height: 56,
+    width: 72,
+    height: 72,
     borderRadius: R.md,
     backgroundColor: C.surface2,
+  },
+  productImagePlaceholder: {
+    width: 72,
+    height: 72,
+    borderRadius: R.md,
+    backgroundColor: C.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 0.5,
+    borderColor: C.border,
+  },
+  productImagePlaceholderText: {
+    fontSize: 22,
+    fontFamily: 'serif',
+    color: C.accent,
+    fontWeight: '500',
   },
   productInfo: { flex: 1 },
   productName: {

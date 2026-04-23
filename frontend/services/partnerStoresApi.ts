@@ -25,6 +25,21 @@ export async function createPartnerStore(
   );
 }
 
+export async function updatePartnerStore(
+  token: string,
+  storeId: string,
+  data: PartnerStorePayload
+): Promise<PartnerStore> {
+  return apiFetch(
+    `/partner-stores/${storeId}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    },
+    token
+  );
+}
+
 export async function importPartnerStoreProducts(
   token: string,
   storeId: string,

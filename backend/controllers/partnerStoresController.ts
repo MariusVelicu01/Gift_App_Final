@@ -5,6 +5,7 @@ import {
   getPartnerStoreById,
   getPartnerStores,
   ProductImportItem,
+  updatePartnerStore,
   updatePartnerStoreProducts,
 } from '../services/partnerStoresService';
 import { createPriceDropAlertsForImport, refreshGiftPlanProductPricesForImport } from '../services/priceAlertsService';
@@ -277,6 +278,30 @@ export async function create(req: Request, res: Response) {
   } catch (error) {
     console.error('CREATE PARTNER STORE ERROR:', error);
     return res.status(500).json({ message: 'Nu am putut salva magazinul.' });
+  }
+}
+
+export async function update(req: Request, res: Response) {
+  try {
+    const storeId = getParam(req.params.storeId);
+    const existing = await getPartnerStoreById(storeId);
+
+    if (!existing) {
+      return res.status(404).json({ message: 'Magazinul nu a fost gasit.' });
+    }
+
+    const result = buildStorePayload(req.body);
+
+    if ('error' in result) {
+      return res.status(400).json({ message: result.error });
+    }
+
+    const store = await updatePartnerStore(storeId, result.payload);
+
+    return res.status(200).json(store);
+  } catch (error) {
+    console.error('UPDATE PARTNER STORE ERROR:', error);
+    return res.status(500).json({ message: 'Nu am putut actualiza magazinul.' });
   }
 }
 

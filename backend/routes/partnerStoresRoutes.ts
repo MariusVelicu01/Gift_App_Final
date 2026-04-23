@@ -4,6 +4,7 @@ import {
   getAll,
   getProductUsage,
   importProducts,
+  update,
 } from '../controllers/partnerStoresController';
 import { requireAuth } from '../middleware/requireAuth';
 import { requireRole } from '../middleware/requireRole';
@@ -15,6 +16,7 @@ router.use(requireAuth);
 router.get('/', getAll);
 router.get('/:storeId/product-usage', requireRole('admin'), getProductUsage);
 router.post('/', requireRole('admin'), create);
+router.put('/:storeId', requireRole('admin'), update);
 router.put('/:storeId/products', requireRole('admin'), importProducts);
 
 export default router;

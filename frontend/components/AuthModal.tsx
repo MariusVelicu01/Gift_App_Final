@@ -166,6 +166,11 @@ export default function AuthModal({ visible, onClose }: Props) {
     clearMessages();
   };
 
+  const openForgotPassword = () => {
+    setForgotEmail(loginEmail.trim());
+    switchTab('forgot');
+  };
+
   const birthDate = useMemo(() => {
     return buildBirthDate(birthYear, birthMonth, birthDay);
   }, [birthYear, birthMonth, birthDay]);
@@ -300,7 +305,7 @@ export default function AuthModal({ visible, onClose }: Props) {
               style={[styles.tabButton, tab === 'login' && styles.tabButtonActive]}
             >
               <Text style={[styles.tabText, tab === 'login' && styles.tabTextActive]}>
-                Login
+                Autentificare
               </Text>
             </Pressable>
 
@@ -309,7 +314,7 @@ export default function AuthModal({ visible, onClose }: Props) {
               style={[styles.tabButton, tab === 'register' && styles.tabButtonActive]}
             >
               <Text style={[styles.tabText, tab === 'register' && styles.tabTextActive]}>
-                Register
+                Inregistrare
               </Text>
             </Pressable>
 
@@ -318,7 +323,7 @@ export default function AuthModal({ visible, onClose }: Props) {
               style={[styles.tabButton, tab === 'forgot' && styles.tabButtonActive]}
             >
               <Text style={[styles.tabText, tab === 'forgot' && styles.tabTextActive]}>
-                Forgot
+                Resetare Parola
               </Text>
             </Pressable>
           </View>
@@ -369,12 +374,23 @@ export default function AuthModal({ visible, onClose }: Props) {
                 </View>
 
                 <Pressable
+                  style={({ hovered, pressed }) => [
+                    styles.forgotPasswordLink,
+                    hovered && styles.forgotPasswordLinkHover,
+                    pressed && styles.forgotPasswordLinkPressed,
+                  ]}
+                  onPress={openForgotPassword}
+                >
+                  <Text style={styles.forgotPasswordLinkText}>Ai uitat parola?</Text>
+                </Pressable>
+
+                <Pressable
                   style={[styles.actionButton, submitting && styles.disabledButton]}
                   onPress={handleLogin}
                   disabled={submitting}
                 >
                   <Text style={styles.actionButtonText}>
-                    {submitting ? 'Se procesează...' : 'Login'}
+                    {submitting ? 'Se procesează...' : 'Autentificare'}
                   </Text>
                 </Pressable>
               </>
@@ -619,7 +635,7 @@ export default function AuthModal({ visible, onClose }: Props) {
                   disabled={!isRegisterButtonEnabled}
                 >
                   <Text style={styles.actionButtonText}>
-                    {submitting ? 'Se procesează...' : 'Register'}
+                    {submitting ? 'Se procesează...' : 'Inregistrare'}
                   </Text>
                 </Pressable>
               </>
@@ -779,6 +795,24 @@ const styles = StyleSheet.create({
     color: C.accent,
     fontSize: 12,
     fontWeight: '600',
+  },
+  forgotPasswordLink: {
+    alignSelf: 'flex-end',
+    marginTop: -2,
+    marginBottom: 14,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  forgotPasswordLinkHover: {
+    opacity: 0.8,
+  },
+  forgotPasswordLinkPressed: {
+    transform: [{ scale: 0.98 }],
+  },
+  forgotPasswordLinkText: {
+    color: C.accent,
+    fontSize: 13,
+    fontWeight: '700',
   },
   label: {
     fontSize: 13,

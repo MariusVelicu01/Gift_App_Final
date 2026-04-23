@@ -504,7 +504,7 @@ export default function ClientDashboard({ firstName, onLogout }: Props) {
     }
   };
 
-  const currentScreen = useMemo(() => {
+  const filteredNotifications = useMemo<AppNotification[]>(() => {
     const notifEnabled = clientSettings.notificationsEnabled;
 
     const filteredPrice = priceAlerts.filter((a) => {
@@ -525,7 +525,7 @@ export default function ClientDashboard({ firstName, onLogout }: Props) {
       ? birthdayAlerts
       : [];
 
-    const notifications: AppNotification[] = [
+    return [
       ...filteredBirthday,
       ...filteredPrice,
       ...filteredDeadline,
@@ -533,77 +533,7 @@ export default function ClientDashboard({ firstName, onLogout }: Props) {
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
-
-    switch (activeTab) {
-      case 'home':
-        return (
-          <HomeScreen firstName={firstName} onOpenGift={openGiftDetails} />
-        );
-      case 'lovedOnes':
-        return (
-          <LovedOnesScreen
-            priceAlertTarget={priceAlertTarget}
-            onPriceAlertTargetConsumed={() => setPriceAlertTarget(null)}
-            giftDetailsTarget={giftDetailsTarget}
-            onGiftDetailsTargetConsumed={() => setGiftDetailsTarget(null)}
-            lovedOneTarget={lovedOneTarget}
-            onLovedOneTargetConsumed={() => setLovedOneTarget(null)}
-            resetRef={lovedOnesTabResetRef}
-          />
-        );
-      case 'calendar':
-        return <CalendarScreen resetRef={calendarTabResetRef} />;
-      case 'partnerStores':
-        return <PartnerStoresScreen resetRef={partnerStoresTabResetRef} />;
-      case 'notifications':
-        return (
-          <NotificationsScreen
-            alerts={notifications}
-            onOpenAlert={openNotification}
-            onRefresh={() => {
-              loadPriceAlerts();
-              loadDeadlineAlerts();
-              loadBirthdayAlerts();
-            }}
-            onMarkAllRead={markAllAlertsRead}
-            onDeleteAlerts={removeAlerts}
-          />
-        );
-      case 'settings':
-        return (
-          <SettingsScreen
-            onLogout={onLogout}
-            personalDataOpen={personalDataOpen}
-            notificationsOpen={notificationsOpen}
-            onToggleSection={(section) => {
-              if (section === 'personalData') {
-                setPersonalDataOpen((prev) => !prev);
-              } else {
-                setNotificationsOpen((prev) => !prev);
-              }
-            }}
-          />
-        );
-      default:
-        return (
-          <HomeScreen firstName={firstName} onOpenGift={openGiftDetails} />
-        );
-    }
-  }, [
-    activeTab,
-    birthdayAlerts,
-    clientSettings,
-    deadlineAlerts,
-    deadlinePrefs,
-    firstName,
-    giftDetailsTarget,
-    lovedOneTarget,
-    onLogout,
-    personalDataOpen,
-    notificationsOpen,
-    priceAlertTarget,
-    priceAlerts,
-  ]);
+  }, [birthdayAlerts, clientSettings, deadlineAlerts, priceAlerts]);
 
   const unreadNotificationsCount =
     (clientSettings.notificationsEnabled
@@ -632,7 +562,50 @@ export default function ClientDashboard({ firstName, onLogout }: Props) {
   return (
     <SafeAreaView style={styles.root}>
       <View style={[styles.container, isWide && styles.containerWide]}>
-        <View style={styles.content}>{currentScreen}</View>
+        <View style={styles.content}>
+          <View style={[styles.screenSlot, activeTab !== 'home' && styles.screenHidden]}>
+            <HomeScreen firstName={firstName} onOpenGift={openGiftDetails} />
+          </View>
+          <View style={[styles.screenSlot, activeTab !== 'lovedOnes' && styles.screenHidden]}>
+            <LovedOnesScreen
+              priceAlertTarget={priceAlertTarget}
+              onPriceAlertTargetConsumed={() => setPriceAlertTarget(null)}
+              giftDetailsTarget={giftDetailsTarget}
+              onGiftDetailsTargetConsumed={() => setGiftDetailsTarget(null)}
+              lovedOneTarget={lovedOneTarget}
+              onLovedOneTargetConsumed={() => setLovedOneTarget(null)}
+              resetRef={lovedOnesTabResetRef}
+            />
+          </View>
+          <View style={[styles.screenSlot, activeTab !== 'calendar' && styles.screenHidden]}>
+            <CalendarScreen resetRef={calendarTabResetRef} />
+          </View>
+          <View style={[styles.screenSlot, activeTab !== 'partnerStores' && styles.screenHidden]}>
+            <PartnerStoresScreen resetRef={partnerStoresTabResetRef} />
+          </View>
+          <View style={[styles.screenSlot, activeTab !== 'notifications' && styles.screenHidden]}>
+            <NotificationsScreen
+              alerts={filteredNotifications}
+              onOpenAlert={openNotification}
+              onMarkAllRead={markAllAlertsRead}
+              onDeleteAlerts={removeAlerts}
+            />
+          </View>
+          <View style={[styles.screenSlot, activeTab !== 'settings' && styles.screenHidden]}>
+            <SettingsScreen
+              onLogout={onLogout}
+              personalDataOpen={personalDataOpen}
+              notificationsOpen={notificationsOpen}
+              onToggleSection={(section) => {
+                if (section === 'personalData') {
+                  setPersonalDataOpen((prev) => !prev);
+                } else {
+                  setNotificationsOpen((prev) => !prev);
+                }
+              }}
+            />
+          </View>
+        </View>
 
         <View style={styles.bottomNavOuter}>
           <View style={styles.bottomNav}>
@@ -709,6 +682,12 @@ const styles = StyleSheet.create({
   containerWide: {},
   content: {
     flex: 1,
+  },
+  screenSlot: {
+    flex: 1,
+  },
+  screenHidden: {
+    display: 'none',
   },
   bottomNavOuter: {
     paddingHorizontal: 12,

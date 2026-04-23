@@ -19,12 +19,14 @@ import {
   createPartnerStore,
   getPartnerStoreProductUsage,
   importPartnerStoreProducts,
+  updatePartnerStore,
 } from '../../../services/partnerStoresApi';
 import {
   getAdminPartnerStoresCache,
   setAdminPartnerStoresCacheSnapshot,
   subscribeAdminPartnerStoresCache,
 } from '../../../services/adminPartnerStoresCache';
+import { invalidatePartnerStoresCache } from '../../../services/partnerStoresCache';
 import {
   PartnerProductsImportPayload,
   PartnerStore,
@@ -35,6 +37,7 @@ import {
 import { C, R, S } from '../../../constants/theme';
 import { getModalBackdropResponder } from '../../../utils/modalBackdrop';
 
+const PRODUCTS_PER_PAGE = 20;
 const PRICE_CHART_WIDTH = 720;
 const PRICE_CHART_HEIGHT = 310;
 const PRICE_CHART_LEFT = 58;
@@ -62,8 +65,8 @@ const MONTHS = [
   { label: 'Decembrie', value: 12 },
 ];
 
-const YEAR_OPTIONS = Array.from({ length: 11 }, (_, i) => {
-  const year = new Date().getFullYear() + i;
+const YEAR_OPTIONS = Array.from({ length: 21 }, (_, i) => {
+  const year = new Date().getFullYear() - 10 + i;
   return { label: String(year), value: year };
 });
 
@@ -164,6 +167,20 @@ function buildIsoDate(
   if (!year || !month || !day) return '';
 
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function getDateParts(value?: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+
+  if (!match) {
+    return { year: null, month: null, day: null };
+  }
+
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+  };
 }
 
 function isDateKeyInPast(value: string) {
@@ -321,6 +338,7 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
   const [stores, setStores] = useState<PartnerStore[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
+  const [editingStoreId, setEditingStoreId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [companyName, setCompanyName] = useState('');
 
@@ -352,6 +370,9 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
   const [usageError, setUsageError] = useState('');
   const [usagePurposeFilter, setUsagePurposeFilter] = useState('all');
   const [usageYearFilter, setUsageYearFilter] = useState('all');
+  const [productSearchText, setProductSearchText] = useState('');
+  const [productCategoryFilter, setProductCategoryFilter] = useState('all');
+  const [productPage, setProductPage] = useState(0);
 
   const selectedStore = useMemo(() => {
     return stores.find((store) => store.id === selectedStoreId) || null;
@@ -538,6 +559,45 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
     });
   }, [searchText, selectedCategory, stores]);
 
+  const productCategoryOptions = useMemo(() => {
+    if (!selectedStore) return [{ label: 'Toate categoriile', value: 'all' }];
+    const categories = new Set<string>();
+    selectedStore.products.forEach((p) => {
+      const cat = String(p.category || '').trim();
+      if (cat) categories.add(cat);
+    });
+    return [
+      { label: 'Toate categoriile', value: 'all' },
+      ...Array.from(categories)
+        .sort((a, b) => a.localeCompare(b))
+        .map((c) => ({ label: c, value: c })),
+    ];
+  }, [selectedStore]);
+
+  const filteredProducts = useMemo(() => {
+    if (!selectedStore) return [];
+    const normalizedSearch = productSearchText.trim().toLowerCase();
+    return selectedStore.products.filter((p) => {
+      const matchesCategory =
+        productCategoryFilter === 'all' ||
+        String(p.category || '').trim().toLowerCase() ===
+          productCategoryFilter.toLowerCase();
+      if (!matchesCategory) return false;
+      if (!normalizedSearch) return true;
+      return String(p.name || '').toLowerCase().includes(normalizedSearch);
+    });
+  }, [selectedStore, productSearchText, productCategoryFilter]);
+
+  const totalProductPages = Math.ceil(filteredProducts.length / PRODUCTS_PER_PAGE);
+  const pagedProducts = filteredProducts.slice(
+    productPage * PRODUCTS_PER_PAGE,
+    (productPage + 1) * PRODUCTS_PER_PAGE
+  );
+
+  useEffect(() => {
+    setProductPage(0);
+  }, [productSearchText, productCategoryFilter, selectedStoreId]);
+
   const loadStores = async () => {
     try {
       if (!token) return;
@@ -558,6 +618,7 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
   }, [token]);
 
   const resetForm = () => {
+    setEditingStoreId(null);
     setCompanyName('');
     setCui('');
     setTradeRegisterNumber('');
@@ -572,14 +633,42 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
     setError('');
   };
 
+  const openCreateStoreModal = () => {
+    resetForm();
+    setModalVisible(true);
+  };
+
+  const openEditStoreModal = (store: PartnerStore) => {
+    const start = getDateParts(store.contractStartDate);
+    const end = getDateParts(store.contractEndDate);
+
+    setEditingStoreId(store.id);
+    setCompanyName(store.companyName || '');
+    setCui(store.cui || '');
+    setTradeRegisterNumber(store.tradeRegisterNumber || '');
+    setDisplayName(store.displayName || '');
+    setContractStartDay(start.day);
+    setContractStartMonth(start.month);
+    setContractStartYear(start.year);
+    setContractEndDay(end.day);
+    setContractEndMonth(end.month);
+    setContractEndYear(end.year);
+    setBrandImageUri(store.brandImageUri);
+    setError('');
+    setModalVisible(true);
+  };
+
   const pickBrandImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      quality: 0.8,
+      quality: 0.5,
+      base64: true,
     });
 
-    if (!result.canceled) {
-      setBrandImageUri(result.assets[0].uri);
+    if (!result.canceled && result.assets[0].base64) {
+      const asset = result.assets[0];
+      const mimeType = asset.mimeType || 'image/jpeg';
+      setBrandImageUri(`data:${mimeType};base64,${asset.base64}`);
     }
   };
 
@@ -638,7 +727,7 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
     if (!token) return;
 
     try {
-      const savedStore = await createPartnerStore(token, {
+      const payload = {
         companyName: companyName.trim(),
         cui: cui.trim().toUpperCase(),
         tradeRegisterNumber: tradeRegisterNumber.trim().toUpperCase(),
@@ -646,11 +735,18 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
         contractStartDate,
         contractEndDate,
         brandImageUri,
-      });
+      };
+
+      const savedStore = editingStoreId
+        ? await updatePartnerStore(token, editingStoreId, payload)
+        : await createPartnerStore(token, payload);
 
       setStores((current) => {
-        const nextStores = [savedStore, ...current];
+        const nextStores = editingStoreId
+          ? current.map((store) => (store.id === savedStore.id ? savedStore : store))
+          : [savedStore, ...current];
         setAdminPartnerStoresCacheSnapshot(token, nextStores);
+        invalidatePartnerStoresCache();
         return nextStores;
       });
       resetForm();
@@ -690,6 +786,7 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
               store.id === selectedStore.id ? updatedStore : store
             );
             setAdminPartnerStoresCacheSnapshot(token, nextStores);
+            invalidatePartnerStoresCache();
             return nextStores;
           });
           setImportError('');
@@ -750,6 +847,16 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
           {!!selectedStore.currency && (
             <Text style={styles.meta}>Moneda catalog: {selectedStore.currency}</Text>
           )}
+
+          <Pressable
+            style={styles.secondaryButton}
+            onPress={() => {
+              openEditStoreModal(selectedStore);
+              setSelectedStoreId(null);
+            }}
+          >
+            <Text style={styles.secondaryButtonText}>Editeaza magazinul</Text>
+          </Pressable>
         </View>
 
         <View style={styles.card}>
@@ -786,7 +893,35 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
             Produse interpretate: {selectedStore.products.length}
           </Text>
 
-          {selectedStore.products.slice(0, 8).map((product, index) => (
+          <View style={styles.productFiltersRow}>
+            <TextInput
+              placeholder="Cauta dupa numele produsului"
+              style={[styles.searchInput, styles.productSearchInput]}
+              value={productSearchText}
+              onChangeText={setProductSearchText}
+            />
+            <Dropdown
+              style={[styles.dropdown, styles.productCategoryDropdown]}
+              containerStyle={styles.dropdownContainer}
+              placeholderStyle={styles.dropdownPlaceholder}
+              selectedTextStyle={styles.dropdownSelectedText}
+              data={productCategoryOptions}
+              maxHeight={260}
+              labelField="label"
+              valueField="value"
+              placeholder="Toate categoriile"
+              value={productCategoryFilter}
+              onChange={(item) => setProductCategoryFilter(item.value)}
+            />
+          </View>
+
+          {(productSearchText.trim() || productCategoryFilter !== 'all') && (
+            <Text style={styles.productFilterCount}>
+              {filteredProducts.length} produse gasite
+            </Text>
+          )}
+
+          {pagedProducts.map((product, index) => (
             <Pressable
               key={`${product.id || product.sku || product.name}-${index}`}
               style={styles.productRow}
@@ -842,6 +977,28 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
               </View>
             </Pressable>
           ))}
+
+          {totalProductPages > 1 && (
+            <View style={styles.paginationRow}>
+              <Pressable
+                style={[styles.paginationButton, productPage === 0 && styles.paginationButtonDisabled]}
+                onPress={() => setProductPage((p) => Math.max(0, p - 1))}
+                disabled={productPage === 0}
+              >
+                <Text style={styles.paginationButtonText}>{'<'}</Text>
+              </Pressable>
+              <Text style={styles.paginationInfo}>
+                {productPage + 1} / {totalProductPages}
+              </Text>
+              <Pressable
+                style={[styles.paginationButton, productPage >= totalProductPages - 1 && styles.paginationButtonDisabled]}
+                onPress={() => setProductPage((p) => Math.min(totalProductPages - 1, p + 1))}
+                disabled={productPage >= totalProductPages - 1}
+              >
+                <Text style={styles.paginationButtonText}>{'>'}</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
 
         <Modal
@@ -1156,41 +1313,6 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
                       )}
                     </View>
 
-                    <Text style={styles.productsSummary}>Importuri observate</Text>
-                    {selectedPriceHistory.history
-                      .slice()
-                      .reverse()
-                      .map((entry, index) => (
-                        <View
-                          key={`${entry.importedAt}-${index}`}
-                          style={styles.priceHistoryRow}
-                        >
-                          <View>
-                            <Text style={styles.priceHistoryDate}>
-                              {formatImportDate(entry.importedAt)}
-                            </Text>
-                            {!!entry.importName && (
-                              <Text style={styles.productMeta}>{entry.importName}</Text>
-                            )}
-                          </View>
-                          <View style={styles.priceHistoryValues}>
-                            <Text style={styles.productPrice}>
-                              {formatMoney(entry.currentPrice, selectedStore.currency || 'RON')}
-                            </Text>
-                            {entry.hasDiscount && (
-                              <Text style={styles.discountText}>
-                                Reducere{' '}
-                                {entry.discountPercent !== undefined
-                                  ? `${entry.discountPercent}%`
-                                  : formatMoney(
-                                      entry.discountAmount,
-                                      selectedStore.currency || 'RON'
-                                    )}
-                              </Text>
-                            )}
-                          </View>
-                        </View>
-                      ))}
                   </>
                 ) : (
                   <Text style={styles.cardText}>
@@ -1239,7 +1361,7 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Magazine Partenere</Text>
 
-      <Pressable style={styles.primaryButton} onPress={() => setModalVisible(true)}>
+      <Pressable style={styles.primaryButton} onPress={openCreateStoreModal}>
         <Text style={styles.primaryButtonText}>+ Adauga magazin partener</Text>
       </Pressable>
 
@@ -1341,7 +1463,9 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
             <View style={styles.handle} />
 
             <ScrollView contentContainerStyle={styles.modalBody}>
-              <Text style={styles.modalTitle}>Adauga magazin partener</Text>
+              <Text style={styles.modalTitle}>
+                {editingStoreId ? 'Editeaza magazin partener' : 'Adauga magazin partener'}
+              </Text>
               {!!error && <Text style={styles.errorText}>{error}</Text>}
 
               <Text style={styles.label}>Numele magazinului ca firma</Text>
@@ -1518,7 +1642,9 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
               )}
 
               <Pressable style={styles.primaryButton} onPress={saveStore}>
-                <Text style={styles.primaryButtonText}>Salveaza magazinul</Text>
+                <Text style={styles.primaryButtonText}>
+                  {editingStoreId ? 'Salveaza modificarile' : 'Salveaza magazinul'}
+                </Text>
               </Pressable>
 
               <Pressable
@@ -2085,5 +2211,52 @@ const styles = StyleSheet.create({
   usageBadgeMuted: {
     backgroundColor: C.surface2,
     color: C.textDim,
+  },
+  productFiltersRow: {
+    gap: 10,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  productSearchInput: {
+    marginBottom: 0,
+  },
+  productCategoryDropdown: {},
+  productFilterCount: {
+    color: C.textDim,
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 4,
+    marginTop: 2,
+  },
+  paginationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 0.5,
+    borderTopColor: C.border,
+  },
+  paginationButton: {
+    backgroundColor: C.accent,
+    borderRadius: R.pill,
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+  },
+  paginationButtonDisabled: {
+    backgroundColor: C.surface2,
+  },
+  paginationButtonText: {
+    color: C.accentInk,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  paginationInfo: {
+    color: C.text,
+    fontWeight: '700',
+    fontSize: 15,
+    minWidth: 60,
+    textAlign: 'center',
   },
 });

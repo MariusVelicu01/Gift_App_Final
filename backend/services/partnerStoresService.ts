@@ -262,6 +262,23 @@ export async function createPartnerStore(data: PartnerStorePayload) {
   return payload;
 }
 
+export async function updatePartnerStore(storeId: string, data: PartnerStorePayload) {
+  const ref = db.collection(COLLECTION).doc(storeId);
+  const existing = await ref.get();
+
+  if (!existing.exists) {
+    return null;
+  }
+
+  await ref.update({
+    ...data,
+    updatedAt: new Date().toISOString(),
+  });
+
+  const updated = await ref.get();
+  return updated.data();
+}
+
 export async function getPartnerStores() {
   const snapshot = await db
     .collection(COLLECTION)

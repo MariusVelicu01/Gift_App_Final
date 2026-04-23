@@ -1,33 +1,33 @@
-// Dorita — Gift Companion design system
-// Cream palette · terracotta accent · warm charcoal text
+// GiftApp — design system
+// Warm cream palette · rose accent · landing-page style throughout
 
 export const C = {
-  // Backgrounds
-  bg: '#FBF7F2',
-  surface: '#FFFFFF',
-  surface2: '#F4EEE5',
+  // Backgrounds — landing-page warm cream
+  bg: '#fff7ed',
+  surface: '#ffffff',
+  surface2: '#fff1f2',
 
-  // Text
-  text: '#1F1B16',
-  textDim: '#7A6E68',   // rgba(31,27,22, 0.62)
-  textFaint: '#A8A19B', // rgba(31,27,22, 0.38)
+  // Text — crisp charcoal scale (landing-page)
+  text: '#111827',
+  textDim: '#4b5563',
+  textFaint: '#9ca3af',
 
-  // Borders
-  border: '#EAE5DF',       // rgba(31,27,22, 0.08)
-  borderStrong: '#D4CEC9', // rgba(31,27,22, 0.16)
+  // Borders — warm rose-tinted
+  border: '#fce7e0',
+  borderStrong: '#fecdd3',
 
-  // Accent — terracotta
-  accent: '#B85C3A',
-  accentSoft: '#F7EDE7',
-  accentInk: '#FFFFFF',
+  // Accent — landing-page rose
+  accent: '#be123c',
+  accentSoft: '#fff1f2',
+  accentInk: '#ffffff',
 
   // Semantic
-  sage: '#547A60',
-  sageBg: '#E8F2EB',
-  warn: '#B8731A',
-  warnBg: '#FEF3E0',
-  danger: '#B8402A',
-  dangerBg: '#FDECEA',
+  sage: '#0d9488',
+  sageBg: '#f0fdfa',
+  warn: '#b45309',
+  warnBg: '#fef3c7',
+  danger: '#dc2626',
+  dangerBg: '#fff1f2',
 } as const;
 
 export const R = {
@@ -41,17 +41,15 @@ export const R = {
 } as const;
 
 export const S = {
-  // Shadows — minimal, warm
   card: {
-    shadowColor: '#1F1B16',
-    shadowOpacity: 0.05,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
     shadowRadius: 12,
-    shadowOffset: { width: 0, height: 3 },
+    shadowOffset: { width: 0, height: 4 },
     elevation: 2,
   },
-  // Used for floating elements (tab bar, modals)
   float: {
-    shadowColor: '#1F1B16',
+    shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 6 },
@@ -59,7 +57,6 @@ export const S = {
   },
 } as const;
 
-// Typography helpers — system serif approximates Fraunces, monospace approximates JetBrains Mono
 export const F = {
   display: { fontFamily: 'serif' as const, fontWeight: '400' as const },
   displayBold: { fontFamily: 'serif' as const, fontWeight: '500' as const },
