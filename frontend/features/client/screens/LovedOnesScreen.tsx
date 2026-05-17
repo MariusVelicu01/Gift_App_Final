@@ -43,6 +43,7 @@ export default function LovedOnesScreen({
   const [data, setData] = useState<LovedOne[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedLovedOneId, setSelectedLovedOneId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const selectedLovedOneBackRef = useRef<ReturnType<typeof pushAppBackEntry> | null>(
     null
   );
@@ -116,11 +117,15 @@ export default function LovedOnesScreen({
     };
   }, [selectedLovedOneId]);
 
-  const goBackFromDetails = () => {
+  const goBackFromDetails = (deletedId?: string) => {
     if (selectedLovedOneBackRef.current?.goBack()) return;
 
+    if (deletedId) {
+      setDeletingId(deletedId);
+      setData(prev => prev.filter(p => p.id !== deletedId));
+    }
     setSelectedLovedOneId(null);
-    loadLovedOnes();
+    loadLovedOnes().finally(() => setDeletingId(null));
   };
 
   if (selectedLovedOneId) {
@@ -187,15 +192,19 @@ export default function LovedOnesScreen({
           </Text>
         </View>
       ) : (
-        data.map((item) => (
+        data.map((item) => {
+          const isDeleting = deletingId === item.id;
+          return (
           <Pressable
             key={item.id}
             style={({ hovered, pressed }) => [
               styles.card,
-              hovered && styles.cardHover,
-              pressed && styles.cardPressed,
+              hovered && !isDeleting && styles.cardHover,
+              pressed && !isDeleting && styles.cardPressed,
+              isDeleting && styles.cardDeleting,
             ]}
-            onPress={() => setSelectedLovedOneId(item.id)}
+            onPress={() => !isDeleting && setSelectedLovedOneId(item.id)}
+            disabled={isDeleting}
           >
             {item.imageUrl ? (
               <Image source={{ uri: item.imageUrl }} style={styles.image} />
@@ -220,7 +229,8 @@ export default function LovedOnesScreen({
 
             <Text style={styles.chevron}>›</Text>
           </Pressable>
-        ))
+          );
+        })
       )}
 
       <AddLovedOneModal
@@ -312,6 +322,9 @@ const styles = StyleSheet.create({
   },
   cardPressed: {
     transform: [{ scale: 0.99 }],
+  },
+  cardDeleting: {
+    opacity: 0.4,
   },
   image: {
     width: 56,

@@ -17,6 +17,7 @@ import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
 import { deleteLovedOne, getLovedOneById } from '../../../services/lovedOnesApi';
 import { invalidateCalendarCache } from '../../../services/calendarCache';
+import { invalidateLovedOnesCache } from '../../../services/lovedOnesCache';
 import { pushAppBackEntry } from '../../../services/navigationHistory';
 import { getModalBackdropResponder } from '../../../utils/modalBackdrop';
 import { C, R } from '../../../constants/theme';
@@ -31,6 +32,11 @@ import {
 } from '../../../services/giftPlansApi';
 import { getPartnerStores } from '../../../services/partnerStoresApi';
 import { markPriceAlertHighlightSeen } from '../../../services/priceAlertsApi';
+import {
+  CatalogItem,
+  GiftBotRecommendation,
+  getGiftBotRecommendations,
+} from '../../../services/giftBotApi';
 import { uploadImageApi } from '../../../services/uploadApi';
 import AddLovedOneModal from '../../../components/AddLovedOneModal';
 import { LovedOne } from '../../../types/lovedOnes';
@@ -646,7 +652,7 @@ function calculateAge(day: number, month: number, year: number) {
 
 type Props = {
   lovedOneId: string;
-  onBack: () => void;
+  onBack: (deletedId?: string) => void;
   initialGiftPlanId?: string | null;
   initialProductId?: string | null;
   priceAlert?: PriceAlert | null;
@@ -802,6 +808,8 @@ export default function LovedOneDetailsScreen({
   const [aiKeepExistingProducts, setAiKeepExistingProducts] = useState(false);
   const [aiHelpError, setAiHelpError] = useState('');
   const [aiPromptInput, setAiPromptInput] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResponse, setAiResponse] = useState<GiftBotRecommendation[]>([]);
   const [changeProduct, setChangeProduct] = useState<GiftPlanProduct | null>(null);
   const [changeProductModeVisible, setChangeProductModeVisible] = useState(false);
   const [changeProductManualVisible, setChangeProductManualVisible] = useState(false);
@@ -810,6 +818,8 @@ export default function LovedOneDetailsScreen({
   const [changeProductAiDescription, setChangeProductAiDescription] = useState('');
   const [changeProductAiBudget, setChangeProductAiBudget] = useState('');
   const [changeProductAiPromptInput, setChangeProductAiPromptInput] = useState('');
+  const [changeProductAiLoading, setChangeProductAiLoading] = useState(false);
+  const [changeProductAiResponse, setChangeProductAiResponse] = useState<GiftBotRecommendation[]>([]);
   const [otherStoreModalVisible, setOtherStoreModalVisible] = useState(false);
   const [otherStoreMode, setOtherStoreMode] = useState<'other' | 'manual'>('other');
   const [otherStoreName, setOtherStoreName] = useState('');
@@ -1016,10 +1026,12 @@ export default function LovedOneDetailsScreen({
     try {
       setDeletingLovedOne(true);
       setDeleteLovedOneError('');
-      await deleteLovedOne(token, data.id);
+      const deletedId = data.id;
+      await deleteLovedOne(token, deletedId);
       invalidateCalendarCache();
+      invalidateLovedOnesCache();
       setDeleteLovedOneVisible(false);
-      onBack();
+      onBack(deletedId);
     } catch (error) {
       console.error('DELETE LOVED ONE ERROR:', error);
       setDeleteLovedOneError('Nu am putut sterge persoana. Incearca din nou.');
@@ -2454,6 +2466,7 @@ export default function LovedOneDetailsScreen({
     setAiProductCount('0');
     setAiHelpError('');
     setAiPromptInput('');
+    setAiResponse([]);
     setAiHelpModalVisible(true);
   };
 
@@ -2461,6 +2474,7 @@ export default function LovedOneDetailsScreen({
     setAiHelpModalVisible(false);
     setAiHelpError('');
     setAiPromptInput('');
+    setAiResponse([]);
   };
 
   const setAiKeepExistingChoice = (
@@ -2471,6 +2485,7 @@ export default function LovedOneDetailsScreen({
     setAiBudget(String(getAiHelpBudget(giftPlan, keepExistingProducts)));
     setAiPromptInput('');
     setAiHelpError('');
+    setAiResponse([]);
   };
 
   const getChangeProductBudget = (
@@ -2504,6 +2519,7 @@ export default function LovedOneDetailsScreen({
     setChangeProductAiVisible(false);
     setChangeProductSearch('');
     setChangeProductAiPromptInput('');
+    setChangeProductAiResponse([]);
     setManualProductName('');
     setManualProductPrice('');
     setManualProductError('');
@@ -2629,6 +2645,116 @@ export default function LovedOneDetailsScreen({
         'Returneaza exact un produs potrivit, cu motiv scurt si respecta bugetul.',
       ].join('\n')
     );
+  };
+
+  const buildCatalog = (): CatalogItem[] =>
+    partnerStores
+      .flatMap((store) =>
+        store.products.map((product, index) => {
+          const price =
+            product.price?.current ?? product.price?.original ?? 0;
+          if (!price || price <= 0) return null;
+          return {
+            id: getProductSuggestionId(store, product, index),
+            name: product.name,
+            brand: product.brand,
+            category: product.category,
+            price,
+            store: store.displayName,
+          } as CatalogItem;
+        })
+      )
+      .filter((item): item is CatalogItem => Boolean(item))
+      .slice(0, 500);
+
+  const buildSuggestionsById = (): Map<string, ProductSuggestion> => {
+    const map = new Map<string, ProductSuggestion>();
+    partnerStores.forEach((store) => {
+      store.products.forEach((product, index) => {
+        const suggestion = toProductSuggestion(store, product, index);
+        if (suggestion) {
+          map.set(suggestion.id, suggestion);
+        }
+      });
+    });
+    return map;
+  };
+
+  const sendAiHelp = async () => {
+    if (!token || !aiPromptInput.trim() || aiLoading) return;
+
+    const catalog = buildCatalog();
+    if (catalog.length === 0) {
+      setAiHelpError('Nu există produse în catalog pentru a trimite la GiftBot.');
+      return;
+    }
+
+    setAiLoading(true);
+    setAiHelpError('');
+    setAiResponse([]);
+
+    try {
+      const recommendations = await getGiftBotRecommendations(
+        token,
+        aiPromptInput.trim(),
+        catalog
+      );
+      setAiResponse(recommendations);
+      if (recommendations.length === 0) {
+        setAiHelpError('GiftBot nu a găsit produse potrivite. Încearcă cu alte criterii.');
+      }
+    } catch (error: any) {
+      setAiHelpError(error?.message || 'GiftBot nu a putut răspunde. Încearcă din nou.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const sendChangeProductAiHelp = async () => {
+    if (!token || !changeProductAiPromptInput.trim() || changeProductAiLoading) return;
+
+    const catalog = buildCatalog();
+    if (catalog.length === 0) return;
+
+    setChangeProductAiLoading(true);
+    setChangeProductAiResponse([]);
+
+    try {
+      const recommendations = await getGiftBotRecommendations(
+        token,
+        changeProductAiPromptInput.trim(),
+        catalog
+      );
+      setChangeProductAiResponse(recommendations);
+    } catch {
+      setChangeProductAiResponse([]);
+    } finally {
+      setChangeProductAiLoading(false);
+    }
+  };
+
+  const addAllBotProductsToGift = async (
+    giftPlan: GiftPlan,
+    suggestions: ProductSuggestion[]
+  ) => {
+    const selectedProducts = giftPlan.selectedProducts || [];
+    const selectedKeys = new Set(
+      selectedProducts.map((p) => getProductIdentityKey(p))
+    );
+    const newProducts = suggestions
+      .filter((s) => !selectedKeys.has(getProductIdentityKey(s)))
+      .map((s) => toGiftPlanProduct(s));
+
+    if (newProducts.length === 0) {
+      closeAiHelpModal();
+      return;
+    }
+
+    const nextSelectedProducts = [...selectedProducts, ...newProducts];
+    const saved = await saveSelectedProducts(giftPlan, nextSelectedProducts);
+    if (saved) {
+      closeAiHelpModal();
+    }
   };
 
   const stopPressPropagation = (event: GestureResponderEvent) => {
@@ -2801,6 +2927,25 @@ export default function LovedOneDetailsScreen({
       .map((product, index) => toProductSuggestion(store, product, index))
       .filter((product): product is ProductSuggestion => Boolean(product))
   );
+  const lowestPriceByKey = new Map<string, number>();
+  const bestImageByKey = new Map<string, string>();
+  allProductOffers.forEach((offer) => {
+    const key = getProductIdentityKey(offer);
+    const existing = lowestPriceByKey.get(key);
+    if (existing === undefined || offer.price < existing) {
+      lowestPriceByKey.set(key, offer.price);
+    }
+    if (offer.imageUrl && !bestImageByKey.has(key)) {
+      bestImageByKey.set(key, offer.imageUrl);
+    }
+  });
+  const getDisplayedProductPrice = (product: GiftPlanProduct): number => {
+    if (product.isPurchased) {
+      return product.purchasePrice ?? product.price;
+    }
+    const key = getProductIdentityKey(product);
+    return lowestPriceByKey.get(key) ?? product.price;
+  };
   const selectedGiftProductKeys = new Set(
     selectedGiftProducts.map((product) => getProductIdentityKey(product))
   );
@@ -2818,10 +2963,12 @@ export default function LovedOneDetailsScreen({
       const existing = productSuggestionsByKey.get(productKey);
       const offerCount = (existing?.offerCount || 0) + 1;
       const bestOffer = !existing || product.price < existing.price ? product : existing;
+      const imageUrl = bestOffer.imageUrl || existing?.imageUrl || product.imageUrl;
 
       productSuggestionsByKey.set(productKey, {
         ...bestOffer,
         offerCount,
+        imageUrl,
       });
     });
 
@@ -2842,9 +2989,11 @@ export default function LovedOneDetailsScreen({
       const existing = changeProductSuggestionsByKey.get(productKey);
       const offerCount = (existing?.offerCount || 0) + 1;
       const bestOffer = !existing || product.price < existing.price ? product : existing;
+      const imageUrl = bestOffer.imageUrl || existing?.imageUrl || product.imageUrl;
 
       changeProductSuggestionsByKey.set(productKey, {
         ...bestOffer,
+        imageUrl,
         offerCount,
       });
     });
@@ -2853,7 +3002,7 @@ export default function LovedOneDetailsScreen({
     .sort((a, b) => a.price - b.price)
     .slice(0, 12);
   const selectedGiftProductsTotal = selectedGiftProducts.reduce(
-    (sum, product) => sum + product.price,
+    (sum, product) => sum + getDisplayedProductPrice(product),
     0
   );
   const selectedGiftBudgetHistory =
@@ -3743,6 +3892,10 @@ export default function LovedOneDetailsScreen({
                               getProductIdentityKey(product) ===
                                 activePriceAlert.productKey);
 
+                          const displayImageUrl =
+                            product.imageUrl ||
+                            bestImageByKey.get(getProductIdentityKey(product));
+
                           return (
                             <Pressable
                               key={product.id}
@@ -3753,9 +3906,9 @@ export default function LovedOneDetailsScreen({
                               ]}
                               onPress={() => setSelectedProductDetailId(product.id)}
                             >
-                              {!!product.imageUrl && (
+                              {!!displayImageUrl && (
                                 <Image
-                                  source={{ uri: product.imageUrl }}
+                                  source={{ uri: displayImageUrl }}
                                   style={styles.productThumb}
                                 />
                               )}
@@ -3777,7 +3930,7 @@ export default function LovedOneDetailsScreen({
                               </View>
                               <View style={styles.productPriceBox}>
                                 <Text style={styles.productPrice}>
-                                  {formatMoney(product.price, product.currency)}
+                                  {formatMoney(getDisplayedProductPrice(product), product.currency)}
                                 </Text>
                                 {visibleSelectedGiftPlan.status !== 'planned' ? (
                                   <Text style={styles.lockedProductText}>
@@ -5294,10 +5447,108 @@ export default function LovedOneDetailsScreen({
                       style={[styles.modalInput, styles.aiPromptInput]}
                       multiline
                       value={aiPromptInput}
-                      onChangeText={setAiPromptInput}
+                      onChangeText={(val) => {
+                        setAiPromptInput(val);
+                        setAiResponse([]);
+                      }}
                     />
+                    <Pressable
+                      style={[styles.saveGiftButton, aiLoading && styles.disabledButton]}
+                      onPress={sendAiHelp}
+                      disabled={aiLoading}
+                    >
+                      {aiLoading ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.saveGiftButtonText}>Trimite la GiftBot</Text>
+                      )}
+                    </Pressable>
                   </View>
                 )}
+
+                {!!aiHelpError && (
+                  <Text style={styles.giftErrorText}>{aiHelpError}</Text>
+                )}
+
+                {aiResponse.length > 0 && (() => {
+                  const suggestionsById = buildSuggestionsById();
+                  const alreadyAddedKeys = new Set(
+                    (visibleSelectedGiftPlan.selectedProducts || []).map((p) =>
+                      getProductIdentityKey(p)
+                    )
+                  );
+                  const matched = aiResponse
+                    .map((rec) => ({ rec, suggestion: suggestionsById.get(rec.id) }))
+                    .filter(
+                      (item): item is { rec: GiftBotRecommendation; suggestion: ProductSuggestion } =>
+                        Boolean(item.suggestion) &&
+                        !alreadyAddedKeys.has(getProductIdentityKey(item.suggestion!))
+                    );
+
+                  if (matched.length === 0) return null;
+
+                  return (
+                    <View style={styles.aiResponseBox}>
+                      <Text style={styles.notesTitle}>
+                        Recomandări GiftBot ({matched.length})
+                      </Text>
+                      {matched.length > 1 && (
+                        <Pressable
+                          style={[styles.saveGiftButton, savingGiftProducts && styles.disabledButton]}
+                          disabled={savingGiftProducts}
+                          onPress={() =>
+                            addAllBotProductsToGift(
+                              visibleSelectedGiftPlan,
+                              matched.map(({ suggestion }) => suggestion)
+                            )
+                          }
+                        >
+                          {savingGiftProducts ? (
+                            <ActivityIndicator color="#fff" />
+                          ) : (
+                            <Text style={styles.saveGiftButtonText}>
+                              Adaugă toate ({matched.length})
+                            </Text>
+                          )}
+                        </Pressable>
+                      )}
+                      {matched.map(({ rec, suggestion }) => {
+                        const botImageUrl =
+                          suggestion.imageUrl ||
+                          bestImageByKey.get(getProductIdentityKey(suggestion));
+                        return (
+                        <View key={rec.id} style={styles.aiBotProductCard}>
+                          {!!botImageUrl && (
+                            <Image
+                              source={{ uri: botImageUrl }}
+                              style={styles.aiBotProductImage}
+                              resizeMode="contain"
+                            />
+                          )}
+                          <Text style={styles.aiBotProductName}>{suggestion.name}</Text>
+                          {!!suggestion.brand && (
+                            <Text style={styles.aiBotProductMeta}>{suggestion.brand}</Text>
+                          )}
+                          <Text style={styles.aiBotProductMeta}>{suggestion.storeName}</Text>
+                          <Text style={styles.aiBotProductPrice}>
+                            {suggestion.price} {suggestion.currency || 'RON'}
+                          </Text>
+                          <Text style={styles.aiResponseText}>{rec.reason}</Text>
+                          <Pressable
+                            style={[styles.addProductButton, savingGiftProducts && styles.disabledButton]}
+                            disabled={savingGiftProducts}
+                            onPress={() =>
+                              addProductToGift(visibleSelectedGiftPlan, suggestion)
+                            }
+                          >
+                            <Text style={styles.addProductButtonText}>Adaugă</Text>
+                          </Pressable>
+                        </View>
+                        );
+                      })}
+                    </View>
+                  );
+                })()}
 
                 <Pressable style={styles.cancelGiftButton} onPress={closeAiHelpModal}>
                   <Text style={styles.cancelGiftButtonText}>Inchide</Text>
@@ -5598,10 +5849,83 @@ export default function LovedOneDetailsScreen({
                       style={[styles.modalInput, styles.aiPromptInput]}
                       multiline
                       value={changeProductAiPromptInput}
-                      onChangeText={setChangeProductAiPromptInput}
+                      onChangeText={(val) => {
+                        setChangeProductAiPromptInput(val);
+                        setChangeProductAiResponse([]);
+                      }}
                     />
+                    <Pressable
+                      style={[
+                        styles.saveGiftButton,
+                        changeProductAiLoading && styles.disabledButton,
+                      ]}
+                      onPress={sendChangeProductAiHelp}
+                      disabled={changeProductAiLoading}
+                    >
+                      {changeProductAiLoading ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.saveGiftButtonText}>Trimite la GiftBot</Text>
+                      )}
+                    </Pressable>
                   </View>
                 )}
+
+                {changeProductAiResponse.length > 0 && (() => {
+                  const suggestionsById = buildSuggestionsById();
+                  const alreadyAddedKeys = new Set(
+                    (visibleSelectedGiftPlan.selectedProducts || []).map((p) =>
+                      getProductIdentityKey(p)
+                    )
+                  );
+                  const matched = changeProductAiResponse
+                    .map((rec) => ({ rec, suggestion: suggestionsById.get(rec.id) }))
+                    .filter(
+                      (item): item is { rec: GiftBotRecommendation; suggestion: ProductSuggestion } =>
+                        Boolean(item.suggestion) &&
+                        !alreadyAddedKeys.has(getProductIdentityKey(item.suggestion!))
+                    );
+
+                  return (
+                    <View style={styles.aiResponseBox}>
+                      <Text style={styles.notesTitle}>Recomandare GiftBot</Text>
+                      {matched.map(({ rec, suggestion }) => {
+                        const botImageUrl =
+                          suggestion.imageUrl ||
+                          bestImageByKey.get(getProductIdentityKey(suggestion));
+                        return (
+                          <View key={rec.id} style={styles.aiBotProductCard}>
+                            {!!botImageUrl && (
+                              <Image
+                                source={{ uri: botImageUrl }}
+                                style={styles.aiBotProductImage}
+                                resizeMode="contain"
+                              />
+                            )}
+                            <Text style={styles.aiBotProductName}>{suggestion.name}</Text>
+                            {!!suggestion.brand && (
+                              <Text style={styles.aiBotProductMeta}>{suggestion.brand}</Text>
+                            )}
+                            <Text style={styles.aiBotProductMeta}>{suggestion.storeName}</Text>
+                            <Text style={styles.aiBotProductPrice}>
+                              {suggestion.price} {suggestion.currency || 'RON'}
+                            </Text>
+                            <Text style={styles.aiResponseText}>{rec.reason}</Text>
+                            <Pressable
+                              style={styles.addProductButton}
+                              onPress={() => {
+                                addProductToGift(visibleSelectedGiftPlan, suggestion);
+                                closeChangeProductFlow();
+                              }}
+                            >
+                              <Text style={styles.addProductButtonText}>Adaugă</Text>
+                            </Pressable>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  );
+                })()}
 
                 <Pressable style={styles.cancelGiftButton} onPress={closeChangeProductFlow}>
                   <Text style={styles.cancelGiftButtonText}>Inchide</Text>
@@ -6527,6 +6851,45 @@ const styles = StyleSheet.create({
   aiPromptInput: {
     minHeight: 180,
     textAlignVertical: 'top',
+  },
+  aiResponseBox: {
+    marginTop: 14,
+    gap: 10,
+  },
+  aiResponseText: {
+    fontSize: 13,
+    color: C.textDim,
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  aiBotProductCard: {
+    backgroundColor: C.surface,
+    borderRadius: R.md,
+    padding: 12,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    gap: 4,
+  },
+  aiBotProductImage: {
+    width: '100%',
+    height: 100,
+    borderRadius: R.sm,
+    marginBottom: 6,
+  },
+  aiBotProductName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: C.text,
+  },
+  aiBotProductMeta: {
+    fontSize: 12,
+    color: C.textDim,
+  },
+  aiBotProductPrice: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: C.accent,
+    marginTop: 2,
   },
   aiChoiceRow: {
     flexDirection: 'row',

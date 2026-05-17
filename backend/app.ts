@@ -7,6 +7,7 @@ import uploadRoutes from './routes/uploadRoutes';
 import partnerStoresRoutes from './routes/partnerStoresRoutes';
 import adminStatisticsRoutes from './routes/adminStatisticsRoutes';
 import priceAlertsRoutes from './routes/priceAlertsRoutes';
+import giftBotRoutes from './routes/giftBotRoutes';
 
 const app = express();
 
@@ -25,5 +26,6 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/partner-stores', partnerStoresRoutes);
 app.use('/api/admin-statistics', adminStatisticsRoutes);
 app.use('/api/price-alerts', priceAlertsRoutes);
+app.use('/api/giftbot', giftBotRoutes);
 
 export default app;

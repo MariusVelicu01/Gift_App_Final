@@ -46,14 +46,6 @@ function openStoreLink(domain?: string) {
   });
 }
 
-function formatDateKey(value?: string) {
-  const match = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(String(value || ''));
-
-  if (!match) return '-';
-
-  return `${match[3]}.${match[2]}.${match[1]}`;
-}
-
 function shuffleProducts<T>(items: T[]) {
   return [...items].sort(() => Math.random() - 0.5);
 }

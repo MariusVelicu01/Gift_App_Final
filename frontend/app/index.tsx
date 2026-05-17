@@ -72,7 +72,7 @@ function GuestHome({ onOpenAuth }: { onOpenAuth: () => void }) {
       {/* ── HERO ── */}
       <View style={styles.hero}>
         <View style={styles.heroBadge}>
-          <Text style={styles.heroBadgeText}>🎀 Planificatorul tău de cadouri</Text>
+          <Text style={styles.heroBadgeText}>Planificatorul tău de cadouri</Text>
         </View>
 
         <Text style={[styles.heroHeadline, isWide && styles.heroHeadlineWide]}>
@@ -92,10 +92,9 @@ function GuestHome({ onOpenAuth }: { onOpenAuth: () => void }) {
           ]}
           onPress={onOpenAuth}
         >
-          <Text style={styles.heroButtonText}>Începe gratuit  →</Text>
+          <Text style={styles.heroButtonText}>Începe acum  →</Text>
         </Pressable>
 
-        <Text style={styles.heroNote}>Fără card. Fără abonament.</Text>
 
         {/* Decorative blobs */}
         <View style={styles.blobTopRight} />
@@ -169,7 +168,7 @@ function GuestHome({ onOpenAuth }: { onOpenAuth: () => void }) {
           Gata să oferi cadouri{'\n'}cu adevărat speciale?
         </Text>
         <Text style={styles.ctaSubtext}>
-          Alătură-te și începe să planifici cadouri inteligent — gratuit.
+          Alătură-te și începe să planifici cadouri inteligent.
         </Text>
 
         <Pressable
@@ -180,7 +179,7 @@ function GuestHome({ onOpenAuth }: { onOpenAuth: () => void }) {
           ]}
           onPress={onOpenAuth}
         >
-          <Text style={styles.ctaButtonText}>Creează cont gratuit</Text>
+          <Text style={styles.ctaButtonText}>Creează cont</Text>
         </Pressable>
 
         <Pressable onPress={onOpenAuth} style={styles.ctaLoginWrap}>
@@ -240,7 +239,7 @@ function IndexContent() {
     <SafeAreaView style={styles.container}>
       {(!profile || serverChecking || !serverUp || loading) && (
         <View style={styles.topBar}>
-          <Text style={styles.appName}>🎀 GiftApp</Text>
+          <Text style={styles.appName}>GiftApp</Text>
           {!profile && (
             <Pressable
               style={[styles.topBarButton, !serverUp && styles.topBarButtonDisabled]}

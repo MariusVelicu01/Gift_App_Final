@@ -98,6 +98,7 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
   const [passwordError, setPasswordError] = useState('');
   const [showCurrentPw, setShowCurrentPw] = useState(false);
   const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
 
   const [settings, setSettings] = useState<ClientSettings>(DEFAULT_SETTINGS);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -413,7 +414,9 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
             style={styles.eyeButton}
             onPress={() => setShowCurrentPw((v) => !v)}
           >
-            <Text style={styles.eyeText}>{showCurrentPw ? '\uD83D\uDE48' : '\uD83D\uDC41'}</Text>
+            <Text style={styles.eyeButtonText}>
+              {showCurrentPw ? 'Ascunde' : 'Arat\u0103'}
+            </Text>
           </Pressable>
         </View>
         <Text style={styles.inputLabel}>Parola noua</Text>
@@ -431,21 +434,33 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
             style={styles.eyeButton}
             onPress={() => setShowNewPw((v) => !v)}
           >
-            <Text style={styles.eyeText}>{showNewPw ? '\uD83D\uDE48' : '\uD83D\uDC41'}</Text>
+            <Text style={styles.eyeButtonText}>
+              {showNewPw ? 'Ascunde' : 'Arat\u0103'}
+            </Text>
           </Pressable>
         </View>
         <Text style={styles.inputLabel}>Confirma parola noua</Text>
-        <TextInput
-          style={styles.input}
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-          placeholder="Repeta parola noua"
-          placeholderTextColor="#9ca3af"
-          secureTextEntry
-          editable={!savingPassword}
-          onSubmitEditing={savePassword}
-          returnKeyType="done"
-        />
+        <View style={styles.passwordRow}>
+          <TextInput
+            style={[styles.input, styles.flex1]}
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            placeholder="Repeta parola noua"
+            placeholderTextColor="#9ca3af"
+            secureTextEntry={!showConfirmPw}
+            editable={!savingPassword}
+            onSubmitEditing={savePassword}
+            returnKeyType="done"
+          />
+          <Pressable
+            style={styles.eyeButton}
+            onPress={() => setShowConfirmPw((v) => !v)}
+          >
+            <Text style={styles.eyeButtonText}>
+              {showConfirmPw ? 'Ascunde' : 'Arat\u0103'}
+            </Text>
+          </Pressable>
+        </View>
         {!!passwordError && <Text style={styles.errorText}>{passwordError}</Text>}
         {!!passwordMessage && <Text style={styles.successText}>{passwordMessage}</Text>}
         <Pressable
@@ -756,10 +771,13 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   eyeButton: {
-    padding: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
-  eyeText: {
-    fontSize: 18,
+  eyeButtonText: {
+    fontSize: 13,
+    color: C.accent,
+    fontWeight: '500',
   },
   hintText: {
     color: C.textFaint,
