@@ -239,7 +239,7 @@ function IndexContent() {
     <SafeAreaView style={styles.container}>
       {(!profile || serverChecking || !serverUp || loading) && (
         <View style={styles.topBar}>
-          <Text style={styles.appName}>GiftApp</Text>
+          <Text style={styles.appName}>PresentPerfect</Text>
           {!profile && (
             <Pressable
               style={[styles.topBarButton, !serverUp && styles.topBarButtonDisabled]}

@@ -1,0 +1,15 @@
+users
+  uid
+    lovedOnes
+      lovedOneId
+        giftPlans
+          giftPlanId
+
+    priceAlerts
+      alertId
+
+
+partnerStores
+  storeId
+    products
+      productId

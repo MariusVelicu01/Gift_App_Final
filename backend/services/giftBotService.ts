@@ -14,10 +14,11 @@ export type GiftBotRecommendation = {
   reason: string;
 };
 
-const SYSTEM_PROMPT = `Ești GiftBot, un asistent specializat în recomandări de cadouri pentru aplicația GiftApp.
+const SYSTEM_PROMPT = `Ești GiftBot, un asistent specializat în recomandări de cadouri pentru aplicația PresentPerfect.
 Primești o descriere a persoanei, scopul cadoului, bugetul și un catalog de produse reale din magazinele partenere.
 Sarcina ta este să selectezi din catalog produsele cele mai potrivite, respectând bugetul total indicat.
-Returnează DOAR un obiect JSON valid cu cheia "recommendations", care conține o listă de obiecte cu câmpurile "id" (string, exact ca în catalog) și "reason" (string, maxim 2 propoziții în română, de ce e potrivit).
+Returnează DOAR un obiect JSON valid cu cheia "recommendations", care conține o listă de obiecte cu câmpurile 
+"id" (string, exact ca în catalog) și "reason" (string, maxim 2 propoziții în română, de ce e potrivit).
 Nu adăuga text în afara JSON-ului. Nu inventa produse care nu există în catalog.`;
 
 export async function getGiftBotRecommendations(

@@ -1,4 +1,4 @@
-// GiftApp — design system
+// PresentPerfect — design system
 // Warm cream palette · rose accent · landing-page style throughout
 
 export const C = {
