@@ -15,6 +15,11 @@ import {
   getAdminUserStatistics,
 } from '../../../services/adminStatisticsApi';
 import { C, R, S } from '../../../constants/theme';
+import {
+  generateUsersReport,
+  generateStoresReport,
+  generateProductDemandReport,
+} from '../../../utils/reportGenerator';
 
 type GenderFilter = 'male' | 'female';
 type StatsView = 'overview' | 'users' | 'stores' | 'productDemand';
@@ -260,6 +265,15 @@ export default function StatisticsScreen() {
     storeStats.productDemandAdded,
     storeStats.productDemandPurchased,
   ]);
+
+  const reportFilters = useMemo(
+    () => ({
+      year: selectedYear,
+      purpose: selectedPurpose,
+      genders: selectedGenders,
+    }),
+    [selectedYear, selectedPurpose, selectedGenders]
+  );
 
   const toggleGender = (gender: GenderFilter) => {
     setSelectedGenders((current) =>
@@ -547,55 +561,91 @@ export default function StatisticsScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Statistici</Text>
 
-      <Pressable
-        style={({ hovered, pressed }) => [
-          styles.card,
-          styles.clickableCard,
-          hovered && styles.clickableCardHover,
-          pressed && styles.clickableCardPressed,
-        ]}
-        onPress={() => setView('users')}
-      >
-        <Text style={styles.cardTitle}>Statistici useri</Text>
-        <Text style={styles.cardText}>
-          Vezi bugete, ritm de cumparare, intarzieri si diferente pe gen, an sau
-          scopul cadoului.
-        </Text>
-      </Pressable>
+      <View style={[styles.card, styles.clickableCard]}>
+        <Pressable
+          style={({ hovered, pressed }) => [
+            styles.cardBody,
+            hovered && styles.clickableCardHover,
+            pressed && styles.clickableCardPressed,
+          ]}
+          onPress={() => setView('users')}
+        >
+          <Text style={styles.cardTitle}>Statistici useri</Text>
+          <Text style={styles.cardText}>
+            Vezi bugete, ritm de cumparare, intarzieri si diferente pe gen, an sau
+            scopul cadoului.
+          </Text>
+        </Pressable>
+        <View style={styles.cardDivider} />
+        <Pressable
+          style={({ hovered, pressed }) => [
+            styles.reportButton,
+            hovered && styles.reportButtonHover,
+            pressed && styles.reportButtonPressed,
+          ]}
+          onPress={() => generateUsersReport(stats, reportFilters)}
+        >
+          <Text style={styles.reportButtonText}>↓ Generează raport Excel</Text>
+        </Pressable>
+      </View>
 
-      <Pressable
-        style={({ hovered, pressed }) => [
-          styles.card,
-          styles.clickableCard,
-          styles.storeClickableCard,
-          hovered && styles.clickableCardHover,
-          pressed && styles.clickableCardPressed,
-        ]}
-        onPress={() => setView('stores')}
-      >
-        <Text style={styles.cardTitle}>Statistici magazine</Text>
-        <Text style={styles.cardText}>
-          Vezi categoriile cumparate, magazinele cele mai cautate si produsele
-          cumparate cel mai des, filtrate dupa an, scop si gen.
-        </Text>
-      </Pressable>
+      <View style={[styles.card, styles.clickableCard, styles.storeClickableCard]}>
+        <Pressable
+          style={({ hovered, pressed }) => [
+            styles.cardBody,
+            hovered && styles.clickableCardHover,
+            pressed && styles.clickableCardPressed,
+          ]}
+          onPress={() => setView('stores')}
+        >
+          <Text style={styles.cardTitle}>Statistici magazine</Text>
+          <Text style={styles.cardText}>
+            Vezi categoriile cumparate, magazinele cele mai cautate si produsele
+            cumparate cel mai des, filtrate dupa an, scop si gen.
+          </Text>
+        </Pressable>
+        <View style={styles.cardDivider} />
+        <Pressable
+          style={({ hovered, pressed }) => [
+            styles.reportButton,
+            styles.reportButtonStore,
+            hovered && styles.reportButtonHover,
+            pressed && styles.reportButtonPressed,
+          ]}
+          onPress={() => generateStoresReport(storeStats, reportFilters)}
+        >
+          <Text style={styles.reportButtonText}>↓ Generează raport Excel</Text>
+        </Pressable>
+      </View>
 
-      <Pressable
-        style={({ hovered, pressed }) => [
-          styles.card,
-          styles.clickableCard,
-          styles.productDemandClickableCard,
-          hovered && styles.clickableCardHover,
-          pressed && styles.clickableCardPressed,
-        ]}
-        onPress={() => setView('productDemand')}
-      >
-        <Text style={styles.cardTitle}>Cerere de produse</Text>
-        <Text style={styles.cardText}>
-          Vezi produsele pe care userii nu le-au gasit in cautari si le-au
-          adaugat manual, de la cele mai dorite la cele mai rare.
-        </Text>
-      </Pressable>
+      <View style={[styles.card, styles.clickableCard, styles.productDemandClickableCard]}>
+        <Pressable
+          style={({ hovered, pressed }) => [
+            styles.cardBody,
+            hovered && styles.clickableCardHover,
+            pressed && styles.clickableCardPressed,
+          ]}
+          onPress={() => setView('productDemand')}
+        >
+          <Text style={styles.cardTitle}>Cerere de produse</Text>
+          <Text style={styles.cardText}>
+            Vezi produsele pe care userii nu le-au gasit in cautari si le-au
+            adaugat manual, de la cele mai dorite la cele mai rare.
+          </Text>
+        </Pressable>
+        <View style={styles.cardDivider} />
+        <Pressable
+          style={({ hovered, pressed }) => [
+            styles.reportButton,
+            styles.reportButtonDemand,
+            hovered && styles.reportButtonHover,
+            pressed && styles.reportButtonPressed,
+          ]}
+          onPress={() => generateProductDemandReport(storeStats, reportFilters)}
+        >
+          <Text style={styles.reportButtonText}>↓ Generează raport Excel</Text>
+        </Pressable>
+      </View>
     </ScrollView>
   );
 }
@@ -694,6 +744,38 @@ const styles = StyleSheet.create({
   clickableCard: {
     borderTopWidth: 3,
     borderTopColor: C.warn,
+    padding: 0,
+    overflow: 'hidden',
+  },
+  cardBody: {
+    padding: 16,
+  },
+  cardDivider: {
+    height: 0.5,
+    backgroundColor: C.border,
+  },
+  reportButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: C.accentSoft,
+    alignItems: 'center',
+  },
+  reportButtonStore: {
+    backgroundColor: C.surface2,
+  },
+  reportButtonDemand: {
+    backgroundColor: C.surface2,
+  },
+  reportButtonHover: {
+    opacity: 0.8,
+  },
+  reportButtonPressed: {
+    opacity: 0.6,
+  },
+  reportButtonText: {
+    color: C.accent,
+    fontWeight: '700',
+    fontSize: 14,
   },
   storeClickableCard: {
     borderTopColor: C.sage,
