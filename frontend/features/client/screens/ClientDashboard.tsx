@@ -50,6 +50,7 @@ export default function ClientDashboard({ firstName, onLogout }: Props) {
   const [activeTab, setActiveTab] = useState<ClientTab>('home');
   const [alerts, setAlerts] = useState<AppNotification[]>([]);
   const [priceAlertTarget, setPriceAlertTarget] = useState<PriceAlertTarget | null>(null);
+  const [giftDetailsTarget, setGiftDetailsTarget] = useState<{ lovedOneId: string; giftPlanId: string } | null>(null);
   const [settingsPersonalDataOpen, setSettingsPersonalDataOpen] = useState(false);
   const [settingsNotificationsOpen, setSettingsNotificationsOpen] = useState(false);
 
@@ -106,12 +107,22 @@ export default function ClientDashboard({ firstName, onLogout }: Props) {
   const renderScreen = () => {
     switch (activeTab) {
       case 'home':
-        return <HomeScreen firstName={firstName} />;
+        return (
+          <HomeScreen
+            firstName={firstName}
+            onOpenGift={(target) => {
+              setGiftDetailsTarget(target);
+              setActiveTab('lovedOnes');
+            }}
+          />
+        );
       case 'lovedOnes':
         return (
           <LovedOnesScreen
             priceAlertTarget={priceAlertTarget}
             onPriceAlertTargetConsumed={() => setPriceAlertTarget(null)}
+            giftDetailsTarget={giftDetailsTarget}
+            onGiftDetailsTargetConsumed={() => setGiftDetailsTarget(null)}
             resetRef={lovedOnesResetRef}
           />
         );

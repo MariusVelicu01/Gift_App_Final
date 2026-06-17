@@ -153,15 +153,6 @@ function GuestHome({ onOpenAuth }: { onOpenAuth: () => void }) {
         </View>
       </View>
 
-      {/* ── QUOTE ── */}
-      <View style={styles.quoteSection}>
-        <Text style={styles.quoteText}>
-          "Nu mai uita niciodată o zi de naștere.{'\n'}
-          Nu mai plăti niciodată prea mult pentru un cadou."
-        </Text>
-        <Text style={styles.quoteAuthor}>— Gift Affiliate App</Text>
-      </View>
-
       {/* ── BOTTOM CTA ── */}
       <View style={styles.ctaSection}>
         <Text style={[styles.ctaHeadline, isWide && styles.ctaHeadlineWide]}>
@@ -188,7 +179,7 @@ function GuestHome({ onOpenAuth }: { onOpenAuth: () => void }) {
       </View>
 
       <View style={styles.footer}>
-        <Text style={styles.footerText}>Gift Affiliate App · Cadouri inteligente</Text>
+        <Text style={styles.footerText}>PresentPerfect · Cadouri inteligente</Text>
       </View>
     </ScrollView>
   );
@@ -556,29 +547,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fce7e0',
     marginLeft: 21,
     marginVertical: 4,
-  },
-
-  /* QUOTE */
-  quoteSection: {
-    backgroundColor: '#be123c',
-    paddingHorizontal: 32,
-    paddingVertical: 52,
-    alignItems: 'center',
-  },
-  quoteText: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#fff',
-    textAlign: 'center',
-    lineHeight: 34,
-    fontStyle: 'italic',
-    letterSpacing: -0.3,
-  },
-  quoteAuthor: {
-    marginTop: 18,
-    color: '#fecdd3',
-    fontSize: 14,
-    fontWeight: '600',
   },
 
   /* BOTTOM CTA */
