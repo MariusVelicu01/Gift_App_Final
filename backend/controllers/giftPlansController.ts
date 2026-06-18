@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getLovedOneById } from '../services/lovedOnesService';
+import { getPartnerStoreById } from '../services/partnerStoresService';
 import {
   completeGiftPlan,
   createGiftPlan,
@@ -378,7 +379,8 @@ function normalizeSelectedProducts(products: unknown) {
       manualSearchFallback:
         product?.manualSearchFallback !== undefined
           ? Boolean(product?.manualSearchFallback)
-          : storeId === 'manual',
+          : storeId === 'manual' || !String(product?.productKey || '').trim(),
+      wasEverPurchased: Boolean(product?.wasEverPurchased) || Boolean(product?.isPurchased),
     };
   });
 
@@ -715,6 +717,54 @@ export async function complete(req: Request, res: Response) {
     );
     const appFeedbackRating = Number(req.body.appFeedbackRating);
 
+    const uniqueStoreIds = Array.from(
+      new Set(
+        purchasedProducts
+          .map((p: any) => String(p?.storeId || ''))
+          .filter((id: string) => id && id !== 'manual')
+      )
+    );
+    const storeCommissionMap = new Map<string, number>();
+    await Promise.all(
+      uniqueStoreIds.map(async (storeId: string) => {
+        try {
+          const store = await getPartnerStoreById(storeId);
+          const pct = Number((store as any)?.affiliate?.commissionPercent);
+          if (Number.isFinite(pct) && pct > 0) {
+            storeCommissionMap.set(storeId, pct);
+          }
+        } catch {
+          // store not found — skip
+        }
+      })
+    );
+
+    const purchasedProductsWithCommission = purchasedProducts.map((product: any) => {
+      const storeId = String(product?.storeId || '');
+      const purchasePrice = Number(product?.purchasePrice || product?.price || 0);
+
+      const productLevelPct = Number(product?.affiliate?.commissionPercent);
+      const commissionPercent = (Number.isFinite(productLevelPct) && productLevelPct > 0)
+        ? productLevelPct
+        : storeCommissionMap.get(storeId);
+
+      if (!commissionPercent || storeId === 'manual') {
+        return { ...product, affiliateCommission: { commissionPercent: 0, expectedAmount: 0, status: 'not_applicable', receivedAmount: 0, receivedAt: '' } };
+      }
+
+      const expectedAmount = Math.round((purchasePrice * commissionPercent / 100) * 100) / 100;
+      return {
+        ...product,
+        affiliateCommission: {
+          commissionPercent,
+          expectedAmount,
+          status: 'pending',
+          receivedAmount: 0,
+          receivedAt: '',
+        },
+      };
+    });
+
     const giftPlan = await completeGiftPlan(uid, lovedOneId, giftPlanId, {
       status: 'purchased',
       appFeedbackDetails: String(req.body.appFeedbackDetails || '').trim(),
@@ -735,7 +785,7 @@ export async function complete(req: Request, res: Response) {
         'purchased',
         updatedAtIso
       ),
-      selectedProducts: purchasedProducts,
+      selectedProducts: purchasedProductsWithCommission,
       updatedAt: updatedAtIso,
     });
 
@@ -875,9 +925,20 @@ export async function updateProducts(req: Request, res: Response) {
       return res.status(400).json({ message: error.message });
     }
 
+    // Preserve wasEverPurchased from existing Firestore data —
+    // once a product was marked purchased it stays tracked even if unchecked.
+    const existingById = new Map(
+      (existing.selectedProducts || []).map((p: any) => [String(p?.id || ''), p])
+    );
+    const mergedProducts = normalizedProducts.map((p: any) => ({
+      ...p,
+      wasEverPurchased:
+        p.wasEverPurchased || Boolean(existingById.get(p.id)?.wasEverPurchased),
+    }));
+
     const updatedAt = new Date().toISOString();
     const payload: any = {
-      selectedProducts: normalizedProducts,
+      selectedProducts: mergedProducts,
       updatedAt,
     };
 

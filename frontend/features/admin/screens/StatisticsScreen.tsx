@@ -131,6 +131,8 @@ export default function StatisticsScreen() {
       const matchesGender =
         selectedGenders.length === 0
           ? false
+          : selectedGenders.length === 2
+          ? true
           : selectedGenders.includes(giftPlan.userGender as GenderFilter);
 
       return matchesYear && matchesPurpose && matchesGender;
@@ -203,18 +205,26 @@ export default function StatisticsScreen() {
     const purchasedProductMap = new Map<string, TopEntry>();
     const productDemandAddedMap = new Map<string, TopEntry>();
     const productDemandPurchasedMap = new Map<string, TopEntry>();
+    const productDemandPurchasedPrices = new Map<string, number[]>();
     const purchasedProducts = selectedProducts.filter((product) => product.isPurchased);
 
     selectedProducts.forEach((product) => {
-      if (product.storeId !== 'manual') {
+      if (product.storeId !== 'manual' && product.productKey) {
         addCount(listedStoreMap, product.storeName || 'Magazin necunoscut');
       }
 
-      if (product.manualSearchFallback || product.storeId === 'manual') {
+      if (product.manualSearchFallback || product.storeId === 'manual' || !product.productKey) {
         addCount(productDemandAddedMap, product.name || 'Produs fara nume');
 
-        if (product.isPurchased) {
-          addCount(productDemandPurchasedMap, product.name || 'Produs fara nume');
+        // wasEverPurchased rămâne true chiar dacă isPurchased a fost bifat înapoi
+        if (product.isPurchased || product.wasEverPurchased) {
+          const label = (product.name || 'Produs fara nume').trim();
+          addCount(productDemandPurchasedMap, label);
+          if (product.purchasePrice > 0) {
+            const existing = productDemandPurchasedPrices.get(label) || [];
+            existing.push(product.purchasePrice);
+            productDemandPurchasedPrices.set(label, existing);
+          }
         }
       }
     });
@@ -243,7 +253,12 @@ export default function StatisticsScreen() {
       purchasedStores: toTopEntries(purchasedStoreMap),
       topPurchasedProducts: toTopEntries(purchasedProductMap, 3),
       productDemandAdded: toTopEntries(productDemandAddedMap),
-      productDemandPurchased: toTopEntries(productDemandPurchasedMap),
+      productDemandPurchased: toTopEntries(productDemandPurchasedMap).map((entry) => {
+        const prices = productDemandPurchasedPrices.get(entry.label) || [];
+        if (prices.length === 0) return entry;
+        const avg = prices.reduce((s, p) => s + p, 0) / prices.length;
+        return { ...entry, hint: `~${Math.round(avg)} RON` };
+      }),
     };
   }, [filteredGiftPlans]);
 
@@ -442,6 +457,9 @@ export default function StatisticsScreen() {
                   </View>
                   <View style={styles.topInfo}>
                     <Text style={styles.topLabel}>{entry.label}</Text>
+                    {!!entry.hint && (
+                      <Text style={styles.metricHint}>{entry.hint}</Text>
+                    )}
                   </View>
                   <Text style={styles.topCount}>{entry.count}</Text>
                 </View>
@@ -495,6 +513,7 @@ export default function StatisticsScreen() {
               entries={storeStats.topPurchasedProducts}
               tone="success"
             />
+
           </>
         ) : (
           <>
@@ -646,6 +665,7 @@ export default function StatisticsScreen() {
           <Text style={styles.reportButtonText}>↓ Generează raport Excel</Text>
         </Pressable>
       </View>
+
     </ScrollView>
   );
 }

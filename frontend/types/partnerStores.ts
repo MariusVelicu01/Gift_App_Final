@@ -29,6 +29,10 @@ export type ProductImportItem = {
     inStock?: boolean;
     stockStatus?: string;
   };
+  affiliate?: {
+    commissionPercent?: number;
+    estimatedCommissionRON?: number;
+  };
 };
 
 export type ProductPriceHistoryEntry = {
@@ -82,6 +86,12 @@ export type PartnerStore = {
     name?: string;
     domain?: string;
     affiliateNetwork?: string;
+  };
+  affiliate?: {
+    commissionPercent: number;
+    network?: string;
+    programId?: string;
+    paymentTermDays?: number;
   };
   currency?: string;
   lastUpdated?: string;
