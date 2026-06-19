@@ -128,6 +128,20 @@ function buildStorePayload(body: any) {
     return { error: 'Data de final nu poate fi inaintea datei de inceput.' };
   }
 
+  const affiliateRaw = body.affiliate || {};
+  const commissionPercent = Number(affiliateRaw.commissionPercent);
+  const affiliate =
+    Number.isFinite(commissionPercent) && commissionPercent >= 0
+      ? {
+          commissionPercent,
+          ...(affiliateRaw.network ? { network: String(affiliateRaw.network).trim() } : {}),
+          ...(affiliateRaw.programId ? { programId: String(affiliateRaw.programId).trim() } : {}),
+          ...(affiliateRaw.paymentTermDays !== undefined
+            ? { paymentTermDays: Number(affiliateRaw.paymentTermDays) }
+            : {}),
+        }
+      : null;
+
   return {
     payload: {
       companyName,
@@ -137,6 +151,7 @@ function buildStorePayload(body: any) {
       contractStartDate,
       contractEndDate,
       ...(brandImageUri ? { brandImageUri } : {}),
+      ...(affiliate ? { affiliate } : {}),
     },
   };
 }
@@ -225,6 +240,12 @@ function normalizeProducts(products: any[]) {
               },
             }
           : {}),
+        ...(() => {
+          const aff = item.affiliate || {};
+          const pct = Number(aff.commissionPercent);
+          if (!Number.isFinite(pct) || pct <= 0) return {};
+          return { affiliate: { commissionPercent: pct } };
+        })(),
       };
     })
     .filter((item) => item.name.length > 0);
@@ -232,6 +253,9 @@ function normalizeProducts(products: any[]) {
 
 function normalizeImportMetadata(body: any) {
   const merchant = body.merchant || {};
+  const affiliateProgram = body.affiliateProgram || {};
+  const defaultPct = Number(affiliateProgram.defaultCommissionPercent ?? affiliateProgram.maxCommissionPercent);
+  const resolvedPct = Number.isFinite(defaultPct) && defaultPct > 0 ? defaultPct : null;
 
   return {
     ...(body.source ? { source: String(body.source) } : {}),
@@ -244,6 +268,16 @@ function normalizeImportMetadata(body: any) {
             ...(merchant.domain ? { domain: String(merchant.domain) } : {}),
             ...(merchant.affiliateNetwork
               ? { affiliateNetwork: String(merchant.affiliateNetwork) }
+              : {}),
+          },
+        }
+      : {}),
+    ...(resolvedPct
+      ? {
+          affiliate: {
+            commissionPercent: resolvedPct,
+            ...(affiliateProgram.cookieDurationDays !== undefined
+              ? { paymentTermDays: Number(affiliateProgram.cookieDurationDays) }
               : {}),
           },
         }
@@ -454,5 +488,75 @@ export async function getProductUsage(req: Request, res: Response) {
   } catch (error) {
     console.error('GET PRODUCT USAGE ERROR:', error);
     return res.status(500).json({ message: 'Nu am putut calcula statisticile produsului.' });
+  }
+}
+
+export async function getAffiliateStats(req: Request, res: Response) {
+  try {
+    const storeId = getParam(req.params.storeId);
+    const existing = await getPartnerStoreById(storeId);
+
+    if (!existing) {
+      return res.status(404).json({ message: 'Magazinul nu a fost gasit.' });
+    }
+
+    const snapshot = await db.collectionGroup('giftPlans').get();
+
+    let conversions = 0;
+    let totalExpected = 0;
+    let totalReceived = 0;
+    let commissionPercent = Number((existing as any)?.affiliate?.commissionPercent || 0);
+
+    const products: {
+      name: string;
+      commissionPercent: number;
+      expectedAmount: number;
+      receivedAmount: number;
+      status: string;
+      purchasePrice: number;
+    }[] = [];
+
+    snapshot.docs.forEach((doc) => {
+      const data = doc.data();
+      const selectedProducts = Array.isArray(data.selectedProducts) ? data.selectedProducts : [];
+      selectedProducts.forEach((product: any) => {
+        if (String(product?.storeId || '') !== storeId) return;
+        const commission = product?.affiliateCommission;
+        if (!commission || commission.status === 'not_applicable') return;
+
+        const expected = Number(commission.expectedAmount || 0);
+        const received = Number(commission.receivedAmount || 0);
+        const pct = Number(commission.commissionPercent || 0);
+
+        conversions += 1;
+        totalExpected = Math.round((totalExpected + expected) * 100) / 100;
+        if (commission.status === 'received') {
+          totalReceived = Math.round((totalReceived + received) * 100) / 100;
+        }
+        if (pct > 0) commissionPercent = pct;
+
+        products.push({
+          name: String(product.name || ''),
+          commissionPercent: pct,
+          expectedAmount: expected,
+          receivedAmount: received,
+          status: String(commission.status || 'pending'),
+          purchasePrice: Number(product.purchasePrice || product.price || 0),
+        });
+      });
+    });
+
+    return res.status(200).json({
+      storeId,
+      commissionPercent,
+      conversions,
+      totalExpected,
+      totalReceived,
+      totalPending: Math.round((totalExpected - totalReceived) * 100) / 100,
+      products,
+    });
+  } catch (error) {
+    console.error('GET AFFILIATE STATS ERROR:', error);
+    return res.status(500).json({ message: 'Nu am putut calcula statisticile afiliate.' });
   }
 }

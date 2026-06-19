@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   create,
+  getAffiliateStats,
   getAll,
   getProductUsage,
   importProducts,
@@ -15,6 +16,7 @@ router.use(requireAuth);
 
 router.get('/', getAll);
 router.get('/:storeId/product-usage', requireRole('admin'), getProductUsage);
+router.get('/:storeId/affiliate-stats', requireRole('admin'), getAffiliateStats);
 router.post('/', requireRole('admin'), create);
 router.put('/:storeId', requireRole('admin'), update);
 router.put('/:storeId/products', requireRole('admin'), importProducts);

@@ -23,17 +23,38 @@ export type AdminUserStatisticsGiftPlan = {
     category: string;
     subcategory: string;
     productKey: string;
+    productUrl: string;
     isPurchased: boolean;
     purchasedStoreName: string;
+    purchasePrice: number;
     selectedAsCheapestOffer: boolean;
     manualSearchFallback: boolean;
+    wasEverPurchased: boolean;
+    affiliateCommission: {
+      commissionPercent: number;
+      expectedAmount: number;
+      status: string;
+      receivedAmount: number;
+      receivedAt: string;
+    } | null;
   }[];
+};
+
+export type AffiliateEarning = {
+  storeId: string;
+  storeName: string;
+  commissionPercent: number;
+  conversions: number;
+  totalExpected: number;
+  totalReceived: number;
+  totalPending: number;
 };
 
 export type AdminUserStatisticsResponse = {
   years: number[];
   purposes: string[];
   giftPlans: AdminUserStatisticsGiftPlan[];
+  affiliateEarnings: AffiliateEarning[];
 };
 
 export async function getAdminUserStatistics(

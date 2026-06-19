@@ -18,7 +18,9 @@ import { useAuth } from '../../../context/AuthContext';
 import {
   createPartnerStore,
   getPartnerStoreProductUsage,
+  getStoreAffiliateStats,
   importPartnerStoreProducts,
+  StoreAffiliateStats,
   updatePartnerStore,
 } from '../../../services/partnerStoresApi';
 import {
@@ -370,9 +372,25 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
   const [usageError, setUsageError] = useState('');
   const [usagePurposeFilter, setUsagePurposeFilter] = useState('all');
   const [usageYearFilter, setUsageYearFilter] = useState('all');
+  const [affiliateStats, setAffiliateStats] = useState<StoreAffiliateStats | null>(null);
+  const [affiliateLoading, setAffiliateLoading] = useState(false);
   const [productSearchText, setProductSearchText] = useState('');
   const [productCategoryFilter, setProductCategoryFilter] = useState('all');
   const [productPage, setProductPage] = useState(0);
+
+  useEffect(() => {
+    if (!selectedStoreId || !token) {
+      setAffiliateStats(null);
+      return;
+    }
+    let cancelled = false;
+    setAffiliateLoading(true);
+    getStoreAffiliateStats(token, selectedStoreId)
+      .then((data) => { if (!cancelled) setAffiliateStats(data); })
+      .catch(() => { if (!cancelled) setAffiliateStats(null); })
+      .finally(() => { if (!cancelled) setAffiliateLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedStoreId, token]);
 
   const selectedStore = useMemo(() => {
     return stores.find((store) => store.id === selectedStoreId) || null;
@@ -857,6 +875,80 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
           >
             <Text style={styles.secondaryButtonText}>Editeaza magazinul</Text>
           </Pressable>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Incasari afiliate</Text>
+          {selectedStore.affiliate?.commissionPercent ? (
+            <Text style={styles.meta}>
+              Comision configurat: {selectedStore.affiliate.commissionPercent}%
+            </Text>
+          ) : null}
+
+          {affiliateLoading ? (
+            <ActivityIndicator style={{ marginTop: 12 }} />
+          ) : !affiliateStats || affiliateStats.conversions === 0 ? (
+            <Text style={styles.cardText}>
+              Nicio conversie afiliata inregistrata pentru acest magazin.
+              Comisioanele apar dupa ce clientii marcheaza cadouri ca si cumparate
+              din produsele acestui magazin.
+            </Text>
+          ) : (
+            <>
+              <View style={styles.affiliateGrid}>
+                <View style={styles.affiliateTile}>
+                  <Text style={styles.affiliateTileLabel}>De incasat</Text>
+                  <Text style={[styles.affiliateTileValue, styles.affiliateValuePositive]}>
+                    {affiliateStats.totalExpected} RON
+                  </Text>
+                </View>
+                <View style={styles.affiliateTile}>
+                  <Text style={styles.affiliateTileLabel}>In asteptare</Text>
+                  <Text style={styles.affiliateTileValue}>
+                    {affiliateStats.totalPending} RON
+                  </Text>
+                </View>
+                <View style={styles.affiliateTile}>
+                  <Text style={styles.affiliateTileLabel}>Incasat</Text>
+                  <Text style={[styles.affiliateTileValue, affiliateStats.totalReceived > 0 && styles.affiliateValuePositive]}>
+                    {affiliateStats.totalReceived} RON
+                  </Text>
+                </View>
+                <View style={styles.affiliateTile}>
+                  <Text style={styles.affiliateTileLabel}>Conversii</Text>
+                  <Text style={styles.affiliateTileValue}>
+                    {affiliateStats.conversions}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={[styles.cardTitle, { marginTop: 16, marginBottom: 8 }]}>
+                Produse cu comision
+              </Text>
+              {affiliateStats.products.map((product, index) => (
+                <View key={index} style={styles.affiliateProductRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.affiliateProductName}>{product.name}</Text>
+                    <Text style={styles.affiliateProductMeta}>
+                      Pret achizitie: {product.purchasePrice} RON · Comision: {product.commissionPercent}%
+                    </Text>
+                  </View>
+                  <View style={styles.affiliateProductRight}>
+                    <Text style={[styles.affiliateProductAmount, styles.affiliateValuePositive]}>
+                      {product.expectedAmount} RON
+                    </Text>
+                    <Text style={[
+                      styles.affiliateProductStatus,
+                      product.status === 'received' && styles.affiliateValuePositive,
+                      product.status === 'pending' && styles.affiliateValuePending,
+                    ]}>
+                      {product.status === 'received' ? 'Incasat' : 'In asteptare'}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
         </View>
 
         <View style={styles.card}>
@@ -2258,5 +2350,66 @@ const styles = StyleSheet.create({
     fontSize: 15,
     minWidth: 60,
     textAlign: 'center',
+  },
+  affiliateGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  affiliateTile: {
+    flex: 1,
+    minWidth: 70,
+    backgroundColor: C.surface2,
+    borderRadius: R.md,
+    padding: 10,
+    borderWidth: 0.5,
+    borderColor: C.border,
+  },
+  affiliateTileLabel: {
+    fontSize: 11,
+    color: C.textFaint,
+    marginBottom: 4,
+  },
+  affiliateTileValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: C.text,
+  },
+  affiliateValuePositive: {
+    color: C.sage,
+  },
+  affiliateValuePending: {
+    color: C.textDim,
+  },
+  affiliateProductRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingVertical: 10,
+    borderTopWidth: 0.5,
+    borderTopColor: C.border,
+  },
+  affiliateProductName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: C.text,
+  },
+  affiliateProductMeta: {
+    fontSize: 12,
+    color: C.textDim,
+    marginTop: 2,
+  },
+  affiliateProductRight: {
+    alignItems: 'flex-end',
+  },
+  affiliateProductAmount: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  affiliateProductStatus: {
+    fontSize: 12,
+    marginTop: 2,
+    color: C.textDim,
   },
 });

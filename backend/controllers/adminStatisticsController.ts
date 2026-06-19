@@ -126,25 +126,41 @@ export async function getUserStatistics(req: Request, res: Response) {
         delayDays,
         purchasedOnTime,
         selectedProducts: Array.isArray(data.selectedProducts)
-          ? data.selectedProducts.map((product: any) => ({
-              storeId: String(product?.storeId || ''),
-              storeName: String(product?.storeName || ''),
-              name: String(product?.name || ''),
-              brand: String(product?.brand || ''),
-              category: String(product?.category || ''),
-              subcategory: String(product?.subcategory || ''),
-              productKey: String(product?.productKey || ''),
-              isPurchased: Boolean(product?.isPurchased),
-              purchasedStoreName: String(product?.purchasedStoreName || ''),
-              selectedAsCheapestOffer:
-                product?.selectedAsCheapestOffer !== undefined
-                  ? Boolean(product?.selectedAsCheapestOffer)
-                  : String(product?.storeId || '') !== 'manual',
-              manualSearchFallback:
-                product?.manualSearchFallback !== undefined
-                  ? Boolean(product?.manualSearchFallback)
-                  : String(product?.storeId || '') === 'manual',
-            }))
+          ? data.selectedProducts.map((product: any) => {
+              const productKey = String(product?.productKey || '').trim();
+              const storeId = String(product?.storeId || '');
+              return {
+                storeId,
+                storeName: String(product?.storeName || ''),
+                name: String(product?.name || ''),
+                brand: String(product?.brand || ''),
+                category: String(product?.category || ''),
+                subcategory: String(product?.subcategory || ''),
+                productKey,
+                productUrl: String(product?.productUrl || '').trim(),
+                isPurchased: Boolean(product?.isPurchased),
+                purchasedStoreName: String(product?.purchasedStoreName || ''),
+                purchasePrice: Number(product?.purchasePrice || 0),
+                selectedAsCheapestOffer:
+                  product?.selectedAsCheapestOffer !== undefined
+                    ? Boolean(product?.selectedAsCheapestOffer)
+                    : storeId !== 'manual',
+                manualSearchFallback:
+                  product?.manualSearchFallback !== undefined
+                    ? Boolean(product?.manualSearchFallback)
+                    : storeId === 'manual' || !productKey,
+                wasEverPurchased: Boolean(product?.wasEverPurchased) || Boolean(product?.isPurchased),
+                affiliateCommission: product?.affiliateCommission
+                  ? {
+                      commissionPercent: Number(product.affiliateCommission.commissionPercent || 0),
+                      expectedAmount: Number(product.affiliateCommission.expectedAmount || 0),
+                      status: String(product.affiliateCommission.status || 'not_applicable'),
+                      receivedAmount: Number(product.affiliateCommission.receivedAmount || 0),
+                      receivedAt: String(product.affiliateCommission.receivedAt || ''),
+                    }
+                  : null,
+              };
+            })
           : [],
       };
     });
@@ -156,10 +172,54 @@ export async function getUserStatistics(req: Request, res: Response) {
       new Set(giftPlans.map((giftPlan) => String(giftPlan.purpose || '').trim()).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b));
 
+    const affiliateEarningsMap = new Map<string, {
+      storeId: string;
+      storeName: string;
+      commissionPercent: number;
+      conversions: number;
+      totalExpected: number;
+      totalReceived: number;
+    }>();
+
+    giftPlans.forEach((giftPlan) => {
+      giftPlan.selectedProducts.forEach((product: any) => {
+        const commission = product?.affiliateCommission;
+        if (!commission || commission.status === 'not_applicable') return;
+
+        const storeId = String(product.storeId || '');
+        const storeName = String(product.storeName || storeId);
+        if (!storeId) return;
+
+        const existing = affiliateEarningsMap.get(storeId) || {
+          storeId,
+          storeName,
+          commissionPercent: Number(commission.commissionPercent || 0),
+          conversions: 0,
+          totalExpected: 0,
+          totalReceived: 0,
+        };
+
+        existing.conversions += 1;
+        existing.totalExpected = Math.round((existing.totalExpected + Number(commission.expectedAmount || 0)) * 100) / 100;
+        if (commission.status === 'received') {
+          existing.totalReceived = Math.round((existing.totalReceived + Number(commission.receivedAmount || 0)) * 100) / 100;
+        }
+        affiliateEarningsMap.set(storeId, existing);
+      });
+    });
+
+    const affiliateEarnings = Array.from(affiliateEarningsMap.values())
+      .map((entry) => ({
+        ...entry,
+        totalPending: Math.round((entry.totalExpected - entry.totalReceived) * 100) / 100,
+      }))
+      .sort((a, b) => b.totalExpected - a.totalExpected);
+
     return res.status(200).json({
       years,
       purposes,
       giftPlans,
+      affiliateEarnings,
     });
   } catch (error) {
     console.error('GET USER STATISTICS ERROR:', error);

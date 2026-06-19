@@ -73,6 +73,14 @@ export type GiftPlanProduct = {
   purchasedFromImportedStore?: boolean;
   selectedAsCheapestOffer?: boolean;
   manualSearchFallback?: boolean;
+  wasEverPurchased?: boolean;
+  affiliateCommission?: {
+    commissionPercent: number;
+    expectedAmount: number;
+    status: 'pending' | 'received' | 'not_applicable';
+    receivedAmount: number;
+    receivedAt: string;
+  };
 };
 
 export type ProductReaction = {

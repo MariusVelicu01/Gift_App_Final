@@ -82,3 +82,27 @@ export async function getPartnerStoreProductUsage(
     token
   );
 }
+
+export type StoreAffiliateStats = {
+  storeId: string;
+  commissionPercent: number;
+  conversions: number;
+  totalExpected: number;
+  totalReceived: number;
+  totalPending: number;
+  products: {
+    name: string;
+    commissionPercent: number;
+    expectedAmount: number;
+    receivedAmount: number;
+    status: string;
+    purchasePrice: number;
+  }[];
+};
+
+export async function getStoreAffiliateStats(
+  token: string,
+  storeId: string
+): Promise<StoreAffiliateStats> {
+  return apiFetch(`/partner-stores/${storeId}/affiliate-stats`, { method: 'GET' }, token);
+}

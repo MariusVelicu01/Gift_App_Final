@@ -809,7 +809,9 @@ export default function LovedOneDetailsScreen({
   const [aiHelpError, setAiHelpError] = useState('');
   const [aiPromptInput, setAiPromptInput] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiConfirmVisible, setAiConfirmVisible] = useState(false);
   const [aiResponse, setAiResponse] = useState<GiftBotRecommendation[]>([]);
+  const [retryingAiProductId, setRetryingAiProductId] = useState<string | null>(null);
   const [changeProduct, setChangeProduct] = useState<GiftPlanProduct | null>(null);
   const [changeProductModeVisible, setChangeProductModeVisible] = useState(false);
   const [changeProductManualVisible, setChangeProductManualVisible] = useState(false);
@@ -819,7 +821,9 @@ export default function LovedOneDetailsScreen({
   const [changeProductAiBudget, setChangeProductAiBudget] = useState('');
   const [changeProductAiPromptInput, setChangeProductAiPromptInput] = useState('');
   const [changeProductAiLoading, setChangeProductAiLoading] = useState(false);
+  const [changeProductAiConfirmVisible, setChangeProductAiConfirmVisible] = useState(false);
   const [changeProductAiResponse, setChangeProductAiResponse] = useState<GiftBotRecommendation[]>([]);
+  const [retryingChangeProductAiId, setRetryingChangeProductAiId] = useState<string | null>(null);
   const [otherStoreModalVisible, setOtherStoreModalVisible] = useState(false);
   const [otherStoreMode, setOtherStoreMode] = useState<'other' | 'manual'>('other');
   const [otherStoreName, setOtherStoreName] = useState('');
@@ -2564,6 +2568,8 @@ export default function LovedOneDetailsScreen({
     }
 
     setAiHelpError('');
+    setAiResponse([]);
+    setAiConfirmVisible(true);
     setAiPromptInput(
       [
         'Cauta sugestii de cadouri folosind produsele disponibile in magazinele partenere.',
@@ -2574,8 +2580,13 @@ export default function LovedOneDetailsScreen({
             ? 'Masculin'
             : data?.gender === 'female'
             ? 'Feminin'
-            : '-'
+            : 'Nespecificat'
         }.`,
+        data?.gender === 'male'
+          ? 'Instructiune gen: Persoana este barbat. Selecteaza produse potrivite pentru barbati. Chiar daca produsele din catalog nu au o categorie de gen explicita, evalueaza daca fiecare produs se potriveste pentru un barbat si evita produsele clar orientate catre femei.'
+          : data?.gender === 'female'
+          ? 'Instructiune gen: Persoana este femeie. Selecteaza produse potrivite pentru femei. Chiar daca produsele din catalog nu au o categorie de gen explicita, evalueaza daca fiecare produs se potriveste pentru o femeie si evita produsele clar orientate catre barbati.'
+          : 'Instructiune gen: Genul persoanei nu este specificat. Sugereaza produse potrivite pentru oricine, fara restrictii de gen.',
         `Zodie: ${zodiac}.`,
         `Descriere persoana: ${aiPersonDescription.trim() || '-'}.`,
         `Scopul cadoului: ${giftPlan.purpose}.`,
@@ -2594,7 +2605,7 @@ export default function LovedOneDetailsScreen({
         }.`,
         `Magazine partenere disponibile: ${partnerStores.length}.`,
         `Produse disponibile in catalog: ${availableProductsCount}.`,
-        'Returneaza produse potrivite, argumente scurte si respecta bugetul.',
+        'Returneaza produse cu legatura DIRECTA si evidenta cu interesele si preferintele persoanei descrise. Nu forta conexiuni vagi sau indirecte (ex: daca ii place sportul, nu sugera casti sau routere pe motiv ca se pot folosi si la sport - sugereaza echipament sportiv, accesorii sport, articole fitness). Daca nu exista in catalog produse clar potrivite pentru un interes specific, alege totusi cel mai bun produs disponibil DAR in campul reason fii transparent: incepe cu "Catalogul nu contine produse [categorie lipsa]. Am ales acest produs deoarece..." si explica sincer de ce l-ai ales in absenta unei optiuni ideale.',
       ].join('\n')
     );
   };
@@ -2612,6 +2623,8 @@ export default function LovedOneDetailsScreen({
       .filter(Boolean)
       .join(', ');
 
+    setChangeProductAiConfirmVisible(true);
+    setChangeProductAiResponse([]);
     setChangeProductAiPromptInput(
       [
         'Cauta un singur produs inlocuitor folosind produsele disponibile in magazinele partenere.',
@@ -2622,8 +2635,13 @@ export default function LovedOneDetailsScreen({
             ? 'Masculin'
             : data?.gender === 'female'
             ? 'Feminin'
-            : '-'
+            : 'Nespecificat'
         }.`,
+        data?.gender === 'male'
+          ? 'Instructiune gen: Persoana este barbat. Selecteaza produse potrivite pentru barbati. Chiar daca produsele din catalog nu au o categorie de gen explicita, evalueaza daca fiecare produs se potriveste pentru un barbat si evita produsele clar orientate catre femei.'
+          : data?.gender === 'female'
+          ? 'Instructiune gen: Persoana este femeie. Selecteaza produse potrivite pentru femei. Chiar daca produsele din catalog nu au o categorie de gen explicita, evalueaza daca fiecare produs se potriveste pentru o femeie si evita produsele clar orientate catre barbati.'
+          : 'Instructiune gen: Genul persoanei nu este specificat. Sugereaza produse potrivite pentru oricine, fara restrictii de gen.',
         `Zodie: ${zodiac}.`,
         `Descriere persoana: ${changeProductAiDescription.trim() || '-'}.`,
         `Scopul cadoului: ${giftPlan.purpose}.`,
@@ -2642,7 +2660,7 @@ export default function LovedOneDetailsScreen({
         `Produse excluse pentru ca sunt deja in lista: ${excludedProducts || '-'}.`,
         `Magazine partenere disponibile: ${partnerStores.length}.`,
         `Produse disponibile in catalog: ${availableProductsCount}.`,
-        'Returneaza exact un produs potrivit, cu motiv scurt si respecta bugetul.',
+        'Returneaza exact un produs cu legatura DIRECTA si evidenta cu preferintele persoanei. Nu forta conexiuni vagi sau indirecte. Daca nu exista in catalog un inlocuitor clar din aceeasi categorie, alege cel mai bun produs disponibil DAR in campul reason fii transparent: incepe cu "Catalogul nu contine un inlocuitor direct. Am ales acest produs deoarece..." si explica sincer alegerea. Motiv scurt si onest.',
       ].join('\n')
     );
   };
@@ -2678,6 +2696,16 @@ export default function LovedOneDetailsScreen({
       });
     });
     return map;
+  };
+
+  const handleConfirmAiSearch = () => {
+    setAiConfirmVisible(false);
+    sendAiHelp();
+  };
+
+  const handleConfirmChangeProductAiSearch = () => {
+    setChangeProductAiConfirmVisible(false);
+    sendChangeProductAiHelp();
   };
 
   const sendAiHelp = async () => {
@@ -2730,6 +2758,93 @@ export default function LovedOneDetailsScreen({
       setChangeProductAiResponse([]);
     } finally {
       setChangeProductAiLoading(false);
+    }
+  };
+
+  const buildRetryExclusionContext = (
+    suggestion: ProductSuggestion | undefined,
+    alreadyRecommendedNames: string[]
+  ): string[] => {
+    const lines: string[] = [];
+    if (suggestion) {
+      const categoryDesc = [
+        suggestion.category,
+        suggestion.subcategory,
+      ].filter(Boolean).join(' > ') || suggestion.name;
+      lines.push(`Cautare alternativa pentru tipul de produs: ${categoryDesc}.`);
+      lines.push(`Cauta un produs din aceeasi categorie (${categoryDesc}) dar de la un brand si magazin DIFERIT fata de cel original.`);
+      const excludedBrand = suggestion.brand || '';
+      const excludedStore = suggestion.storeName || '';
+      if (excludedBrand || excludedStore) {
+        lines.push(`Evita brandul "${excludedBrand || '-'}" si magazinul "${excludedStore || '-'}" - alege diversitate.`);
+      }
+    }
+    lines.push(`Produse deja recomandate in aceasta sesiune (excluse complet, nu le repeta si nu sugera variante similare din acelasi brand): ${alreadyRecommendedNames.join(', ') || '-'}.`);
+    lines.push('Numar produse dorite: 1. Prioritizeaza diversitatea de brand si magazin.');
+    return lines;
+  };
+
+  const retryAiSingleProduct = async (recId: string, giftPlan: GiftPlan) => {
+    if (!token || !!retryingAiProductId) return;
+
+    const catalog = buildCatalog();
+    if (catalog.length === 0) return;
+
+    const suggestionsById = buildSuggestionsById();
+    const originalSuggestion = suggestionsById.get(recId);
+    const alreadyRecommendedNames = aiResponse
+      .map((r) => suggestionsById.get(r.id)?.name || '')
+      .filter(Boolean);
+
+    const retryPrompt = [
+      aiPromptInput.trim(),
+      ...buildRetryExclusionContext(originalSuggestion, alreadyRecommendedNames),
+    ].join('\n');
+
+    setRetryingAiProductId(recId);
+
+    try {
+      const recommendations = await getGiftBotRecommendations(token, retryPrompt, catalog);
+      if (recommendations.length > 0) {
+        setAiResponse((prev) => prev.map((r) => (r.id === recId ? recommendations[0] : r)));
+      }
+    } catch {
+      // silent
+    } finally {
+      setRetryingAiProductId(null);
+    }
+  };
+
+  const retryChangeProductAiSingle = async (recId: string) => {
+    if (!token || !!retryingChangeProductAiId) return;
+
+    const catalog = buildCatalog();
+    if (catalog.length === 0) return;
+
+    const suggestionsById = buildSuggestionsById();
+    const originalSuggestion = suggestionsById.get(recId);
+    const alreadyRecommendedNames = changeProductAiResponse
+      .map((r) => suggestionsById.get(r.id)?.name || '')
+      .filter(Boolean);
+
+    const retryPrompt = [
+      changeProductAiPromptInput.trim(),
+      ...buildRetryExclusionContext(originalSuggestion, alreadyRecommendedNames),
+    ].join('\n');
+
+    setRetryingChangeProductAiId(recId);
+
+    try {
+      const recommendations = await getGiftBotRecommendations(token, retryPrompt, catalog);
+      if (recommendations.length > 0) {
+        setChangeProductAiResponse((prev) =>
+          prev.map((r) => (r.id === recId ? recommendations[0] : r))
+        );
+      }
+    } catch {
+      // silent
+    } finally {
+      setRetryingChangeProductAiId(null);
     }
   };
 
@@ -5308,10 +5423,53 @@ export default function LovedOneDetailsScreen({
               >
                 <Text style={styles.modalTitle}>Ajutor AI</Text>
 
-                {!!aiHelpError && (
-                  <Text style={styles.giftErrorText}>{aiHelpError}</Text>
-                )}
-
+                {aiLoading ? (
+                  <View style={styles.aiSearchingBlock}>
+                    <ActivityIndicator size="large" color={C.accent} />
+                    <Text style={styles.aiSearchingText}>GiftBot analizează...</Text>
+                    <Text style={styles.aiSearchingHint}>
+                      Caută produse potrivite pentru {data?.name}
+                    </Text>
+                  </View>
+                ) : aiConfirmVisible ? (
+                  <View style={styles.aiConfirmBlock}>
+                    <Text style={styles.aiConfirmTitle}>Informațiile sunt corecte?</Text>
+                    <View style={styles.aiConfirmRow}>
+                      <Text style={styles.aiConfirmLabel}>Persoana</Text>
+                      <Text style={styles.aiConfirmValue}>{data?.name || '-'}</Text>
+                    </View>
+                    <View style={styles.aiConfirmRow}>
+                      <Text style={styles.aiConfirmLabel}>Descriere</Text>
+                      <Text style={styles.aiConfirmValue}>{aiPersonDescription.trim() || '-'}</Text>
+                    </View>
+                    <View style={styles.aiConfirmRow}>
+                      <Text style={styles.aiConfirmLabel}>Buget</Text>
+                      <Text style={styles.aiConfirmValue}>{aiBudget.trim() || '-'} RON</Text>
+                    </View>
+                    <View style={styles.aiConfirmRow}>
+                      <Text style={styles.aiConfirmLabel}>Nr. produse</Text>
+                      <Text style={styles.aiConfirmValue}>{aiProductCount}</Text>
+                    </View>
+                    <View style={styles.aiConfirmRow}>
+                      <Text style={styles.aiConfirmLabel}>Păstrează lista</Text>
+                      <Text style={styles.aiConfirmValue}>{aiKeepExistingProducts ? 'Da' : 'Nu'}</Text>
+                    </View>
+                    <Pressable
+                      style={styles.saveGiftButton}
+                      onPress={handleConfirmAiSearch}
+                    >
+                      <Text style={styles.saveGiftButtonText}>Caută produse</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.cancelGiftButton}
+                      onPress={() => { setAiConfirmVisible(false); setAiHelpError(''); }}
+                    >
+                      <Text style={styles.cancelGiftButtonText}>Modifică</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <>
+                {aiResponse.length === 0 && (<>
                 <View style={styles.aiPersonBox}>
                   <Text style={styles.notesTitle}>Persoana draga</Text>
                   <Text style={styles.historyDetails}>Nume: {data.name}</Text>
@@ -5430,6 +5588,7 @@ export default function LovedOneDetailsScreen({
                     setAiProductCount(value.replace(/[^0-9]/g, ''));
                     setAiHelpError('');
                     setAiPromptInput('');
+                    setAiConfirmVisible(false);
                   }}
                 />
 
@@ -5440,35 +5599,10 @@ export default function LovedOneDetailsScreen({
                   <Text style={styles.saveGiftButtonText}>OK</Text>
                 </Pressable>
 
-                {!!aiPromptInput && (
-                  <View style={styles.aiPromptBox}>
-                    <Text style={styles.notesTitle}>Input pentru AI</Text>
-                    <TextInput
-                      style={[styles.modalInput, styles.aiPromptInput]}
-                      multiline
-                      value={aiPromptInput}
-                      onChangeText={(val) => {
-                        setAiPromptInput(val);
-                        setAiResponse([]);
-                      }}
-                    />
-                    <Pressable
-                      style={[styles.saveGiftButton, aiLoading && styles.disabledButton]}
-                      onPress={sendAiHelp}
-                      disabled={aiLoading}
-                    >
-                      {aiLoading ? (
-                        <ActivityIndicator color="#fff" />
-                      ) : (
-                        <Text style={styles.saveGiftButtonText}>Trimite la GiftBot</Text>
-                      )}
-                    </Pressable>
-                  </View>
-                )}
-
                 {!!aiHelpError && (
                   <Text style={styles.giftErrorText}>{aiHelpError}</Text>
                 )}
+                </>)}
 
                 {aiResponse.length > 0 && (() => {
                   const suggestionsById = buildSuggestionsById();
@@ -5543,12 +5677,32 @@ export default function LovedOneDetailsScreen({
                           >
                             <Text style={styles.addProductButtonText}>Adaugă</Text>
                           </Pressable>
+                          {retryingAiProductId === rec.id ? (
+                            <ActivityIndicator size="small" color={C.accent} style={{ marginTop: 8 }} />
+                          ) : (
+                            <Pressable
+                              style={[styles.cancelGiftButton, !!retryingAiProductId && styles.disabledButton]}
+                              disabled={!!retryingAiProductId}
+                              onPress={() => retryAiSingleProduct(rec.id, visibleSelectedGiftPlan)}
+                            >
+                              <Text style={styles.cancelGiftButtonText}>Altă încercare</Text>
+                            </Pressable>
+                          )}
                         </View>
                         );
                       })}
                     </View>
                   );
                 })()}
+
+                {aiResponse.length > 0 && (
+                  <Pressable style={styles.cancelGiftButton} onPress={() => setAiResponse([])}>
+                    <Text style={styles.cancelGiftButtonText}>Sugerează alte idei</Text>
+                  </Pressable>
+                )}
+
+                  </>
+                )}
 
                 <Pressable style={styles.cancelGiftButton} onPress={closeAiHelpModal}>
                   <Text style={styles.cancelGiftButtonText}>Inchide</Text>
@@ -5800,76 +5954,89 @@ export default function LovedOneDetailsScreen({
                   </Text>
                 </View>
 
-                <Text style={styles.modalLabel}>Descriere despre ea</Text>
-                <TextInput
-                  placeholder="Ex: preferinte, hobby-uri, stil, lucruri pe care le evita..."
-                  style={[styles.modalInput, styles.modalTextArea]}
-                  multiline
-                  value={changeProductAiDescription}
-                  onChangeText={setChangeProductAiDescription}
-                />
-
-                <Text style={styles.modalLabel}>Scopul cadoului</Text>
-                <TextInput
-                  style={[styles.modalInput, styles.disabledInput]}
-                  value={visibleSelectedGiftPlan.purpose}
-                  editable={false}
-                />
-
-                <Text style={styles.modalLabel}>Buget pentru inlocuire</Text>
-                <TextInput
-                  placeholder="Buget maxim"
-                  style={styles.modalInput}
-                  keyboardType="numeric"
-                  value={changeProductAiBudget}
-                  onChangeText={(value) =>
-                    setChangeProductAiBudget(value.replace(/[^0-9]/g, ''))
-                  }
-                />
-
-                <Text style={styles.modalLabel}>Numarul de produse dorite</Text>
-                <TextInput
-                  style={[styles.modalInput, styles.disabledInput]}
-                  value="1"
-                  editable={false}
-                />
-
-                <Pressable
-                  style={[styles.saveGiftButton, !changeProduct && styles.disabledButton]}
-                  onPress={() => buildChangeProductAiInput(visibleSelectedGiftPlan)}
-                  disabled={!changeProduct}
-                >
-                  <Text style={styles.saveGiftButtonText}>OK</Text>
-                </Pressable>
-
-                {!!changeProductAiPromptInput && (
-                  <View style={styles.aiPromptBox}>
-                    <Text style={styles.notesTitle}>Input pentru AI</Text>
+                {!changeProductAiLoading && !changeProductAiConfirmVisible && changeProductAiResponse.length === 0 && (
+                  <>
+                    <Text style={styles.modalLabel}>Descriere despre ea</Text>
                     <TextInput
-                      style={[styles.modalInput, styles.aiPromptInput]}
+                      placeholder="Ex: preferinte, hobby-uri, stil, lucruri pe care le evita..."
+                      style={[styles.modalInput, styles.modalTextArea]}
                       multiline
-                      value={changeProductAiPromptInput}
-                      onChangeText={(val) => {
-                        setChangeProductAiPromptInput(val);
-                        setChangeProductAiResponse([]);
-                      }}
+                      value={changeProductAiDescription}
+                      onChangeText={setChangeProductAiDescription}
                     />
+
+                    <Text style={styles.modalLabel}>Scopul cadoului</Text>
+                    <TextInput
+                      style={[styles.modalInput, styles.disabledInput]}
+                      value={visibleSelectedGiftPlan.purpose}
+                      editable={false}
+                    />
+
+                    <Text style={styles.modalLabel}>Buget pentru inlocuire</Text>
+                    <TextInput
+                      placeholder="Buget maxim"
+                      style={styles.modalInput}
+                      keyboardType="numeric"
+                      value={changeProductAiBudget}
+                      onChangeText={(value) =>
+                        setChangeProductAiBudget(value.replace(/[^0-9]/g, ''))
+                      }
+                    />
+
+                    <Text style={styles.modalLabel}>Numarul de produse dorite</Text>
+                    <TextInput
+                      style={[styles.modalInput, styles.disabledInput]}
+                      value="1"
+                      editable={false}
+                    />
+
                     <Pressable
-                      style={[
-                        styles.saveGiftButton,
-                        changeProductAiLoading && styles.disabledButton,
-                      ]}
-                      onPress={sendChangeProductAiHelp}
-                      disabled={changeProductAiLoading}
+                      style={[styles.saveGiftButton, !changeProduct && styles.disabledButton]}
+                      onPress={() => buildChangeProductAiInput(visibleSelectedGiftPlan)}
+                      disabled={!changeProduct}
                     >
-                      {changeProductAiLoading ? (
-                        <ActivityIndicator color="#fff" />
-                      ) : (
-                        <Text style={styles.saveGiftButtonText}>Trimite la GiftBot</Text>
-                      )}
+                      <Text style={styles.saveGiftButtonText}>OK</Text>
+                    </Pressable>
+                  </>
+                )}
+
+                {changeProductAiLoading ? (
+                  <View style={styles.aiSearchingBlock}>
+                    <ActivityIndicator size="large" color={C.accent} />
+                    <Text style={styles.aiSearchingText}>GiftBot analizează...</Text>
+                    <Text style={styles.aiSearchingHint}>
+                      Caută un înlocuitor pentru {changeProduct?.name}
+                    </Text>
+                  </View>
+                ) : changeProductAiConfirmVisible ? (
+                  <View style={styles.aiConfirmBlock}>
+                    <Text style={styles.aiConfirmTitle}>Informațiile sunt corecte?</Text>
+                    <View style={styles.aiConfirmRow}>
+                      <Text style={styles.aiConfirmLabel}>Produs de schimbat</Text>
+                      <Text style={styles.aiConfirmValue}>{changeProduct?.name || '-'}</Text>
+                    </View>
+                    <View style={styles.aiConfirmRow}>
+                      <Text style={styles.aiConfirmLabel}>Descriere</Text>
+                      <Text style={styles.aiConfirmValue}>{changeProductAiDescription.trim() || '-'}</Text>
+                    </View>
+                    <View style={styles.aiConfirmRow}>
+                      <Text style={styles.aiConfirmLabel}>Buget</Text>
+                      <Text style={styles.aiConfirmValue}>{changeProductAiBudget.trim() || '-'} RON</Text>
+                    </View>
+                    <Pressable
+                      style={styles.saveGiftButton}
+                      onPress={handleConfirmChangeProductAiSearch}
+                    >
+                      <Text style={styles.saveGiftButtonText}>Caută înlocuitor</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.cancelGiftButton}
+                      onPress={() => setChangeProductAiConfirmVisible(false)}
+                    >
+                      <Text style={styles.cancelGiftButtonText}>Modifică</Text>
                     </Pressable>
                   </View>
-                )}
+                ) : null}
 
                 {changeProductAiResponse.length > 0 && (() => {
                   const suggestionsById = buildSuggestionsById();
@@ -5920,12 +6087,32 @@ export default function LovedOneDetailsScreen({
                             >
                               <Text style={styles.addProductButtonText}>Adaugă</Text>
                             </Pressable>
+                            {retryingChangeProductAiId === rec.id ? (
+                              <ActivityIndicator size="small" color={C.accent} style={{ marginTop: 8 }} />
+                            ) : (
+                              <Pressable
+                                style={[styles.cancelGiftButton, !!retryingChangeProductAiId && styles.disabledButton]}
+                                disabled={!!retryingChangeProductAiId}
+                                onPress={() => retryChangeProductAiSingle(rec.id)}
+                              >
+                                <Text style={styles.cancelGiftButtonText}>Altă încercare</Text>
+                              </Pressable>
+                            )}
                           </View>
                         );
                       })}
                     </View>
                   );
                 })()}
+
+                {changeProductAiResponse.length > 0 && (
+                  <Pressable
+                    style={styles.cancelGiftButton}
+                    onPress={() => setChangeProductAiResponse([])}
+                  >
+                    <Text style={styles.cancelGiftButtonText}>Sugerează alte idei</Text>
+                  </Pressable>
+                )}
 
                 <Pressable style={styles.cancelGiftButton} onPress={closeChangeProductFlow}>
                   <Text style={styles.cancelGiftButtonText}>Inchide</Text>
@@ -8062,5 +8249,48 @@ const styles = StyleSheet.create({
   cancelGiftButtonText: {
     color: C.textFaint,
     fontWeight: '500',
+  },
+  aiSearchingBlock: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    gap: 16,
+  },
+  aiSearchingText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: C.text,
+    marginTop: 12,
+  },
+  aiSearchingHint: {
+    fontSize: 14,
+    color: C.textDim,
+    textAlign: 'center',
+  },
+  aiConfirmBlock: {
+    gap: 12,
+    paddingVertical: 8,
+  },
+  aiConfirmTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: C.text,
+    marginBottom: 4,
+  },
+  aiConfirmRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  aiConfirmLabel: {
+    fontSize: 14,
+    color: C.textDim,
+    flex: 1,
+  },
+  aiConfirmValue: {
+    fontSize: 14,
+    color: C.text,
+    fontWeight: '500',
+    flex: 2,
+    textAlign: 'right',
   },
 });
