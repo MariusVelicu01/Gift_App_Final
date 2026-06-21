@@ -246,6 +246,7 @@ function normalizeProducts(products: any[]) {
           if (!Number.isFinite(pct) || pct <= 0) return {};
           return { affiliate: { commissionPercent: pct } };
         })(),
+        ...(['barbati', 'femei', 'unisex'].includes(item.gender) ? { gender: item.gender } : {}),
       };
     })
     .filter((item) => item.name.length > 0);
@@ -491,6 +492,41 @@ export async function getProductUsage(req: Request, res: Response) {
   }
 }
 
+function getMonthKey(isoDate?: string): string {
+  if (!isoDate) return '';
+  const d = new Date(isoDate);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function currentMonthKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function addDays(isoDate: string, days: number): string {
+  const d = new Date(isoDate);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function daysFromNow(dateStr: string): number {
+  const target = new Date(dateStr);
+  target.setHours(0, 0, 0, 0);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - now.getTime()) / 86400000);
+}
+
+// Returns YYYY-MM-DD for the last day of the current month (local time)
+function lastDayOfCurrentMonth(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const lastDay = new Date(y, m, 0).getDate();
+  return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+}
+
 export async function getAffiliateStats(req: Request, res: Response) {
   try {
     const storeId = getParam(req.params.storeId);
@@ -500,12 +536,30 @@ export async function getAffiliateStats(req: Request, res: Response) {
       return res.status(404).json({ message: 'Magazinul nu a fost gasit.' });
     }
 
+    const storeCommissionPct = Number((existing as any)?.affiliate?.commissionPercent || 0);
+    const paymentTermDays = Number((existing as any)?.affiliate?.paymentTermDays || 30);
+
+    // Build per-product commission lookup from store catalog
+    const storeProducts = Array.isArray((existing as any).products) ? (existing as any).products : [];
+    const catalogPctByExternalId = new Map<string, number>();
+    const catalogPctByName = new Map<string, number>();
+    storeProducts.forEach((p: any) => {
+      const pct = Number(p?.affiliate?.commissionPercent);
+      if (Number.isFinite(pct) && pct > 0) {
+        if (p.externalId) catalogPctByExternalId.set(String(p.externalId), pct);
+        if (p.name) catalogPctByName.set(String(p.name).toLowerCase().trim(), pct);
+      }
+    });
+
     const snapshot = await db.collectionGroup('giftPlans').get();
+    const curMonth = currentMonthKey();
 
     let conversions = 0;
-    let totalExpected = 0;
+    let currentMonthExpected = 0;  // luna curentă
+    let previousMonthsPending = 0; // luni anterioare, neprimite
     let totalReceived = 0;
-    let commissionPercent = Number((existing as any)?.affiliate?.commissionPercent || 0);
+    let commissionPercent = storeCommissionPct;
+    let earliestPendingPurchaseDate: string | null = null; // pentru calculul datei de plată
 
     const products: {
       name: string;
@@ -514,49 +568,236 @@ export async function getAffiliateStats(req: Request, res: Response) {
       receivedAmount: number;
       status: string;
       purchasePrice: number;
+      purchasedAt?: string;
+      paymentDueDate?: string;
     }[] = [];
 
     snapshot.docs.forEach((doc) => {
       const data = doc.data();
+      const giftPlanPurchasedAt = String(data.completedAt || data.updatedAt || '');
       const selectedProducts = Array.isArray(data.selectedProducts) ? data.selectedProducts : [];
-      selectedProducts.forEach((product: any) => {
-        if (String(product?.storeId || '') !== storeId) return;
-        const commission = product?.affiliateCommission;
-        if (!commission || commission.status === 'not_applicable') return;
 
-        const expected = Number(commission.expectedAmount || 0);
-        const received = Number(commission.receivedAmount || 0);
-        const pct = Number(commission.commissionPercent || 0);
+      selectedProducts.forEach((product: any) => {
+        const productStoreId = String(product?.storeId || '');
+        if (productStoreId !== storeId) return;
+        if (!product?.isPurchased) return;
+
+        const commission = product?.affiliateCommission;
+        const purchasePrice = Number(product.purchasePrice || product.price || 0);
+        const purchasedAt = String(product.purchasedAt || giftPlanPurchasedAt || '');
+
+        let pct: number;
+        let expected: number;
+        let received: number;
+        let status: string;
+
+        if (!commission || commission.status === 'not_applicable') {
+          const externalId = String(product.externalId || '');
+          const productName = String(product.name || '').toLowerCase().trim();
+          const retroPct =
+            (externalId && catalogPctByExternalId.get(externalId)) ||
+            (productName && catalogPctByName.get(productName)) ||
+            commissionPercent;
+          if (!retroPct || !purchasePrice) return;
+          pct = retroPct;
+          expected = Math.round((purchasePrice * pct / 100) * 100) / 100;
+          received = 0;
+          status = 'pending';
+        } else {
+          pct = Number(commission.commissionPercent || 0);
+          expected = Number(commission.expectedAmount || 0);
+          received = Number(commission.receivedAmount || 0);
+          status = String(commission.status || 'pending');
+        }
 
         conversions += 1;
-        totalExpected = Math.round((totalExpected + expected) * 100) / 100;
-        if (commission.status === 'received') {
-          totalReceived = Math.round((totalReceived + received) * 100) / 100;
-        }
         if (pct > 0) commissionPercent = pct;
+
+        const purchaseMonthKey = getMonthKey(purchasedAt);
+        const paymentDueDate = purchasedAt ? addDays(purchasedAt, paymentTermDays) : '';
+
+        if (status === 'received') {
+          totalReceived = Math.round((totalReceived + received) * 100) / 100;
+        } else {
+          // Pending: split by month
+          if (purchaseMonthKey === curMonth) {
+            currentMonthExpected = Math.round((currentMonthExpected + expected) * 100) / 100;
+          } else {
+            previousMonthsPending = Math.round((previousMonthsPending + expected) * 100) / 100;
+            // Track earliest purchase from previous months for payment ETA
+            if (purchasedAt && (!earliestPendingPurchaseDate || purchasedAt < earliestPendingPurchaseDate)) {
+              earliestPendingPurchaseDate = purchasedAt;
+            }
+          }
+        }
 
         products.push({
           name: String(product.name || ''),
           commissionPercent: pct,
           expectedAmount: expected,
           receivedAmount: received,
-          status: String(commission.status || 'pending'),
-          purchasePrice: Number(product.purchasePrice || product.price || 0),
+          status,
+          purchasePrice,
+          purchasedAt: purchasedAt || undefined,
+          paymentDueDate: paymentDueDate || undefined,
         });
       });
     });
 
+    // Payment due: last day of current month (for previous months' pending)
+    const nextPaymentDate = previousMonthsPending > 0 ? lastDayOfCurrentMonth() : null;
+    const daysUntilPayment = nextPaymentDate ? daysFromNow(nextPaymentDate) : null;
+
     return res.status(200).json({
       storeId,
       commissionPercent,
+      paymentTermDays,
       conversions,
-      totalExpected,
+      currentMonthExpected,
+      previousMonthsPending,
       totalReceived,
-      totalPending: Math.round((totalExpected - totalReceived) * 100) / 100,
+      nextPaymentDate,
+      daysUntilPayment,
       products,
     });
   } catch (error) {
     console.error('GET AFFILIATE STATS ERROR:', error);
     return res.status(500).json({ message: 'Nu am putut calcula statisticile afiliate.' });
+  }
+}
+
+export async function getAffiliateSummary(req: Request, res: Response) {
+  try {
+    const allStores = await getPartnerStores();
+
+    // Build catalog commission map per store
+    const storeCommissionMap = new Map<string, number>();
+    const catalogPctByStoreAndExternalId = new Map<string, Map<string, number>>();
+    const catalogPctByStoreAndName = new Map<string, Map<string, number>>();
+
+    allStores.forEach((store: any) => {
+      const storeId = store.id;
+      const storePct = Number(store?.affiliate?.commissionPercent || 0);
+      if (storePct > 0) storeCommissionMap.set(storeId, storePct);
+
+      const byExternalId = new Map<string, number>();
+      const byName = new Map<string, number>();
+      (store.products || []).forEach((p: any) => {
+        const pct = Number(p?.affiliate?.commissionPercent || storePct || 0);
+        if (pct > 0) {
+          if (p.externalId) byExternalId.set(String(p.externalId), pct);
+          if (p.name) byName.set(String(p.name).toLowerCase().trim(), pct);
+        }
+      });
+      catalogPctByStoreAndExternalId.set(storeId, byExternalId);
+      catalogPctByStoreAndName.set(storeId, byName);
+    });
+
+    const snapshot = await db.collectionGroup('giftPlans').get();
+
+    const storeMap = new Map<string, {
+      storeId: string;
+      storeName: string;
+      conversions: number;
+      totalExpected: number;
+      totalReceived: number;
+      commissionPercent: number;
+    }>();
+
+    const curMonth = currentMonthKey();
+    let globalCurrentMonth = 0;
+    let globalPreviousPending = 0;
+    let globalReceived = 0;
+    let globalEarliestPending: string | null = null;
+    let globalPaymentTermDays = 30;
+
+    snapshot.docs.forEach((doc) => {
+      const data = doc.data();
+      (Array.isArray(data.selectedProducts) ? data.selectedProducts : []).forEach((product: any) => {
+        const storeId = String(product?.storeId || '');
+        if (!storeId || storeId === 'manual') return;
+        if (!product?.isPurchased) return;
+
+        const commission = product?.affiliateCommission;
+        const purchasePrice = Number(product.purchasePrice || product.price || 0);
+        const byExternalId = catalogPctByStoreAndExternalId.get(storeId);
+        const byName = catalogPctByStoreAndName.get(storeId);
+        const storePct = storeCommissionMap.get(storeId) || 0;
+
+        let pct: number;
+        let expected: number;
+        let received: number;
+        let status: string;
+
+        if (!commission || commission.status === 'not_applicable') {
+          const externalId = String(product.externalId || '');
+          const productName = String(product.name || '').toLowerCase().trim();
+          const retroPct =
+            (externalId && byExternalId?.get(externalId)) ||
+            (productName && byName?.get(productName)) ||
+            storePct;
+          if (!retroPct || !purchasePrice) return;
+          pct = retroPct;
+          expected = Math.round((purchasePrice * pct / 100) * 100) / 100;
+          received = 0;
+          status = 'pending';
+        } else {
+          pct = Number(commission.commissionPercent || 0);
+          expected = Number(commission.expectedAmount || 0);
+          received = Number(commission.receivedAmount || 0);
+          status = String(commission.status || 'pending');
+          if (!pct && !expected) return;
+        }
+
+        const purchasedAt = String(product.purchasedAt || data.completedAt || '');
+        const purchaseMonthKey = getMonthKey(purchasedAt);
+        const storePaymentTermDays = Number((allStores as any[]).find((s: any) => s.id === storeId)?.affiliate?.paymentTermDays || 30);
+
+        const existing = storeMap.get(storeId) || {
+          storeId,
+          storeName: String(product.storeName || storeId),
+          conversions: 0,
+          totalExpected: 0,
+          totalReceived: 0,
+          commissionPercent: pct,
+        };
+        existing.conversions += 1;
+        existing.totalExpected = Math.round((existing.totalExpected + expected) * 100) / 100;
+        if (status === 'received') existing.totalReceived = Math.round((existing.totalReceived + received) * 100) / 100;
+        if (pct > existing.commissionPercent) existing.commissionPercent = pct;
+        storeMap.set(storeId, existing);
+
+        // Track for global monthly totals
+        if (status !== 'received') {
+          if (purchaseMonthKey === curMonth) {
+            globalCurrentMonth = Math.round((globalCurrentMonth + expected) * 100) / 100;
+          } else {
+            globalPreviousPending = Math.round((globalPreviousPending + expected) * 100) / 100;
+            if (purchasedAt && (!globalEarliestPending || purchasedAt < globalEarliestPending)) {
+              globalEarliestPending = purchasedAt;
+              globalPaymentTermDays = storePaymentTermDays;
+            }
+          }
+        } else {
+          globalReceived = Math.round((globalReceived + received) * 100) / 100;
+        }
+      });
+    });
+
+    const stores = Array.from(storeMap.values()).sort((a, b) => b.totalExpected - a.totalExpected);
+    const nextPaymentDate = globalPreviousPending > 0 ? lastDayOfCurrentMonth() : null;
+    const totals = {
+      conversions: stores.reduce((s, x) => s + x.conversions, 0),
+      currentMonthExpected: globalCurrentMonth,
+      previousMonthsPending: globalPreviousPending,
+      totalReceived: globalReceived,
+      nextPaymentDate,
+      daysUntilPayment: nextPaymentDate ? daysFromNow(nextPaymentDate) : null,
+    };
+
+    return res.status(200).json({ totals, stores });
+  } catch (error) {
+    console.error('GET AFFILIATE SUMMARY ERROR:', error);
+    return res.status(500).json({ message: 'Nu am putut calcula sumarul afiliat.' });
   }
 }

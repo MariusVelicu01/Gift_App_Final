@@ -12,10 +12,11 @@ type AdminTab = 'home' | 'partnerStores' | 'statistics' | 'settings';
 
 type Props = {
   firstName: string;
+  lastName?: string;
   onLogout: () => Promise<void> | void;
 };
 
-export default function AdminDashboard({ firstName, onLogout }: Props) {
+export default function AdminDashboard({ firstName, lastName, onLogout }: Props) {
   const [activeTab, setActiveTab] = useState<AdminTab>('home');
   const [partnerStoreSelectedId, setPartnerStoreSelectedId] = useState<string | null>(null);
 
@@ -30,7 +31,7 @@ export default function AdminDashboard({ firstName, onLogout }: Props) {
   const currentScreen = useMemo(() => {
     switch (activeTab) {
       case 'home':
-        return <HomeScreen firstName={firstName} onOpenStore={(storeId) => {
+        return <HomeScreen firstName={firstName} lastName={lastName} onOpenStore={(storeId) => {
           setPartnerStoreSelectedId(storeId);
           navigateToTab('partnerStores');
         }} />;

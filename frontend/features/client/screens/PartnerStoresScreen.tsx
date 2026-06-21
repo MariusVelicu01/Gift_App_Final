@@ -50,27 +50,47 @@ function shuffleProducts<T>(items: T[]) {
   return [...items].sort(() => Math.random() - 0.5);
 }
 
-function pickFeaturedProducts(store: PartnerStore) {
-  const discountedProducts = shuffleProducts(
-    store.products.filter(
-      (product) =>
-        product.price?.hasDiscount ||
-        Number(product.price?.discountPercent || 0) > 0 ||
-        Number(product.price?.discount || 0) > 0
-    )
-  );
-  const regularProducts = shuffleProducts(
-    store.products.filter((product) => !discountedProducts.includes(product))
-  );
+function profileGenderToProductGender(g?: string): 'barbati' | 'femei' | null {
+  if (!g) return null;
+  const lower = g.toLowerCase();
+  if (lower === 'masculin' || lower === 'male') return 'barbati';
+  if (lower === 'feminin' || lower === 'female') return 'femei';
+  return null;
+}
 
-  return [...discountedProducts, ...regularProducts].slice(0, 5);
+function pickFeaturedProducts(store: PartnerStore, userProductGender: 'barbati' | 'femei' | null) {
+  const opposite = userProductGender === 'barbati' ? 'femei' : 'barbati';
+
+  function score(product: any) {
+    const g = (product as any).gender || 'unisex';
+    if (!userProductGender || g === 'unisex') return 1;
+    if (g === userProductGender) return 1;
+    return 0; // opposite gender - put last
+  }
+
+  const sorted = shuffleProducts(store.products).sort((a, b) => score(b) - score(a));
+  const discounted = sorted.filter(p => p.price?.hasDiscount || Number(p.price?.discountPercent || 0) > 0);
+  const regular = sorted.filter(p => !discounted.includes(p));
+
+  // Primary: matching/unisex discounted first, then regular; opposite gender at the end
+  const primary = [...discounted.filter(p => (p as any).gender !== opposite), ...regular.filter(p => (p as any).gender !== opposite)];
+  const opp = [...discounted.filter(p => (p as any).gender === opposite), ...regular.filter(p => (p as any).gender === opposite)];
+  const result: typeof store.products = [];
+  primary.forEach((item, i) => {
+    result.push(item);
+    if ((i + 1) % 5 === 0 && opp.length > 0) result.push(opp.splice(0, 1)[0]);
+  });
+
+  return result.slice(0, 6);
 }
 
 type Props = {
   resetRef?: React.MutableRefObject<(() => void) | null>;
+  userGender?: string;
 };
 
-export default function PartnerStoresScreen({ resetRef }: Props) {
+export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
+  const userProductGender = profileGenderToProductGender(userGender);
   const { token } = useAuth();
   const [stores, setStores] = useState<PartnerStore[]>([]);
   const [loading, setLoading] = useState(true);
@@ -209,7 +229,7 @@ export default function PartnerStoresScreen({ resetRef }: Props) {
 
   const openStoreDetails = (store: PartnerStore) => {
     setSelectedStore(store);
-    setFeaturedProducts(pickFeaturedProducts(store));
+    setFeaturedProducts(pickFeaturedProducts(store, userProductGender));
   };
 
   if (selectedStore) {
@@ -324,6 +344,7 @@ export default function PartnerStoresScreen({ resetRef }: Props) {
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Magazine partenere</Text>
 
+      <View style={styles.stickyFiltersWrapper}>
       <View style={styles.filtersCard}>
         <TextInput
           placeholder="Cauta dupa numele magazinului"
@@ -357,6 +378,7 @@ export default function PartnerStoresScreen({ resetRef }: Props) {
             <Text style={styles.clearFiltersText}>Curata filtrele</Text>
           </Pressable>
         )}
+      </View>
       </View>
 
       {loading ? (
@@ -434,6 +456,15 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: C.border,
     ...S.card,
+  },
+  stickyFiltersWrapper: {
+    position: 'sticky' as any,
+    top: 0,
+    zIndex: 10,
+    backgroundColor: C.bg,
+    paddingVertical: 4,
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
   },
   filtersCard: {
     padding: 14,

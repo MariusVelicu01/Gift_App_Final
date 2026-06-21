@@ -86,6 +86,7 @@ type ProductSuggestion = GiftPlanProduct & {
   inStock?: boolean;
   searchText: string;
   offerCount?: number;
+  gender?: 'barbati' | 'femei' | 'unisex';
 };
 
 type ProductReactionDraft = {
@@ -513,6 +514,20 @@ function getNextDateParts(day: number, month: number) {
   return { day, month, year };
 }
 
+const ORTHODOX_EASTER_DATES = [
+  '2026-04-12', '2027-05-02', '2028-04-16', '2029-04-08', '2030-04-28',
+  '2031-04-13', '2032-05-02', '2033-04-24', '2034-04-09', '2035-04-29',
+];
+
+function getNextEasterDateParts() {
+  const today = getTodayParts();
+  const todayKey = `${today.year}-${pad(today.month)}-${pad(today.day)}`;
+  const next = ORTHODOX_EASTER_DATES.find((d) => d >= todayKey);
+  if (!next) return null;
+  const [year, month, day] = next.split('-').map(Number);
+  return { day, month, year };
+}
+
 function toProductSuggestion(
   store: PartnerStore,
   product: ProductImportItem,
@@ -559,6 +574,9 @@ function toProductSuggestion(
     addedAt: new Date().toISOString(),
     availabilityStatus: product.availability?.stockStatus,
     inStock: product.availability?.inStock,
+    gender: (['barbati', 'femei', 'unisex'].includes((product as any).gender)
+      ? (product as any).gender
+      : 'unisex') as 'barbati' | 'femei' | 'unisex',
     searchText: [
       product.name,
       product.brand,
@@ -831,6 +849,8 @@ export default function LovedOneDetailsScreen({
   const [otherStoreImageUri, setOtherStoreImageUri] = useState('');
   const [otherStoreImageFile, setOtherStoreImageFile] = useState<File | null>(null);
   const [otherStoreError, setOtherStoreError] = useState('');
+  const [budgetChartContainerWidth, setBudgetChartContainerWidth] = useState(BUDGET_CHART_WIDTH);
+  const budgetPlotWidth = Math.max(200, budgetChartContainerWidth - 116 - 24);
 
   const years = getYearOptions();
   const actionYears = getActionYearOptions();
@@ -954,10 +974,10 @@ export default function LovedOneDetailsScreen({
         : (entry.value - historyBudgetMin) / historyBudgetRange;
     const x =
       historyBudgetValues.length <= 1
-        ? BUDGET_CHART_PLOT_WIDTH / 2
+        ? budgetPlotWidth / 2
         : BUDGET_CHART_PLOT_PADDING +
           (index / (historyBudgetValues.length - 1)) *
-            (BUDGET_CHART_PLOT_WIDTH - BUDGET_CHART_PLOT_PADDING * 2);
+            (budgetPlotWidth - BUDGET_CHART_PLOT_PADDING * 2);
     const y =
       BUDGET_CHART_PLOT_PADDING +
       (1 - normalized) *
@@ -1217,6 +1237,20 @@ export default function LovedOneDetailsScreen({
     };
   }, [addedProductToast]);
 
+  // Compute the effective deadline date directly from purpose (avoids state sync issues)
+  const computedFixedDeadline = useMemo((): { day: number; month: number; year: number } | null => {
+    console.log('[deadline] giftPurpose=', giftPurpose, 'canEdit=', canEditFixedGiftDate);
+    if (canEditFixedGiftDate) return null;
+    if (giftPurpose === 'Paste') {
+      const e = getNextEasterDateParts();
+      console.log('[deadline] Easter =', e);
+      return e;
+    }
+    if (giftPurpose === 'Craciun') return getNextDateParts(25, 12);
+    if (giftPurpose === 'Zi de nastere' && data) return getNextDateParts(Number(data.day), Number(data.month));
+    return null;
+  }, [giftPurpose, canEditFixedGiftDate, data]);
+
   const resetGiftForm = () => {
     setGiftPurpose(null);
     setGiftBudget(200);
@@ -1312,7 +1346,17 @@ export default function LovedOneDetailsScreen({
     setCustomBudget(isCustomBudgetValue ? String(giftPlan.budget) : '');
     setIsCustomBudget(isCustomBudgetValue);
 
-    const parts = parseDateParts(giftPlan.deadlineDate);
+    // For fixed-date purposes (Paste, Craciun, Zi de nastere), recalculate from current date
+    // to avoid stale stored dates being shown
+    let parts = parseDateParts(giftPlan.deadlineDate);
+    if (giftPlan.purpose === 'Paste') {
+      const easter = getNextEasterDateParts();
+      if (easter) parts = easter;
+    } else if (giftPlan.purpose === 'Craciun') {
+      parts = getNextDateParts(25, 12);
+    } else if (giftPlan.purpose === 'Zi de nastere' && data) {
+      parts = getNextDateParts(Number(data.day), Number(data.month));
+    }
     setDeadlineDay(parts.day);
     setDeadlineMonth(parts.month);
     setDeadlineYear(parts.year);
@@ -1343,6 +1387,13 @@ export default function LovedOneDetailsScreen({
       setDeadlineDay(christmas.day);
       setDeadlineMonth(christmas.month);
       setDeadlineYear(christmas.year);
+    } else if (purpose === 'Paste') {
+      const easter = getNextEasterDateParts();
+      if (easter) {
+        setDeadlineDay(easter.day);
+        setDeadlineMonth(easter.month);
+        setDeadlineYear(easter.year);
+      }
     } else {
       const today = getTodayParts();
       if (!deadlineDay || !deadlineMonth || !deadlineYear) {
@@ -1393,12 +1444,21 @@ export default function LovedOneDetailsScreen({
       return;
     }
 
-    if (!deadlineDay || !deadlineMonth || !deadlineYear) {
+    // Use computed fixed deadline (from purpose) or manually set deadline
+    const effectiveDeadline = computedFixedDeadline ?? (
+      deadlineDay && deadlineMonth && deadlineYear
+        ? { day: deadlineDay, month: deadlineMonth, year: deadlineYear }
+        : null
+    );
+
+    if (!effectiveDeadline) {
       setGiftError('Selecteaza data in care vrei sa oferi cadoul.');
       return;
     }
 
-    if (isDateBeforeToday(deadlineDay, deadlineMonth, deadlineYear)) {
+    const { day: dDay, month: dMonth, year: dYear } = effectiveDeadline;
+
+    if (isDateBeforeToday(dDay, dMonth, dYear)) {
       setGiftError('Data oferirii nu poate fi in trecut.');
       return;
     }
@@ -1406,9 +1466,7 @@ export default function LovedOneDetailsScreen({
     const purchaseDateKey = `${purchaseDeadlineYear}-${pad(
       purchaseDeadlineMonth
     )}-${pad(purchaseDeadlineDay)}`;
-    const giftDateKey = `${deadlineYear}-${pad(deadlineMonth)}-${pad(
-      deadlineDay
-    )}`;
+    const giftDateKey = `${dYear}-${pad(dMonth)}-${pad(dDay)}`;
 
     if (purchaseDateKey > giftDateKey) {
       setGiftError(
@@ -1425,9 +1483,9 @@ export default function LovedOneDetailsScreen({
       const payload = {
         purpose: giftPurpose,
         budget: selectedBudget,
-        deadlineDay,
-        deadlineMonth,
-        deadlineYear,
+        deadlineDay: dDay,
+        deadlineMonth: dMonth,
+        deadlineYear: dYear,
         purchaseDeadlineDay,
         purchaseDeadlineMonth,
         purchaseDeadlineYear,
@@ -2665,13 +2723,21 @@ export default function LovedOneDetailsScreen({
     );
   };
 
-  const buildCatalog = (): CatalogItem[] =>
-    partnerStores
+  const buildCatalog = (promptText?: string): CatalogItem[] => {
+    const explicitlyWantsOpposite = (() => {
+      if (!recipientProductGender || !promptText) return false;
+      const lower = promptText.toLowerCase();
+      return lower.includes('feminin') || lower.includes('femei') || lower.includes('barbati') || lower.includes('masculin') || lower.includes('unisex');
+    })();
+    const opposite = recipientProductGender === 'barbati' ? 'femei' : 'barbati';
+
+    return partnerStores
       .flatMap((store) =>
         store.products.map((product, index) => {
-          const price =
-            product.price?.current ?? product.price?.original ?? 0;
+          const price = product.price?.current ?? product.price?.original ?? 0;
           if (!price || price <= 0) return null;
+          const productGender = (product as any).gender || 'unisex';
+          if (recipientProductGender && !explicitlyWantsOpposite && productGender === opposite) return null;
           return {
             id: getProductSuggestionId(store, product, index),
             name: product.name,
@@ -2684,6 +2750,7 @@ export default function LovedOneDetailsScreen({
       )
       .filter((item): item is CatalogItem => Boolean(item))
       .slice(0, 500);
+  };
 
   const buildSuggestionsById = (): Map<string, ProductSuggestion> => {
     const map = new Map<string, ProductSuggestion>();
@@ -2711,7 +2778,7 @@ export default function LovedOneDetailsScreen({
   const sendAiHelp = async () => {
     if (!token || !aiPromptInput.trim() || aiLoading) return;
 
-    const catalog = buildCatalog();
+    const catalog = buildCatalog(aiPromptInput || changeProductAiPromptInput);
     if (catalog.length === 0) {
       setAiHelpError('Nu există produse în catalog pentru a trimite la GiftBot.');
       return;
@@ -2741,7 +2808,7 @@ export default function LovedOneDetailsScreen({
   const sendChangeProductAiHelp = async () => {
     if (!token || !changeProductAiPromptInput.trim() || changeProductAiLoading) return;
 
-    const catalog = buildCatalog();
+    const catalog = buildCatalog(aiPromptInput || changeProductAiPromptInput);
     if (catalog.length === 0) return;
 
     setChangeProductAiLoading(true);
@@ -2787,7 +2854,7 @@ export default function LovedOneDetailsScreen({
   const retryAiSingleProduct = async (recId: string, giftPlan: GiftPlan) => {
     if (!token || !!retryingAiProductId) return;
 
-    const catalog = buildCatalog();
+    const catalog = buildCatalog(aiPromptInput || changeProductAiPromptInput);
     if (catalog.length === 0) return;
 
     const suggestionsById = buildSuggestionsById();
@@ -2818,7 +2885,7 @@ export default function LovedOneDetailsScreen({
   const retryChangeProductAiSingle = async (recId: string) => {
     if (!token || !!retryingChangeProductAiId) return;
 
-    const catalog = buildCatalog();
+    const catalog = buildCatalog(aiPromptInput || changeProductAiPromptInput);
     if (catalog.length === 0) return;
 
     const suggestionsById = buildSuggestionsById();
@@ -3037,11 +3104,28 @@ export default function LovedOneDetailsScreen({
       selectedGiftPlan
     : null;
   const selectedGiftProducts = visibleSelectedGiftPlan?.selectedProducts || [];
-  const allProductOffers = partnerStores.flatMap((store) =>
-    store.products
-      .map((product, index) => toProductSuggestion(store, product, index))
-      .filter((product): product is ProductSuggestion => Boolean(product))
-  );
+  const recipientGender = data?.gender; // 'male' | 'female' | undefined
+  const recipientProductGender = recipientGender === 'male' ? 'barbati' : recipientGender === 'female' ? 'femei' : null;
+
+  const allProductOffers = (() => {
+    const all = partnerStores.flatMap((store) =>
+      store.products
+        .map((product, index) => toProductSuggestion(store, product, index))
+        .filter((product): product is ProductSuggestion => Boolean(product))
+    );
+    if (!recipientProductGender) return all;
+    const opposite = recipientProductGender === 'barbati' ? 'femei' : 'barbati';
+
+    // Sort by gender relevance: matching gender first, then unisex, then opposite gender last
+    const genderScore = (p: ProductSuggestion) => {
+      const g = p.gender || 'unisex';
+      if (g === recipientProductGender) return 0; // exact match — top
+      if (g === 'unisex') return 1;               // neutral — middle
+      return 2;                                    // opposite — bottom
+    };
+
+    return [...all].sort((a, b) => genderScore(a) - genderScore(b));
+  })();
   const lowestPriceByKey = new Map<string, number>();
   const bestImageByKey = new Map<string, string>();
   allProductOffers.forEach((offer) => {
@@ -3088,7 +3172,19 @@ export default function LovedOneDetailsScreen({
     });
 
   const productSuggestions = Array.from(productSuggestionsByKey.values())
-    .sort((a, b) => a.price - b.price)
+    .sort((a, b) => {
+      if (recipientProductGender) {
+        const score = (p: ProductSuggestion) => {
+          const g = p.gender || 'unisex';
+          if (g === recipientProductGender) return 0;
+          if (g === 'unisex') return 1;
+          return 2;
+        };
+        const diff = score(a) - score(b);
+        if (diff !== 0) return diff;
+      }
+      return a.price - b.price;
+    })
     .slice(0, 12);
   const changeProductSearchQuery = changeProductSearch.trim().toLowerCase();
   const changeProductSuggestionsByKey = new Map<string, ProductSuggestion>();
@@ -3114,7 +3210,19 @@ export default function LovedOneDetailsScreen({
     });
 
   const changeProductSuggestions = Array.from(changeProductSuggestionsByKey.values())
-    .sort((a, b) => a.price - b.price)
+    .sort((a, b) => {
+      if (recipientProductGender) {
+        const score = (p: ProductSuggestion) => {
+          const g = p.gender || 'unisex';
+          if (g === recipientProductGender) return 0;
+          if (g === 'unisex') return 1;
+          return 2;
+        };
+        const diff = score(a) - score(b);
+        if (diff !== 0) return diff;
+      }
+      return a.price - b.price;
+    })
     .slice(0, 12);
   const selectedGiftProductsTotal = selectedGiftProducts.reduce(
     (sum, product) => sum + getDisplayedProductPrice(product),
@@ -3146,10 +3254,10 @@ export default function LovedOneDetailsScreen({
         : (entry.value - budgetHistoryMin) / budgetHistoryRange;
     const x =
       budgetHistoryValues.length <= 1
-        ? BUDGET_CHART_PLOT_WIDTH / 2
+        ? budgetPlotWidth / 2
         : BUDGET_CHART_PLOT_PADDING +
           (index / (budgetHistoryValues.length - 1)) *
-            (BUDGET_CHART_PLOT_WIDTH - BUDGET_CHART_PLOT_PADDING * 2);
+            (budgetPlotWidth - BUDGET_CHART_PLOT_PADDING * 2);
     const y =
       BUDGET_CHART_PLOT_PADDING +
       (1 - normalized) *
@@ -5068,15 +5176,14 @@ export default function LovedOneDetailsScreen({
                 showsVerticalScrollIndicator={false}
               >
                 <Text style={styles.modalTitle}>Istoric buget</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
+                <View
                   style={styles.budgetChartScroll}
+                  onLayout={(e) => setBudgetChartContainerWidth(e.nativeEvent.layout.width)}
                 >
                   <View
                     style={[
                       styles.budgetLineChart,
-                      { width: BUDGET_CHART_WIDTH, height: BUDGET_CHART_HEIGHT },
+                      { width: budgetChartContainerWidth, height: BUDGET_CHART_HEIGHT },
                     ]}
                   >
                     <View style={styles.budgetChartTitleBlock}>
@@ -5111,9 +5218,9 @@ export default function LovedOneDetailsScreen({
                       ))}
                     </View>
 
-                    <View style={styles.budgetLineChartPlot}>
+                    <View style={[styles.budgetLineChartPlot, { width: budgetPlotWidth }]}>
                       <View style={styles.budgetLineChartYAxisLine} />
-                      <View style={styles.budgetLineChartXAxisLine} />
+                      <View style={[styles.budgetLineChartXAxisLine, { width: budgetPlotWidth }]} />
 
                       {budgetChartSegments.map((segment) => (
                         <View
@@ -5166,7 +5273,7 @@ export default function LovedOneDetailsScreen({
                       ))}
                     </View>
                   </View>
-                </ScrollView>
+                </View>
 
                 {selectedGiftBudgetHistory.map((entry, index) => (
                   <View key={`${entry.changedAt}-row-${index}`} style={styles.budgetHistoryRow}>
@@ -6179,15 +6286,14 @@ export default function LovedOneDetailsScreen({
           ) : (
             <>
               {historyBudgetChartPoints.length > 0 && (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
+                <View
                   style={styles.budgetChartScroll}
+                  onLayout={(e) => setBudgetChartContainerWidth(e.nativeEvent.layout.width)}
                 >
                   <View
                     style={[
                       styles.budgetLineChart,
-                      { width: BUDGET_CHART_WIDTH, height: BUDGET_CHART_HEIGHT },
+                      { width: budgetChartContainerWidth, height: BUDGET_CHART_HEIGHT },
                     ]}
                   >
                     <View style={styles.budgetChartTitleBlock}>
@@ -6222,9 +6328,9 @@ export default function LovedOneDetailsScreen({
                       ))}
                     </View>
 
-                    <View style={styles.budgetLineChartPlot}>
+                    <View style={[styles.budgetLineChartPlot, { width: budgetPlotWidth }]}>
                       <View style={styles.budgetLineChartYAxisLine} />
-                      <View style={styles.budgetLineChartXAxisLine} />
+                      <View style={[styles.budgetLineChartXAxisLine, { width: budgetPlotWidth }]} />
 
                       {historyBudgetChartSegments.map((segment) => (
                         <View
@@ -6274,7 +6380,7 @@ export default function LovedOneDetailsScreen({
                       ))}
                     </View>
                   </View>
-                </ScrollView>
+                </View>
               )}
 
               {completedGiftPlanGroups.map((group) => (
@@ -6705,10 +6811,10 @@ export default function LovedOneDetailsScreen({
                 <View style={styles.duplicateInfoBox}>
                   <Text style={styles.duplicateInfoTitle}>Data oferirii</Text>
                   <Text style={styles.duplicateInfoText}>
-                    {deadlineDay && deadlineMonth && deadlineYear
+                    {computedFixedDeadline
                       ? formatDate(
-                          `${deadlineYear}-${pad(deadlineMonth)}-${pad(
-                            deadlineDay
+                          `${computedFixedDeadline.year}-${pad(computedFixedDeadline.month)}-${pad(
+                            computedFixedDeadline.day
                           )}`
                         )
                       : 'Se calculeaza automat pentru aceasta ocazie.'}

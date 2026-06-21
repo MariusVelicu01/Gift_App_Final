@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -8,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { getModalBackdropResponder } from '../../../utils/modalBackdrop';
 import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
 import {
@@ -20,6 +22,7 @@ import {
   generateStoresReport,
   generateProductDemandReport,
 } from '../../../utils/reportGenerator';
+import { getAdminPartnerStoresCache, subscribeAdminPartnerStoresCache } from '../../../services/adminPartnerStoresCache';
 
 type GenderFilter = 'male' | 'female';
 type StatsView = 'overview' | 'users' | 'stores' | 'productDemand';
@@ -29,6 +32,7 @@ type TopEntry = {
   label: string;
   count: number;
   hint?: string;
+  storeName?: string;
 };
 
 function formatMoney(value: number) {
@@ -85,6 +89,13 @@ export default function StatisticsScreen() {
   const [productDemandSearch, setProductDemandSearch] = useState('');
   const [productDemandFilter, setProductDemandFilter] =
     useState<ProductDemandFilter>('added');
+  const [productDemandPage, setProductDemandPage] = useState(0);
+  const [partnerStoreNames, setPartnerStoreNames] = useState<Set<string>>(new Set());
+  const [nonPartnerModalVisible, setNonPartnerModalVisible] = useState(false);
+  const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
+  const [topProductsModalVisible, setTopProductsModalVisible] = useState(false);
+  const [allStoresModalVisible, setAllStoresModalVisible] = useState(false);
+  const [allStoresFilter, setAllStoresFilter] = useState<'all' | 'partner' | 'non-partner'>('all');
 
   useEffect(() => {
     const loadStatistics = async () => {
@@ -104,6 +115,24 @@ export default function StatisticsScreen() {
     };
 
     loadStatistics();
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    getAdminPartnerStoresCache(token).then((stores) => {
+      setPartnerStoreNames(
+        new Set((stores || []).map((s) => (s.displayName || s.companyName || '').toLowerCase().trim()))
+      );
+    }).catch(() => {});
+
+    return subscribeAdminPartnerStoresCache(() => {
+      if (!token) return;
+      getAdminPartnerStoresCache(token).then((stores) => {
+        setPartnerStoreNames(
+          new Set((stores || []).map((s) => (s.displayName || s.companyName || '').toLowerCase().trim()))
+        );
+      }).catch(() => {});
+    });
   }, [token]);
 
   const yearOptions = useMemo(
@@ -242,16 +271,57 @@ export default function StatisticsScreen() {
 
       addCount(purchasedStoreMap, storeName);
       addCount(purchasedCategoryMap, category);
-      addCount(purchasedProductMap, productName, product.category || undefined);
+      const existingProduct = purchasedProductMap.get(productName);
+      if (existingProduct) {
+        existingProduct.count++;
+      } else {
+        purchasedProductMap.set(productName, { label: productName, count: 1, hint: product.category || undefined, storeName });
+      }
     });
+
+    // Separate partner stores from non-partner stores
+    const partnerStoreEntries: TopEntry[] = [];
+    const nonPartnerStoreMap = new Map<string, number>();
+    purchasedStoreMap.forEach((entry, key) => {
+      const isPartner = partnerStoreNames.has(key.toLowerCase().trim());
+      if (isPartner) {
+        partnerStoreEntries.push(entry);
+      } else {
+        nonPartnerStoreMap.set(key, entry.count);
+      }
+    });
+    partnerStoreEntries.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    const MANUAL_LABELS = new Set(['manual', 'adaugat manual', 'magazin necunoscut', '']);
+    let alteMagazineCount = 0;
+    const namedNonPartnerMap = new Map<string, number>();
+    nonPartnerStoreMap.forEach((count, key) => {
+      if (MANUAL_LABELS.has(key.toLowerCase().trim())) {
+        alteMagazineCount += count;
+      } else {
+        namedNonPartnerMap.set(key, count);
+      }
+    });
+    const nonPartnerTotal = Array.from(nonPartnerStoreMap.values()).reduce((s, c) => s + c, 0);
+    const nonPartnerDetails: TopEntry[] = [
+      ...Array.from(namedNonPartnerMap.entries())
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+      ...(alteMagazineCount > 0 ? [{ label: 'Alte Magazine', count: alteMagazineCount }] : []),
+    ];
+    const purchasedStoresFiltered: TopEntry[] = [
+      ...partnerStoreEntries.slice(0, 4),
+      ...(nonPartnerTotal > 0 ? [{ label: 'Magazine fara contract de afiliere', count: nonPartnerTotal, hint: 'non-partner' }] : []),
+    ];
 
     return {
       listedProductsCount: selectedProducts.length,
       purchasedProductsCount: purchasedProducts.length,
       purchasedCategories: toTopEntries(purchasedCategoryMap),
       listedStores: toTopEntries(listedStoreMap),
-      purchasedStores: toTopEntries(purchasedStoreMap),
-      topPurchasedProducts: toTopEntries(purchasedProductMap, 3),
+      purchasedStores: purchasedStoresFiltered,
+      allPartnerStores: partnerStoreEntries,
+      nonPartnerStores: nonPartnerDetails,
+      topPurchasedProducts: toTopEntries(purchasedProductMap),
       productDemandAdded: toTopEntries(productDemandAddedMap),
       productDemandPurchased: toTopEntries(productDemandPurchasedMap).map((entry) => {
         const prices = productDemandPurchasedPrices.get(entry.label) || [];
@@ -260,7 +330,7 @@ export default function StatisticsScreen() {
         return { ...entry, hint: `~${Math.round(avg)} RON` };
       }),
     };
-  }, [filteredGiftPlans]);
+  }, [filteredGiftPlans, partnerStoreNames]);
 
   const productDemandEntries = useMemo(() => {
     const normalizedSearch = productDemandSearch.trim().toLowerCase();
@@ -308,13 +378,29 @@ export default function StatisticsScreen() {
           <Text style={styles.secondaryButtonText}>Inapoi la statistici</Text>
         </Pressable>
 
-        <Text style={styles.title}>
-          {isProductDemandView
-            ? 'Cerere de produse'
-            : isStoreView
-            ? 'Statistici magazine'
-            : 'Statistici useri'}
-        </Text>
+        <View style={styles.overviewHeader}>
+          <Text style={styles.title}>
+            {isProductDemandView
+              ? 'Cerere de produse'
+              : isStoreView
+              ? 'Statistici magazine'
+              : 'Statistici useri'}
+          </Text>
+          <Pressable
+            style={({ hovered, pressed }) => [
+              styles.overviewExportBtn,
+              hovered && styles.reportButtonHover,
+              pressed && styles.reportButtonPressed,
+            ]}
+            onPress={() => {
+              if (isProductDemandView) generateProductDemandReport(storeStats, reportFilters);
+              else if (isStoreView) generateStoresReport(storeStats, reportFilters);
+              else generateUsersReport(stats, reportFilters);
+            }}
+          >
+            <Text style={styles.reportButtonText}>↓ Descarcă raport Excel</Text>
+          </Pressable>
+        </View>
 
         <View style={styles.filtersCard}>
           <Dropdown
@@ -403,7 +489,7 @@ export default function StatisticsScreen() {
               style={styles.searchInput}
               placeholder="Cauta in cereri dupa numele produsului"
               value={productDemandSearch}
-              onChangeText={setProductDemandSearch}
+              onChangeText={(v) => { setProductDemandSearch(v); setProductDemandPage(0); }}
             />
 
             <View style={styles.segmentedRow}>
@@ -412,7 +498,7 @@ export default function StatisticsScreen() {
                   styles.segmentedButton,
                   productDemandFilter === 'added' && styles.segmentedButtonActive,
                 ]}
-                onPress={() => setProductDemandFilter('added')}
+                onPress={() => { setProductDemandFilter('added'); setProductDemandPage(0); }}
               >
                 <Text
                   style={[
@@ -431,7 +517,7 @@ export default function StatisticsScreen() {
                   productDemandFilter === 'purchased' &&
                     styles.segmentedButtonActive,
                 ]}
-                onPress={() => setProductDemandFilter('purchased')}
+                onPress={() => { setProductDemandFilter('purchased'); setProductDemandPage(0); }}
               >
                 <Text
                   style={[
@@ -450,20 +536,71 @@ export default function StatisticsScreen() {
                 Nu exista cereri pentru filtrele selectate.
               </Text>
             ) : (
-              productDemandEntries.map((entry, index) => (
-                <View key={`${entry.label}-${index}`} style={styles.topRow}>
-                  <View style={styles.rankBadge}>
-                    <Text style={styles.rankBadgeText}>{index + 1}</Text>
+              <>
+                {productDemandEntries.slice(productDemandPage * 10, (productDemandPage + 1) * 10).map((entry, index) => (
+                  <View key={`${entry.label}-${index}`} style={styles.topRow}>
+                    <View style={styles.rankBadge}>
+                      <Text style={styles.rankBadgeText}>{productDemandPage * 10 + index + 1}</Text>
+                    </View>
+                    <View style={styles.topInfo}>
+                      <Text style={styles.topLabel}>{entry.label}</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end', gap: 2 }}>
+                      <Text style={styles.topCount}>{entry.count}</Text>
+                      {!!entry.hint && productDemandFilter === 'purchased' && (
+                        <Text style={[styles.metricHint, { fontSize: 13 }]}>{entry.hint}</Text>
+                      )}
+                    </View>
                   </View>
-                  <View style={styles.topInfo}>
-                    <Text style={styles.topLabel}>{entry.label}</Text>
-                    {!!entry.hint && (
-                      <Text style={styles.metricHint}>{entry.hint}</Text>
-                    )}
-                  </View>
-                  <Text style={styles.topCount}>{entry.count}</Text>
-                </View>
-              ))
+                ))}
+                {(() => {
+                  const totalPages = Math.ceil(productDemandEntries.length / 10);
+                  if (totalPages <= 1) return null;
+                  const pages: (number | '...')[] = [];
+                  if (totalPages <= 7) {
+                    for (let i = 0; i < totalPages; i++) pages.push(i);
+                  } else {
+                    pages.push(0);
+                    if (productDemandPage > 2) pages.push('...');
+                    for (let i = Math.max(1, productDemandPage - 1); i <= Math.min(totalPages - 2, productDemandPage + 1); i++) pages.push(i);
+                    if (productDemandPage < totalPages - 3) pages.push('...');
+                    pages.push(totalPages - 1);
+                  }
+                  return (
+                    <View style={styles.paginationRow}>
+                      <Pressable
+                        style={[styles.paginationButton, productDemandPage === 0 && styles.paginationButtonDisabled]}
+                        onPress={() => setProductDemandPage((p) => Math.max(0, p - 1))}
+                        disabled={productDemandPage === 0}
+                      >
+                        <Text style={styles.paginationButtonText}>‹ Inapoi</Text>
+                      </Pressable>
+                      {pages.map((p, i) =>
+                        p === '...' ? (
+                          <Text key={`e-${i}`} style={styles.paginationEllipsis}>…</Text>
+                        ) : (
+                          <Pressable
+                            key={p}
+                            style={[styles.paginationPageBtn, p === productDemandPage && styles.paginationPageBtnActive]}
+                            onPress={() => setProductDemandPage(p)}
+                          >
+                            <Text style={[styles.paginationPageText, p === productDemandPage && styles.paginationPageTextActive]}>
+                              {p + 1}
+                            </Text>
+                          </Pressable>
+                        )
+                      )}
+                      <Pressable
+                        style={[styles.paginationButton, productDemandPage >= totalPages - 1 && styles.paginationButtonDisabled]}
+                        onPress={() => setProductDemandPage((p) => Math.min(totalPages - 1, p + 1))}
+                        disabled={productDemandPage >= totalPages - 1}
+                      >
+                        <Text style={styles.paginationButtonText}>Inainte ›</Text>
+                      </Pressable>
+                    </View>
+                  );
+                })()}
+              </>
             )}
           </View>
         ) : isStoreView ? (
@@ -488,38 +625,292 @@ export default function StatisticsScreen() {
               />
             </View>
 
-            <TopListCard
-              title="Categorii de produse cumparate"
-              emptyText="Nu exista produse cumparate pentru filtrele selectate."
-              entries={storeStats.purchasedCategories}
-            />
+            <View style={styles.card}>
+              <View style={styles.overviewHeader}>
+                <Text style={styles.cardTitle}>Categorii de produse cumparate</Text>
+                {storeStats.purchasedCategories.length > 10 && (
+                  <Pressable onPress={() => setCategoriesModalVisible(true)}>
+                    <Text style={styles.reportButtonText}>Vezi toate ({storeStats.purchasedCategories.length})</Text>
+                  </Pressable>
+                )}
+              </View>
+              {storeStats.purchasedCategories.length === 0 ? (
+                <Text style={styles.cardText}>Nu exista produse cumparate pentru filtrele selectate.</Text>
+              ) : (
+                storeStats.purchasedCategories.slice(0, 10).map((entry, index) => (
+                  <View key={`${entry.label}-${index}`} style={styles.topRow}>
+                    <View style={styles.rankBadge}>
+                      <Text style={styles.rankBadgeText}>{index + 1}</Text>
+                    </View>
+                    <View style={styles.topInfo}>
+                      <Text style={styles.topLabel}>{entry.label}</Text>
+                      {!!entry.hint && <Text style={styles.metricHint}>{entry.hint}</Text>}
+                    </View>
+                    <Text style={styles.topCount}>{entry.count}</Text>
+                  </View>
+                ))
+              )}
+            </View>
 
-            <TopListCard
-              title="Cele mai cautate magazine in liste"
-              emptyText="Nu exista magazine in liste pentru filtrele selectate."
-              entries={storeStats.listedStores}
-            />
+            <Modal
+              visible={categoriesModalVisible}
+              animationType="slide"
+              transparent
+              onRequestClose={() => setCategoriesModalVisible(false)}
+            >
+              <View style={styles.nonPartnerOverlay} {...getModalBackdropResponder(() => setCategoriesModalVisible(false))}>
+                <View style={styles.nonPartnerModal}>
+                  <View style={styles.handle} />
+                  <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
+                    <Text style={styles.cardTitle}>Toate categoriile cumparate</Text>
+                    {storeStats.purchasedCategories.map((entry, index) => (
+                      <View key={`${entry.label}-${index}`} style={styles.topRow}>
+                        <View style={styles.rankBadge}>
+                          <Text style={styles.rankBadgeText}>{index + 1}</Text>
+                        </View>
+                        <View style={styles.topInfo}>
+                          <Text style={styles.topLabel}>{entry.label}</Text>
+                          {!!entry.hint && <Text style={styles.metricHint}>{entry.hint}</Text>}
+                        </View>
+                        <Text style={styles.topCount}>{entry.count}</Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                  <Pressable
+                    style={[styles.secondaryButton, { margin: 16 }]}
+                    onPress={() => setCategoriesModalVisible(false)}
+                  >
+                    <Text style={styles.secondaryButtonText}>Inchide</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </Modal>
 
-            <TopListCard
-              title="Cele mai cautate magazine cumparate"
-              emptyText="Nu exista produse cumparate pentru filtrele selectate."
-              entries={storeStats.purchasedStores}
-              tone="success"
-            />
+            <View style={styles.card}>
+              <View style={styles.overviewHeader}>
+                <Text style={styles.cardTitle}>Cele mai cautate magazine cumparate</Text>
+                {partnerStoreNames.size > 0 && (
+                  <Pressable onPress={() => { setAllStoresFilter('all'); setAllStoresModalVisible(true); }}>
+                    <Text style={styles.reportButtonText}>
+                      Vezi toate ({storeStats.purchasedStores.filter(e => e.hint !== 'non-partner').length + (storeStats.nonPartnerStores?.length ?? 0)})
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+              {storeStats.purchasedStores.length === 0 ? (
+                <Text style={styles.cardText}>Nu exista produse cumparate pentru filtrele selectate.</Text>
+              ) : (
+                storeStats.purchasedStores.map((entry, index) => {
+                  const isNonPartner = entry.hint === 'non-partner';
+                  return (
+                    <Pressable
+                      key={entry.label}
+                      style={({ pressed }) => [styles.topRow, isNonPartner && { opacity: pressed ? 0.7 : 1 }]}
+                      onPress={isNonPartner ? () => setNonPartnerModalVisible(true) : undefined}
+                    >
+                      <View style={styles.rankBadge}>
+                        <Text style={styles.rankBadgeText}>{index + 1}</Text>
+                      </View>
+                      <View style={styles.topInfo}>
+                        <Text style={[styles.topLabel, isNonPartner && { color: C.textDim, fontStyle: 'italic' }]}>
+                          {entry.label}
+                        </Text>
+                        {isNonPartner && (
+                          <Text style={styles.metricHint}>Apasa pentru detalii</Text>
+                        )}
+                      </View>
+                      <Text style={styles.topCount}>{entry.count}</Text>
+                    </Pressable>
+                  );
+                })
+              )}
+            </View>
 
-            <TopListCard
-              title="Top 3 produse cele mai cumparate"
-              emptyText="Nu exista produse cumparate pentru filtrele selectate."
-              entries={storeStats.topPurchasedProducts}
-              tone="success"
-            />
+            <Modal
+              visible={nonPartnerModalVisible}
+              animationType="slide"
+              transparent
+              onRequestClose={() => setNonPartnerModalVisible(false)}
+            >
+              <View style={styles.nonPartnerOverlay} {...getModalBackdropResponder(() => setNonPartnerModalVisible(false))}>
+                <View style={styles.nonPartnerModal}>
+                  <View style={styles.handle} />
+                  <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
+                    <Text style={styles.cardTitle}>Magazine fara contract de afiliere</Text>
+                    <Text style={styles.cardText}>Magazine din care clientii au cumparat fara un acord de parteneriat.</Text>
+                    {storeStats.nonPartnerStores?.map((entry, index) => (
+                      <View key={entry.label} style={styles.topRow}>
+                        <View style={styles.rankBadge}>
+                          <Text style={styles.rankBadgeText}>{index + 1}</Text>
+                        </View>
+                        <Text style={[styles.topInfo, { flex: 1 }]}>{entry.label}</Text>
+                        <Text style={styles.topCount}>{entry.count}</Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                  <Pressable
+                    style={[styles.secondaryButton, { margin: 16 }]}
+                    onPress={() => setNonPartnerModalVisible(false)}
+                  >
+                    <Text style={styles.secondaryButtonText}>Inchide</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </Modal>
+
+            <Modal
+              visible={allStoresModalVisible}
+              animationType="slide"
+              transparent
+              onRequestClose={() => setAllStoresModalVisible(false)}
+            >
+              <View style={styles.nonPartnerOverlay} {...getModalBackdropResponder(() => setAllStoresModalVisible(false))}>
+                <View style={styles.nonPartnerModal}>
+                  <View style={styles.handle} />
+                  <ScrollView contentContainerStyle={{ padding: 16, gap: 10 }}>
+                    <Text style={styles.cardTitle}>Toate magazinele cumparate</Text>
+
+                    <Dropdown
+                      style={styles.dropdown}
+                      containerStyle={styles.dropdownContainer}
+                      placeholderStyle={styles.dropdownPlaceholder}
+                      selectedTextStyle={styles.dropdownSelectedText}
+                      data={[
+                        { label: 'Toate magazinele', value: 'all' },
+                        { label: 'Parteneri', value: 'partner' },
+                        { label: 'Fara contract', value: 'non-partner' },
+                      ]}
+                      maxHeight={160}
+                      labelField="label"
+                      valueField="value"
+                      value={allStoresFilter}
+                      onChange={(item) => setAllStoresFilter(item.value)}
+                    />
+
+                    <View style={styles.storeLegendRow}>
+                      <View style={styles.storeLegendItem}>
+                        <View style={[styles.storeLegendDot, { backgroundColor: '#d1fae5' }]} />
+                        <Text style={styles.storeLegendText}>Magazin partener</Text>
+                      </View>
+                      <View style={styles.storeLegendItem}>
+                        <View style={[styles.storeLegendDot, { backgroundColor: '#fef9c3' }]} />
+                        <Text style={styles.storeLegendText}>Fara contract</Text>
+                      </View>
+                    </View>
+
+                    {(() => {
+                      const partners = (storeStats.allPartnerStores || []).map(e => ({ ...e, isPartner: true }));
+                      const nonPartners = (storeStats.nonPartnerStores || []).map(e => ({ ...e, isPartner: false }));
+                      const combined =
+                        allStoresFilter === 'partner' ? partners :
+                        allStoresFilter === 'non-partner' ? nonPartners :
+                        [...partners, ...nonPartners].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+                      return combined.map((entry, index) => (
+                        <View
+                          key={`${entry.label}-${index}`}
+                          style={[styles.topRow, entry.isPartner ? styles.storeRowPartner : styles.storeRowNonPartner]}
+                        >
+                          <View style={styles.rankBadge}>
+                            <Text style={styles.rankBadgeText}>{index + 1}</Text>
+                          </View>
+                          <Text style={[styles.topInfo, { flex: 1 }]}>{entry.label}</Text>
+                          <Text style={[styles.topCount, entry.isPartner && styles.metricValueSuccess]}>{entry.count}</Text>
+                        </View>
+                      ));
+                    })()}
+                  </ScrollView>
+                  <Pressable
+                    style={[styles.secondaryButton, { margin: 16 }]}
+                    onPress={() => setAllStoresModalVisible(false)}
+                  >
+                    <Text style={styles.secondaryButtonText}>Inchide</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </Modal>
+
+            <View style={styles.card}>
+              <View style={styles.overviewHeader}>
+                <Text style={styles.cardTitle}>Top 5 produse cumparate</Text>
+                {storeStats.topPurchasedProducts.length > 5 && (
+                  <Pressable onPress={() => setTopProductsModalVisible(true)}>
+                    <Text style={styles.reportButtonText}>
+                      Vezi toate ({storeStats.topPurchasedProducts.length})
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+              {storeStats.topPurchasedProducts.length === 0 ? (
+                <Text style={styles.cardText}>Nu exista produse cumparate pentru filtrele selectate.</Text>
+              ) : (
+                storeStats.topPurchasedProducts.slice(0, 5).map((entry, index) => (
+                  <View key={`${entry.label}-${index}`} style={styles.topRow}>
+                    <View style={styles.rankBadge}>
+                      <Text style={styles.rankBadgeText}>{index + 1}</Text>
+                    </View>
+                    <View style={styles.topInfo}>
+                      <Text style={styles.topLabel}>{entry.label}</Text>
+                      {!!entry.hint && <Text style={styles.metricHint}>{entry.hint}</Text>}
+                    </View>
+                    <Text style={[styles.topCount, styles.metricValueSuccess]}>{entry.count}</Text>
+                  </View>
+                ))
+              )}
+            </View>
+
+            <Modal
+              visible={topProductsModalVisible}
+              animationType="slide"
+              transparent
+              onRequestClose={() => setTopProductsModalVisible(false)}
+            >
+              <View style={styles.nonPartnerOverlay} {...getModalBackdropResponder(() => setTopProductsModalVisible(false))}>
+                <View style={styles.nonPartnerModal}>
+                  <View style={styles.handle} />
+                  <ScrollView contentContainerStyle={{ padding: 16, gap: 10 }}>
+                    <Text style={styles.cardTitle}>Toate produsele cumparate</Text>
+                    <View style={styles.storeLegendRow}>
+                      <View style={styles.storeLegendItem}>
+                        <View style={[styles.storeLegendDot, { backgroundColor: '#d1fae5' }]} />
+                        <Text style={styles.storeLegendText}>Produs din magazin partener</Text>
+                      </View>
+                      <View style={styles.storeLegendItem}>
+                        <View style={[styles.storeLegendDot, { backgroundColor: '#fef9c3' }]} />
+                        <Text style={styles.storeLegendText}>Alt magazin</Text>
+                      </View>
+                    </View>
+                    {storeStats.topPurchasedProducts.map((entry, index) => {
+                      const isPartner = partnerStoreNames.has((entry.storeName || '').toLowerCase().trim());
+                      return (
+                        <View key={`${entry.label}-${index}`} style={[styles.topRow, isPartner ? styles.storeRowPartner : styles.storeRowNonPartner]}>
+                          <View style={styles.rankBadge}>
+                            <Text style={styles.rankBadgeText}>{index + 1}</Text>
+                          </View>
+                          <View style={styles.topInfo}>
+                            <Text style={styles.topLabel}>{entry.label}</Text>
+                            {!!entry.hint && <Text style={styles.metricHint}>{entry.hint}</Text>}
+                          </View>
+                          <Text style={[styles.topCount, isPartner && styles.metricValueSuccess]}>{entry.count}</Text>
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
+                  <Pressable
+                    style={[styles.secondaryButton, { margin: 16 }]}
+                    onPress={() => setTopProductsModalVisible(false)}
+                  >
+                    <Text style={styles.secondaryButtonText}>Inchide</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </Modal>
 
           </>
         ) : (
           <>
             <View style={styles.statsGrid}>
               <MetricCard
-                label="Cadouri in selectie"
+                label="Cadouri"
                 value={String(stats.totalGiftPlans)}
               />
               <MetricCard
@@ -563,11 +954,9 @@ export default function StatisticsScreen() {
             </View>
 
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Interpretare rapida</Text>
+              <Text style={styles.cardTitle}>Nota:</Text>
               <Text style={styles.cardText}>
-                Procentele pentru cumparare la timp sunt calculate doar pentru cadourile
-                marcate ca fiind cumparate. Bugetele includ cadourile care se potrivesc
-                filtrelor selectate.
+                Procentele pentru cumparare la timp sunt calculate doar pentru cadourile marcate ca fiind cumparate.
               </Text>
             </View>
           </>
@@ -595,17 +984,6 @@ export default function StatisticsScreen() {
             scopul cadoului.
           </Text>
         </Pressable>
-        <View style={styles.cardDivider} />
-        <Pressable
-          style={({ hovered, pressed }) => [
-            styles.reportButton,
-            hovered && styles.reportButtonHover,
-            pressed && styles.reportButtonPressed,
-          ]}
-          onPress={() => generateUsersReport(stats, reportFilters)}
-        >
-          <Text style={styles.reportButtonText}>↓ Generează raport Excel</Text>
-        </Pressable>
       </View>
 
       <View style={[styles.card, styles.clickableCard, styles.storeClickableCard]}>
@@ -623,18 +1001,6 @@ export default function StatisticsScreen() {
             cumparate cel mai des, filtrate dupa an, scop si gen.
           </Text>
         </Pressable>
-        <View style={styles.cardDivider} />
-        <Pressable
-          style={({ hovered, pressed }) => [
-            styles.reportButton,
-            styles.reportButtonStore,
-            hovered && styles.reportButtonHover,
-            pressed && styles.reportButtonPressed,
-          ]}
-          onPress={() => generateStoresReport(storeStats, reportFilters)}
-        >
-          <Text style={styles.reportButtonText}>↓ Generează raport Excel</Text>
-        </Pressable>
       </View>
 
       <View style={[styles.card, styles.clickableCard, styles.productDemandClickableCard]}>
@@ -651,18 +1017,6 @@ export default function StatisticsScreen() {
             Vezi produsele pe care userii nu le-au gasit in cautari si le-au
             adaugat manual, de la cele mai dorite la cele mai rare.
           </Text>
-        </Pressable>
-        <View style={styles.cardDivider} />
-        <Pressable
-          style={({ hovered, pressed }) => [
-            styles.reportButton,
-            styles.reportButtonDemand,
-            hovered && styles.reportButtonHover,
-            pressed && styles.reportButtonPressed,
-          ]}
-          onPress={() => generateProductDemandReport(storeStats, reportFilters)}
-        >
-          <Text style={styles.reportButtonText}>↓ Generează raport Excel</Text>
         </Pressable>
       </View>
 
@@ -746,6 +1100,123 @@ const styles = StyleSheet.create({
     gap: 16,
     paddingBottom: 36,
     backgroundColor: C.bg,
+  },
+  storeLegendRow: {
+    flexDirection: 'row',
+    gap: 16,
+    marginBottom: 4,
+  },
+  storeLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  storeLegendDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 0.5,
+    borderColor: C.border,
+  },
+  storeLegendText: {
+    fontSize: 13,
+    color: C.textDim,
+  },
+  storeRowPartner: {
+    backgroundColor: '#d1fae5',
+    borderRadius: R.sm,
+    paddingHorizontal: 8,
+  },
+  storeRowNonPartner: {
+    backgroundColor: '#fef9c3',
+    borderRadius: R.sm,
+    paddingHorizontal: 8,
+  },
+  paginationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 0.5,
+    borderTopColor: C.border,
+  },
+  paginationButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: R.sm,
+    backgroundColor: C.surface2,
+    borderWidth: 0.5,
+    borderColor: C.border,
+  },
+  paginationButtonDisabled: {
+    opacity: 0.35,
+  },
+  paginationButtonText: {
+    color: C.text,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  paginationPageBtn: {
+    minWidth: 34,
+    height: 34,
+    borderRadius: R.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  paginationPageBtnActive: {
+    backgroundColor: C.accent,
+  },
+  paginationPageText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: C.textDim,
+  },
+  paginationPageTextActive: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  paginationEllipsis: {
+    fontSize: 14,
+    color: C.textDim,
+    paddingHorizontal: 4,
+    alignSelf: 'center',
+  },
+  nonPartnerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  nonPartnerModal: {
+    backgroundColor: C.surface,
+    borderTopLeftRadius: R.xxl,
+    borderTopRightRadius: R.xxl,
+    maxHeight: '80%',
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: C.border,
+    alignSelf: 'center',
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  overviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  overviewExportBtn: {
+    backgroundColor: C.accentSoft,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: R.md,
   },
   title: {
     fontSize: 28,

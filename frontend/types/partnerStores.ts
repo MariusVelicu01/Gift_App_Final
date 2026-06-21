@@ -33,6 +33,7 @@ export type ProductImportItem = {
     commissionPercent?: number;
     estimatedCommissionRON?: number;
   };
+  gender?: 'barbati' | 'femei' | 'unisex';
 };
 
 export type ProductPriceHistoryEntry = {
@@ -146,6 +147,12 @@ export type PartnerProductsImportPayload = {
   };
   currency?: string;
   lastUpdated?: string;
+  affiliateProgram?: {
+    type?: string;
+    defaultCommissionPercent?: number;
+    maxCommissionPercent?: number;
+    cookieDurationDays?: number;
+  };
 };
 
 export type PartnerStorePayload = {

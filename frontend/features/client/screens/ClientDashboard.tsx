@@ -20,7 +20,12 @@ import {
   generateBirthdayAlerts,
   markBirthdayAlertRead,
 } from '../../../services/birthdayAlertsService';
+import {
+  generateDeadlineAlerts,
+  markDeadlineAlertRead,
+} from '../../../services/deadlineAlertsService';
 import { getLovedOnesCache } from '../../../services/lovedOnesCache';
+import { getCalendarCache } from '../../../services/calendarCache';
 
 type ClientTab = 'home' | 'lovedOnes' | 'calendar' | 'partnerStores' | 'notifications' | 'settings';
 
@@ -42,10 +47,12 @@ const TABS: TabConfig[] = [
 
 type Props = {
   firstName: string;
+  lastName?: string;
+  userGender?: string;
   onLogout: () => void;
 };
 
-export default function ClientDashboard({ firstName, onLogout }: Props) {
+export default function ClientDashboard({ firstName, lastName, userGender, onLogout }: Props) {
   const { token } = useAuth();
   const [activeTab, setActiveTab] = useState<ClientTab>('home');
   const [alerts, setAlerts] = useState<AppNotification[]>([]);
@@ -60,12 +67,17 @@ export default function ClientDashboard({ firstName, onLogout }: Props) {
   const loadAlerts = useCallback(async () => {
     if (!token) return;
     try {
-      const [priceAlerts, lovedOnes] = await Promise.all([
+      const [priceAlerts, lovedOnes, calendarData] = await Promise.all([
         getPriceAlerts(token),
         getLovedOnesCache(token),
+        getCalendarCache(token),
       ]);
-      const birthdayAlerts = await generateBirthdayAlerts(lovedOnes);
-      setAlerts([...priceAlerts, ...birthdayAlerts]);
+      const [birthdayAlerts, deadlineAlerts] = await Promise.all([
+        generateBirthdayAlerts(lovedOnes),
+        generateDeadlineAlerts(calendarData),
+      ]);
+      // Price alerts first (unread), then deadline alerts, then birthday alerts
+      setAlerts([...priceAlerts, ...deadlineAlerts, ...birthdayAlerts]);
     } catch {}
   }, [token]);
 
@@ -77,6 +89,8 @@ export default function ClientDashboard({ firstName, onLogout }: Props) {
     if (!alert.readAt) {
       if ((alert as any).notificationKind === 'birthday') {
         await markBirthdayAlertRead(alert.id);
+      } else if ((alert as any).notificationKind === 'deadline') {
+        await markDeadlineAlertRead(alert.id);
       } else if (token) {
         await markPriceAlertRead(token, alert.id);
       }
@@ -110,6 +124,8 @@ export default function ClientDashboard({ firstName, onLogout }: Props) {
         return (
           <HomeScreen
             firstName={firstName}
+            lastName={lastName}
+            userGender={userGender}
             onOpenGift={(target) => {
               setGiftDetailsTarget(target);
               setActiveTab('lovedOnes');
@@ -129,7 +145,7 @@ export default function ClientDashboard({ firstName, onLogout }: Props) {
       case 'calendar':
         return <CalendarScreen resetRef={calendarResetRef} />;
       case 'partnerStores':
-        return <PartnerStoresScreen />;
+        return <PartnerStoresScreen userGender={userGender} />;
       case 'notifications':
         return (
           <NotificationsScreen

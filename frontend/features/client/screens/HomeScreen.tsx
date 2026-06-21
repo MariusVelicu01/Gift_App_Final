@@ -33,8 +33,40 @@ type GiftDetailsTarget = {
 
 type Props = {
   firstName: string;
+  lastName?: string;
+  userGender?: string;
   onOpenGift?: (target: GiftDetailsTarget) => void;
 };
+
+// Maps profile gender ('Masculin'/'male') to product gender ('barbati'/'femei')
+function profileGenderToProductGender(g?: string): 'barbati' | 'femei' | null {
+  if (!g) return null;
+  const lower = g.toLowerCase();
+  if (lower === 'masculin' || lower === 'male') return 'barbati';
+  if (lower === 'feminin' || lower === 'female') return 'femei';
+  return null;
+}
+
+// Sort products: matching gender + unisex first, opposite gender ~1-in-6 chance mixed in
+function sortProductsByGender(products: any[], userProductGender: 'barbati' | 'femei' | null) {
+  if (!userProductGender) return products;
+  const opposite = userProductGender === 'barbati' ? 'femei' : 'barbati';
+  const primary: any[] = [];
+  const opp: any[] = [];
+  products.forEach(p => {
+    const g = (p.product?.gender || p.gender || 'unisex') as string;
+    if (g === opposite) opp.push(p);
+    else primary.push(p); // matching or unisex
+  });
+  // Shuffle primary, then sprinkle 1 opposite per every 5 primary
+  const shuffled = [...primary].sort(() => Math.random() - 0.5);
+  const result: any[] = [];
+  shuffled.forEach((item, i) => {
+    result.push(item);
+    if ((i + 1) % 5 === 0 && opp.length > 0) result.push(opp.splice(0, 1)[0]);
+  });
+  return result;
+}
 
 function getTodayKey() {
   const today = new Date();
@@ -74,7 +106,8 @@ function openProductLink(affiliateUrl?: string, productUrl?: string) {
   });
 }
 
-export default function HomeScreen({ firstName, onOpenGift }: Props) {
+export default function HomeScreen({ firstName, lastName, userGender, onOpenGift }: Props) {
+  const userProductGender = profileGenderToProductGender(userGender);
   const { token } = useAuth();
   const { width } = useWindowDimensions();
   const isCompact = width < 760;
@@ -151,8 +184,9 @@ export default function HomeScreen({ firstName, onOpenGift }: Props) {
         })
       )
       .filter(Boolean) as Promotion[];
-    return [...allDiscounted].sort(() => Math.random() - 0.5).slice(0, 5);
-  }, [partnerStores]);
+    const shuffled = [...allDiscounted].sort(() => Math.random() - 0.5);
+    return sortProductsByGender(shuffled, userProductGender).slice(0, 8);
+  }, [partnerStores, userProductGender]);
 
   if (loading) {
     return (
@@ -166,19 +200,18 @@ export default function HomeScreen({ firstName, onOpenGift }: Props) {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       {/* Hero greeting */}
-      <View style={styles.hero}>
-        <Text style={styles.heroKicker}>Bun venit</Text>
+      <View style={styles.heroBlock}>
+        <View style={styles.roleBadge}>
+          <Text style={styles.roleBadgeText}>Bun venit</Text>
+        </View>
         <Text style={styles.heroTitle}>
-          {firstName},{' '}
-          <Text style={styles.heroAccent}>{activeGiftPlans.length} cadouri active</Text>
+          {firstName}{lastName ? ` ${lastName}` : ''}
         </Text>
-        <Text style={styles.heroSub}>asteapta atentia ta.</Text>
-      </View>
-
-      {/* Stat card */}
-      <View style={styles.statCard}>
-        <Text style={styles.statValue}>{activeGiftPlans.length}</Text>
-        <Text style={styles.statLabel}>cadouri active</Text>
+        <Text style={styles.heroSub}>
+          {activeGiftPlans.length > 0
+            ? `Ai ${activeGiftPlans.length} ${activeGiftPlans.length === 1 ? 'cadou activ' : 'cadouri active'} care asteapta atentia ta.`
+            : 'Nu ai cadouri active momentan.'}
+        </Text>
       </View>
 
       {/* Buy soon */}
@@ -337,13 +370,24 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 4,
   },
-  heroKicker: {
-    fontSize: 11,
-    letterSpacing: 2,
+  heroBlock: {
+    gap: 6,
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
+  roleBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: C.accentSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: R.pill,
+  },
+  roleBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.accent,
     textTransform: 'uppercase',
-    color: C.textFaint,
-    fontWeight: '500',
-    marginBottom: 4,
+    letterSpacing: 0.5,
   },
   heroTitle: {
     fontFamily: 'serif',
@@ -353,19 +397,13 @@ const styles = StyleSheet.create({
     lineHeight: 38,
     letterSpacing: -0.5,
   },
-  heroAccent: {
-    fontFamily: 'serif',
-    fontStyle: 'italic',
-    color: C.accent,
-  },
   heroSub: {
-    fontFamily: 'serif',
-    fontSize: 32,
-    fontWeight: '400',
-    color: C.text,
-    lineHeight: 38,
-    letterSpacing: -0.5,
+    fontSize: 14,
+    color: C.textDim,
+    marginTop: 2,
   },
+  heroKicker: { fontSize: 11, color: C.textFaint },
+  heroAccent: { color: C.accent, fontStyle: 'italic' },
 
   // Stat card
   statCard: {
