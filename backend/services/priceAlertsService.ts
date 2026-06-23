@@ -326,21 +326,28 @@ export async function refreshGiftPlanProductPricesForImport({
   storeName,
   importedProducts,
   currency = 'RON',
+  importedAt,
 }: {
   storeId: string;
   storeName: string;
   importedProducts: ProductImportItem[];
   currency?: string;
+  importedAt?: string;
 }) {
   const snapshot = await db.collectionGroup('giftPlans').get();
-  const batches: ReturnType<typeof db.batch>[] = [db.batch()];
-  let opsInCurrentBatch = 0;
+  const planBatches: ReturnType<typeof db.batch>[] = [db.batch()];
+  const alertBatches: ReturnType<typeof db.batch>[] = [db.batch()];
+  let planOps = 0;
+  let alertOps = 0;
   let updatedPlansCount = 0;
+  const now = importedAt || new Date().toISOString();
 
   for (const doc of snapshot.docs) {
     const giftPlan = doc.data();
-
     if (giftPlan.status !== 'planned') continue;
+
+    const pathData = getUserIdFromGiftPlanPath(doc.ref.path);
+    if (!pathData) continue;
 
     const selectedProducts = Array.isArray(giftPlan.selectedProducts)
       ? giftPlan.selectedProducts
@@ -354,11 +361,56 @@ export async function refreshGiftPlanProductPricesForImport({
       const importedProduct = importedProducts.find((p) =>
         matchesImportedProduct(selectedProduct, p)
       );
-
       if (!importedProduct) return selectedProduct;
 
       const details = getProductEffectivePriceDetails(importedProduct);
       if (!details) return selectedProduct;
+
+      const oldPrice = Number(selectedProduct.price || 0);
+      const newPrice = details.effectivePrice;
+      const changeAmount = Number((newPrice - oldPrice).toFixed(2));
+
+      // Create price alert if price changed
+      if (Math.abs(changeAmount) > 0.009 && oldPrice > 0) {
+        const productId = String(selectedProduct.id || selectedProduct.productId || '').trim();
+        const alertId = buildAlertDocId(
+          pathData.giftPlanId,
+          productId || getProductIdentityKey(selectedProduct),
+          storeId,
+          newPrice,
+          now
+        );
+        const alertRef = alertsCollection(pathData.uid).doc(alertId);
+        if (alertOps >= 490) {
+          alertBatches.push(db.batch());
+          alertOps = 0;
+        }
+        alertBatches[alertBatches.length - 1].set(alertRef, {
+          id: alertId,
+          type: 'price_change',
+          userId: pathData.uid,
+          lovedOneId: pathData.lovedOneId,
+          lovedOneName: giftPlan.lovedOneName || '',
+          giftPlanId: pathData.giftPlanId,
+          giftPurpose: giftPlan.purpose || '',
+          productId,
+          productKey: getProductIdentityKey(selectedProduct),
+          productName: selectedProduct.name || importedProduct.name,
+          storeId,
+          storeName,
+          oldPrice,
+          previousStorePrice: oldPrice,
+          newPrice,
+          changeAmount,
+          changeDirection: changeAmount > 0 ? 'up' : 'down',
+          currency,
+          importedAt: now,
+          createdAt: now,
+          readAt: null,
+          highlightSeenAt: null,
+        }, { merge: true });
+        alertOps++;
+      }
 
       changed = true;
       return {
@@ -374,7 +426,7 @@ export async function refreshGiftPlanProductPricesForImport({
         promoDiscount: details.promoDiscount,
         promoDiscountPercent: details.promoDiscountPercent,
         promoNote: details.promoNote,
-        currency: currency,
+        currency,
         storeName,
         ...(importedProduct.productUrl ? { productUrl: importedProduct.productUrl } : {}),
         ...(importedProduct.affiliateUrl ? { affiliateUrl: importedProduct.affiliateUrl } : {}),
@@ -386,19 +438,19 @@ export async function refreshGiftPlanProductPricesForImport({
 
     if (!changed) continue;
 
-    if (opsInCurrentBatch >= 490) {
-      batches.push(db.batch());
-      opsInCurrentBatch = 0;
+    if (planOps >= 490) {
+      planBatches.push(db.batch());
+      planOps = 0;
     }
-
-    batches[batches.length - 1].update(doc.ref, { selectedProducts: updatedProducts });
-    opsInCurrentBatch++;
+    planBatches[planBatches.length - 1].update(doc.ref, { selectedProducts: updatedProducts });
+    planOps++;
     updatedPlansCount++;
   }
 
-  if (updatedPlansCount > 0) {
-    await Promise.all(batches.map((batch) => batch.commit()));
-  }
+  await Promise.all([
+    ...(updatedPlansCount > 0 ? planBatches.map((b) => b.commit()) : []),
+    ...(alertOps > 0 ? alertBatches.map((b) => b.commit()) : []),
+  ]);
 
   return updatedPlansCount;
 }

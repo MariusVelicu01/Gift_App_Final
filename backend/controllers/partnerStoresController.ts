@@ -283,6 +283,29 @@ function normalizeImportMetadata(body: any) {
           },
         }
       : {}),
+    ...(() => {
+      const pi = body.promotionIndicator;
+      if (!pi || !pi.hasPromotion) return {};
+      return {
+        promotionIndicator: {
+          hasPromotion: Boolean(pi.hasPromotion),
+          ...(pi.code ? { code: String(pi.code) } : {}),
+          ...(pi.discountPercent !== undefined ? { discountPercent: Number(pi.discountPercent) } : {}),
+          ...(pi.hasMinimumOrderValue !== undefined ? { hasMinimumOrderValue: Boolean(pi.hasMinimumOrderValue) } : {}),
+          ...(pi.minimumOrderValue !== undefined ? { minimumOrderValue: Number(pi.minimumOrderValue) } : {}),
+          ...(pi.currency ? { currency: String(pi.currency) } : {}),
+          ...(pi.note ? { note: String(pi.note) } : {}),
+          ...(pi.hasLimitedDuration ? { hasLimitedDuration: true } : {}),
+          ...(() => {
+            const dur = pi.duration || {};
+            const endDate = String(dur.endDate || '').trim();
+            const startDate = String(dur.startDate || '').trim();
+            if (!endDate && !startDate) return {};
+            return { duration: { ...(startDate ? { startDate } : {}), ...(endDate ? { endDate } : {}) } };
+          })(),
+        },
+      };
+    })(),
   };
 }
 
@@ -373,6 +396,7 @@ export async function importProducts(req: Request, res: Response) {
         storeName,
         importedProducts: products,
         currency,
+        importedAt,
       });
     } catch (refreshError) {
       console.error('REFRESH GIFT PLAN PRICES ERROR:', refreshError);

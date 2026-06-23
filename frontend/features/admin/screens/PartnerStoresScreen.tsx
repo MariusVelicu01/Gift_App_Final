@@ -240,20 +240,17 @@ function normalizeProduct(item: any, index: number) {
     ...(promo
       ? {
           promo: {
-            ...(promo.hasPromoCode !== undefined
-              ? { hasPromoCode: Boolean(promo.hasPromoCode) }
-              : {}),
+            ...(promo.hasPromoCode !== undefined ? { hasPromoCode: Boolean(promo.hasPromoCode) } : {}),
             ...(promo.code ? { code: String(promo.code) } : {}),
-            ...(promo.discount !== undefined
-              ? { discount: Number(promo.discount) }
-              : {}),
-            ...(promo.discountAmount !== undefined
-              ? { discountAmount: Number(promo.discountAmount) }
-              : {}),
-            ...(promo.discountPercent !== undefined
-              ? { discountPercent: Number(promo.discountPercent) }
-              : {}),
+            ...(promo.discount !== undefined ? { discount: Number(promo.discount) } : {}),
+            ...(promo.discountAmount !== undefined ? { discountAmount: Number(promo.discountAmount) } : {}),
+            ...(promo.discountPercent !== undefined ? { discountPercent: Number(promo.discountPercent) } : {}),
             ...(promo.note ? { note: String(promo.note) } : {}),
+            ...(promo.startDate ? { startDate: String(promo.startDate) } : {}),
+            ...(promo.endDate ? { endDate: String(promo.endDate) } : {}),
+            ...(promo.hasMinimumOrderValue !== undefined ? { hasMinimumOrderValue: Boolean(promo.hasMinimumOrderValue) } : {}),
+            ...(promo.minimumOrderValue !== undefined ? { minimumOrderValue: Number(promo.minimumOrderValue) } : {}),
+            ...(promo.minimumOrderCurrency ? { minimumOrderCurrency: String(promo.minimumOrderCurrency) } : {}),
           },
         }
       : {}),
@@ -294,6 +291,7 @@ function parseJsonProducts(content: string): PartnerProductsImportPayload {
     ...(parsed.lastUpdated ? { lastUpdated: String(parsed.lastUpdated) } : {}),
     ...(parsed.merchant ? { merchant: parsed.merchant } : {}),
     ...(parsed.affiliateProgram ? { affiliateProgram: parsed.affiliateProgram } : {}),
+    ...(parsed.promotionIndicator ? { promotionIndicator: parsed.promotionIndicator } : {}),
   };
 }
 
@@ -1089,6 +1087,32 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
           )}
         </View>
 
+        {(() => {
+          const pi = (selectedStore as any).promotionIndicator;
+          if (!pi?.hasPromotion || !pi.code) return null;
+          const endDate = pi.duration?.endDate;
+          const endFmt = endDate ? (() => {
+            const d = /^\d{2}-\d{2}-\d{4}$/.test(endDate)
+              ? new Date(endDate.split('-').reverse().join('-'))
+              : new Date(endDate);
+            return isNaN(d.getTime()) ? null : `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
+          })() : null;
+          return (
+            <View style={styles.adminPromoBanner}>
+              <View style={styles.adminPromoBannerHeader}>
+                <Text style={styles.adminPromoBannerTitle}>🏷 Promoție activă: -{pi.discountPercent}% cod {pi.code}</Text>
+                <Text style={styles.adminPromoBannerBadge}>
+                {endFmt ? `până ${endFmt}` : 'Promoție permanentă'}
+              </Text>
+              </View>
+              {pi.hasMinimumOrderValue && pi.minimumOrderValue && (
+                <Text style={styles.adminPromoBannerDetail}>Cos minim: {pi.minimumOrderValue} {pi.currency || 'RON'}</Text>
+              )}
+              {pi.note && <Text style={styles.adminPromoBannerNote}>{pi.note}</Text>}
+            </View>
+          );
+        })()}
+
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Catalog produse</Text>
           <Text style={styles.cardText}>
@@ -1197,6 +1221,20 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
                     Stoc: {product.availability.stockStatus}
                   </Text>
                 )}
+                {(() => {
+                  const pi = (selectedStore as any).promotionIndicator;
+                  const effectivePromo = product.promo?.code ? product.promo : (pi?.hasPromotion ? pi : null);
+                  if (!effectivePromo?.code && !effectivePromo?.discountPercent) return null;
+                  const pct = effectivePromo.discountPercent;
+                  const code = effectivePromo.code || pi?.code;
+                  const minOrder = effectivePromo.minimumOrderValue ?? (pi?.hasMinimumOrderValue ? pi?.minimumOrderValue : null);
+                  return (
+                    <View style={styles.adminProductPromoRow}>
+                      <Text style={styles.adminProductPromoTag}>-{pct}% {code}</Text>
+                      {minOrder ? <Text style={styles.adminProductPromoMin}>min. {minOrder} RON</Text> : null}
+                    </View>
+                  );
+                })()}
                 <Text style={styles.productHistoryText}>Detalii produs</Text>
               </View>
               <View style={styles.priceBlock}>
@@ -2359,6 +2397,67 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     marginTop: 4,
+  },
+  adminPromoBanner: {
+    backgroundColor: '#fff8e1',
+    borderWidth: 1,
+    borderColor: '#f9a825',
+    borderRadius: R.md,
+    padding: 12,
+    marginBottom: 8,
+    gap: 4,
+  },
+  adminPromoBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  adminPromoBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#e65100',
+    flex: 1,
+  },
+  adminPromoBannerBadge: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#e65100',
+    backgroundColor: '#ffe0b2',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: R.sm,
+  },
+  adminPromoBannerDetail: {
+    fontSize: 13,
+    color: '#6d4c41',
+  },
+  adminPromoBannerNote: {
+    fontSize: 11,
+    color: C.textDim,
+    fontStyle: 'italic',
+  },
+  adminProductPromoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 3,
+    marginBottom: 2,
+  },
+  adminProductPromoTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#e65100',
+    backgroundColor: '#fff3e0',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: R.xs,
+  },
+  adminProductPromoMin: {
+    fontSize: 10,
+    color: C.textDim,
+    fontStyle: 'italic',
   },
   priceBlock: {
     alignItems: 'flex-end',

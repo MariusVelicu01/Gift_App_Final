@@ -24,8 +24,10 @@ import {
   generateDeadlineAlerts,
   markDeadlineAlertRead,
 } from '../../../services/deadlineAlertsService';
+import { generatePriceChangeAlerts, markObserverAlertRead } from '../../../services/priceChangeObserver';
 import { getLovedOnesCache } from '../../../services/lovedOnesCache';
 import { getCalendarCache } from '../../../services/calendarCache';
+import { getPartnerStoresCache, subscribePartnerStoresCache } from '../../../services/partnerStoresCache';
 
 type ClientTab = 'home' | 'lovedOnes' | 'calendar' | 'partnerStores' | 'notifications' | 'settings';
 
@@ -66,22 +68,66 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
 
   const loadAlerts = useCallback(async () => {
     if (!token) return;
+
+    // Load price alerts independently — must not fail due to calendar errors
+    const priceAlerts = await getPriceAlerts(token).catch(() => [] as any[]);
+
+    // Load calendar + catalog based alerts separately — failure doesn't block price alerts
+    let deadlineAlerts: any[] = [];
+    let birthdayAlerts: any[] = [];
+    let observedPriceAlerts: any[] = [];
     try {
-      const [priceAlerts, lovedOnes, calendarData] = await Promise.all([
-        getPriceAlerts(token),
+      const [lovedOnes, calendarData, stores] = await Promise.all([
         getLovedOnesCache(token),
         getCalendarCache(token),
+        getPartnerStoresCache(token),
       ]);
-      const [birthdayAlerts, deadlineAlerts] = await Promise.all([
-        generateBirthdayAlerts(lovedOnes),
-        generateDeadlineAlerts(calendarData),
+      const [bAlerts, dAlerts, obsAlerts] = await Promise.all([
+        generateBirthdayAlerts(lovedOnes).catch(() => []),
+        generateDeadlineAlerts(calendarData).catch(() => []),
+        generatePriceChangeAlerts(calendarData, stores).catch(() => []),
       ]);
-      // Price alerts first (unread), then deadline alerts, then birthday alerts
-      setAlerts([...priceAlerts, ...deadlineAlerts, ...birthdayAlerts]);
+      birthdayAlerts = bAlerts;
+      deadlineAlerts = dAlerts;
+      observedPriceAlerts = obsAlerts;
     } catch {}
+
+    setAlerts([...priceAlerts, ...observedPriceAlerts, ...deadlineAlerts, ...birthdayAlerts]);
   }, [token]);
 
   useEffect(() => { loadAlerts(); }, [loadAlerts]);
+
+  // Re-run alerts when catalog updates (e.g., admin imports new prices)
+  useEffect(() => {
+    if (!token) return;
+    return subscribePartnerStoresCache(() => { loadAlerts(); });
+  }, [token, loadAlerts]);
+
+  // Price observer: poll catalog every 20s, detect price changes in real-time
+  useEffect(() => {
+    if (!token) return;
+
+    const checkPrices = async () => {
+      try {
+        // Force refresh catalog (bypass 30s cache)
+        const [stores, calendarData] = await Promise.all([
+          getPartnerStoresCache(token, { forceRefresh: true }),
+          getCalendarCache(token),
+        ]);
+        const newPriceAlerts = await generatePriceChangeAlerts(calendarData, stores).catch(() => []);
+        if (newPriceAlerts.length > 0) {
+          setAlerts((prev) => {
+            const existingIds = new Set(prev.map((a) => a.id));
+            const novel = newPriceAlerts.filter((a) => !existingIds.has(a.id));
+            return novel.length > 0 ? [...novel, ...prev] : prev;
+          });
+        }
+      } catch {}
+    };
+
+    const interval = setInterval(checkPrices, 20000); // every 20 seconds
+    return () => clearInterval(interval);
+  }, [token]);
 
   const unreadCount = alerts.filter((a) => !a.readAt).length;
 
@@ -91,6 +137,9 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
         await markBirthdayAlertRead(alert.id);
       } else if ((alert as any).notificationKind === 'deadline') {
         await markDeadlineAlertRead(alert.id);
+      } else if (alert.id.startsWith('price-obs-')) {
+        // Observer-generated alert — mark locally, not via API
+        await markObserverAlertRead(alert.id);
       } else if (token) {
         await markPriceAlertRead(token, alert.id);
       }

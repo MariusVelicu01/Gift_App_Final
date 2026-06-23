@@ -253,6 +253,33 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
           </View>
 
           <Text style={styles.storeDetailTitle}>{selectedStore.displayName}</Text>
+
+          {(() => {
+            const pi = (selectedStore as any).promotionIndicator;
+            if (!pi?.hasPromotion || !pi.code) return null;
+            const endDate = pi.duration?.endDate;
+            const endFormatted = endDate ? (() => {
+              const d = /^\d{2}-\d{2}-\d{4}$/.test(endDate)
+                ? new Date(endDate.split('-').reverse().join('-'))
+                : new Date(endDate);
+              return isNaN(d.getTime()) ? null : `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
+            })() : null;
+            return (
+              <View style={styles.promoBanner}>
+                <Text style={styles.promoBannerCode}>🏷 Cod {pi.code} — -{pi.discountPercent}%</Text>
+                {pi.hasMinimumOrderValue && pi.minimumOrderValue ? (
+                  <Text style={styles.promoBannerDetail}>Valabil la comenzi de min. {pi.minimumOrderValue} {pi.currency || 'RON'}</Text>
+                ) : null}
+                <Text style={styles.promoBannerDetail}>
+                  {endFormatted ? `Valabil până pe ${endFormatted}` : 'Promoție permanentă'}
+                </Text>
+                {pi.note ? (
+                  <Text style={styles.promoBannerNote}>{pi.note}</Text>
+                ) : null}
+              </View>
+            );
+          })()}
+
           {!!selectedStore.merchant?.domain && (
             <Pressable
               style={styles.storeLinkButton}
@@ -621,6 +648,30 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: -0.5,
     marginBottom: 12,
+  },
+  promoBanner: {
+    backgroundColor: '#fff8e1',
+    borderWidth: 1,
+    borderColor: '#f9a825',
+    borderRadius: R.md,
+    padding: 12,
+    marginBottom: 12,
+    gap: 4,
+  },
+  promoBannerCode: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#e65100',
+  },
+  promoBannerDetail: {
+    fontSize: 13,
+    color: '#6d4c41',
+  },
+  promoBannerNote: {
+    fontSize: 12,
+    color: C.textDim,
+    fontStyle: 'italic',
+    marginTop: 2,
   },
   storeLinkButton: {
     marginTop: 4,

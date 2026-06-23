@@ -315,6 +315,7 @@ export async function updatePartnerStoreProducts(
       commissionPercent: number;
       paymentTermDays?: number;
     };
+    promotionIndicator?: Record<string, any>;
   }
 ) {
   const ref = db.collection(COLLECTION).doc(storeId);
@@ -341,6 +342,7 @@ export async function updatePartnerStoreProducts(
     lastUpdated: metadata?.lastUpdated || null,
     updatedAt,
     ...(metadata?.affiliate ? { affiliate: metadata.affiliate } : {}),
+    ...(metadata?.promotionIndicator ? { promotionIndicator: metadata.promotionIndicator } : {}),
   });
 
   const updated = await ref.get();

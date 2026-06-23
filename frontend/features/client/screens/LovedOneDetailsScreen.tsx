@@ -87,7 +87,31 @@ type ProductSuggestion = GiftPlanProduct & {
   searchText: string;
   offerCount?: number;
   gender?: 'barbati' | 'femei' | 'unisex';
+  promoEndDate?: string;
+  promoMinOrder?: number;
+  promoMinOrderCurrency?: string;
+  promoEffectivePrice?: number; // price WITH code applied (always calculated)
+  basePrice?: number;           // price WITHOUT code (catalog price before promo)
 };
+
+function formatPromoEndDate(endDate?: string): string | null {
+  if (!endDate) return null;
+  // Handle DD-MM-YYYY or YYYY-MM-DD formats
+  let d: Date;
+  if (/^\d{2}-\d{2}-\d{4}$/.test(endDate)) {
+    const [day, month, year] = endDate.split('-');
+    d = new Date(`${year}-${month}-${day}`);
+  } else {
+    d = new Date(endDate);
+  }
+  if (isNaN(d.getTime())) return null;
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+}
+
+function getPromoEffectivePrice(basePrice: number, discountPercent?: number): number | null {
+  if (!discountPercent || discountPercent <= 0) return null;
+  return Math.round((basePrice * (1 - discountPercent / 100)) * 100) / 100;
+}
 
 type ProductReactionDraft = {
   reactionRating: number | null;
@@ -533,15 +557,41 @@ function toProductSuggestion(
   product: ProductImportItem,
   index: number
 ): ProductSuggestion | null {
-  const priceDetails = getProductPriceDetails(product);
-  const price = priceDetails?.effectivePrice ?? null;
+  // Resolve effective promo: per-product promo takes precedence over store-level promotionIndicator
+  const pi = (store as any).promotionIndicator;
+  const effectiveProduct = product.promo?.code
+    ? product
+    : pi?.hasPromotion
+    ? {
+        ...product,
+        promo: {
+          hasPromoCode: true,
+          code: String(pi.code || ''),
+          discountPercent: Number(pi.discountPercent || 0),
+          hasMinimumOrderValue: Boolean(pi.hasMinimumOrderValue),
+          minimumOrderValue: pi.minimumOrderValue ? Number(pi.minimumOrderValue) : undefined,
+          minimumOrderCurrency: pi.currency ? String(pi.currency) : undefined,
+          endDate: pi.duration?.endDate ? String(pi.duration.endDate) : undefined,
+          startDate: pi.duration?.startDate ? String(pi.duration.startDate) : undefined,
+          note: pi.note ? String(pi.note) : undefined,
+        },
+      }
+    : product;
+
+  const priceDetails = getProductPriceDetails(effectiveProduct);
+  const hasMinOrder = Boolean(effectiveProduct.promo?.hasMinimumOrderValue && effectiveProduct.promo?.minimumOrderValue);
+  // effectivePrice = price with promo; currentPrice = base catalog price
+  const effectivePriceWithPromo = priceDetails?.effectivePrice ?? null;
+  const baseCatalogPrice = priceDetails?.currentPrice ?? effectivePriceWithPromo;
+  // price used for display & sorting: base when has min order, promo when no min order
+  const price = hasMinOrder ? baseCatalogPrice : effectivePriceWithPromo;
 
   if (price === null) {
     return null;
   }
 
-  const baseDiscount = Number(product.price?.discount);
-  const baseDiscountPercent = Number(product.price?.discountPercent);
+  const baseDiscount = Number(effectiveProduct.price?.discount);
+  const baseDiscountPercent = Number(effectiveProduct.price?.discountPercent);
   const hasPromoDiscount = Boolean(priceDetails && priceDetails.promoDiscount > 0);
   const suggestion: ProductSuggestion = {
     id: getProductSuggestionId(store, product, index),
@@ -577,6 +627,11 @@ function toProductSuggestion(
     gender: (['barbati', 'femei', 'unisex'].includes((product as any).gender)
       ? (product as any).gender
       : 'unisex') as 'barbati' | 'femei' | 'unisex',
+    promoEndDate: effectiveProduct.promo?.endDate,
+    promoMinOrder: effectiveProduct.promo?.minimumOrderValue,
+    promoMinOrderCurrency: effectiveProduct.promo?.minimumOrderCurrency,
+    promoEffectivePrice: (priceDetails?.promoDiscount || 0) > 0 ? effectivePriceWithPromo ?? undefined : undefined,
+    basePrice: baseCatalogPrice ?? undefined,
     searchText: [
       product.name,
       product.brand,
@@ -849,6 +904,17 @@ export default function LovedOneDetailsScreen({
   const [otherStoreImageUri, setOtherStoreImageUri] = useState('');
   const [otherStoreImageFile, setOtherStoreImageFile] = useState<File | null>(null);
   const [otherStoreError, setOtherStoreError] = useState('');
+  const [promoConfirmPending, setPromoConfirmPending] = useState<{
+    giftPlan: GiftPlan;
+    productId: string;
+    storeName: string;
+    basePrice: number;
+    promoPrice: number;
+    promoCode: string;
+    promoMinOrder: number;
+    promoMinOrderCurrency: string;
+    imageUrl?: string;
+  } | null>(null);
   const [budgetChartContainerWidth, setBudgetChartContainerWidth] = useState(BUDGET_CHART_WIDTH);
   const budgetPlotWidth = Math.max(200, budgetChartContainerWidth - 116 - 24);
 
@@ -3183,6 +3249,7 @@ export default function LovedOneDetailsScreen({
         const diff = score(a) - score(b);
         if (diff !== 0) return diff;
       }
+      // p.price is already correct: base price when has min order, promo price when no min order
       return a.price - b.price;
     })
     .slice(0, 12);
@@ -3221,6 +3288,7 @@ export default function LovedOneDetailsScreen({
         const diff = score(a) - score(b);
         if (diff !== 0) return diff;
       }
+      // p.price is already correct: base price when has min order, promo price when no min order
       return a.price - b.price;
     })
     .slice(0, 12);
@@ -3382,6 +3450,10 @@ export default function LovedOneDetailsScreen({
               const hasPromoCode = Boolean(
                 offer.hasPromoCode && offer.promoCode && promoDiscount > 0
               );
+              const promoMinOrder = (offer as any).promoMinOrder as number | undefined;
+              const promoEffectivePrice = (offer as any).promoEffectivePrice as number | undefined;
+              // When has min order: offer.price = base price, promoEffectivePrice = price with code
+              // When no min order: offer.price = already promo price
               const hasDiscount =
                 Boolean(offer.hasDiscount) && originalPrice > offer.price;
               const isBestOffer = index === 0;
@@ -3424,6 +3496,13 @@ export default function LovedOneDetailsScreen({
                           Cu cod {offer.promoCode}
                         </Text>
                       )}
+                      {hasPromoCode && !!promoMinOrder && (
+                        <View style={styles.promoMinOrderBadge}>
+                          <Text style={styles.promoMinOrderBadgeText}>
+                            cos minim {promoMinOrder} {(offer as any).promoMinOrderCurrency || 'RON'}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={styles.reducedPriceDetail}>
                       {formatMoney(offer.price, offer.currency)}
@@ -3465,11 +3544,27 @@ export default function LovedOneDetailsScreen({
                         <Text style={styles.priceDetailLabel}>Reducere cod</Text>
                         <Text style={styles.priceDetailValue}>
                           {formatMoney(promoDiscount, offer.currency)}
-                          {promoDiscountPercent > 0
-                            ? ` (${promoDiscountPercent}%)`
-                            : ''}
+                          {promoDiscountPercent > 0 ? ` (${promoDiscountPercent}%)` : ''}
                         </Text>
                       </View>
+                      {!!promoMinOrder && !!promoEffectivePrice && (
+                        <>
+                          <View style={[styles.priceDetailRow, { marginTop: 6, paddingTop: 6, borderTopWidth: 0.5, borderTopColor: C.border }]}>
+                            <Text style={styles.priceDetailLabel}>Fara cod (pret curent)</Text>
+                            <Text style={styles.priceDetailValue}>
+                              {formatMoney(offer.price, offer.currency)}
+                            </Text>
+                          </View>
+                          <View style={styles.priceDetailRow}>
+                            <Text style={[styles.priceDetailLabel, { color: C.accent, fontWeight: '600' }]}>
+                              Cu cod (cos min. {promoMinOrder} {(offer as any).promoMinOrderCurrency || 'RON'})
+                            </Text>
+                            <Text style={[styles.priceDetailValue, { color: C.accent, fontWeight: '700' }]}>
+                              {formatMoney(promoEffectivePrice, offer.currency)}
+                            </Text>
+                          </View>
+                        </>
+                      )}
                       <Text style={styles.productMeta}>
                         Codul {offer.promoCode} trebuie introdus pe site pentru pretul final.
                       </Text>
@@ -3510,19 +3605,36 @@ export default function LovedOneDetailsScreen({
                         styles.offerPurchaseButton,
                         savingGiftProducts && styles.disabledButton,
                       ]}
-                      onPress={() =>
-                        isManualProduct
-                          ? openOtherStoreModal('manual')
-                          : markProductAsPurchased(
-                              visibleSelectedGiftPlan,
-                              selectedProductDetail.id,
-                              {
-                                storeName: offer.storeName,
-                                price: offer.price,
-                                fromImportedStore: true,
-                              }
-                            )
-                      }
+                      onPress={() => {
+                        if (isManualProduct) {
+                          openOtherStoreModal('manual');
+                          return;
+                        }
+                        // If offer has promo with minimum order, ask how they purchased
+                        if (promoMinOrder && promoEffectivePrice) {
+                          setPromoConfirmPending({
+                            giftPlan: visibleSelectedGiftPlan,
+                            productId: selectedProductDetail.id,
+                            storeName: offer.storeName,
+                            basePrice: offer.price,
+                            promoPrice: promoEffectivePrice,
+                            promoCode: offer.promoCode || '',
+                            promoMinOrder,
+                            promoMinOrderCurrency: (offer as any).promoMinOrderCurrency || 'RON',
+                            imageUrl: offer.imageUrl,
+                          });
+                          return;
+                        }
+                        markProductAsPurchased(
+                          visibleSelectedGiftPlan,
+                          selectedProductDetail.id,
+                          {
+                            storeName: offer.storeName,
+                            price: offer.price,
+                            fromImportedStore: true,
+                          }
+                        );
+                      }}
                       disabled={savingGiftProducts}
                     >
                       <Text style={styles.purchasedButtonText}>
@@ -3592,6 +3704,68 @@ export default function LovedOneDetailsScreen({
             ) : null}
           </View>
         </View>
+
+        <Modal
+          visible={!!promoConfirmPending}
+          animationType="fade"
+          transparent
+          onRequestClose={() => setPromoConfirmPending(null)}
+        >
+          <View style={styles.modalOverlay} {...getModalBackdropResponder(() => setPromoConfirmPending(null))}>
+            <View style={styles.confirmModalCard}>
+              {!!promoConfirmPending && (
+                <>
+                  <Text style={styles.modalTitle}>Cum ai cumpărat?</Text>
+                  <Text style={styles.confirmText}>
+                    Cod <Text style={{ fontWeight: '700', color: C.accent }}>{promoConfirmPending.promoCode}</Text>
+                    {' '}(-{Math.round((1 - promoConfirmPending.promoPrice / promoConfirmPending.basePrice) * 100)}%) la comenzi min.{' '}
+                    <Text style={{ fontWeight: '700' }}>{promoConfirmPending.promoMinOrder} {promoConfirmPending.promoMinOrderCurrency}</Text>.
+                  </Text>
+
+                  <Pressable
+                    style={styles.cancelGiftButton}
+                    onPress={() => {
+                      const p = promoConfirmPending;
+                      setPromoConfirmPending(null);
+                      markProductAsPurchased(p.giftPlan, p.productId, {
+                        storeName: p.storeName,
+                        price: p.promoPrice,
+                        fromImportedStore: true,
+                        imageUrl: p.imageUrl,
+                      });
+                    }}
+                  >
+                    <Text style={styles.cancelGiftButtonText}>
+                      Da, am aplicat codul — {promoConfirmPending.promoPrice} RON
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={styles.cancelGiftButton}
+                    onPress={() => {
+                      const p = promoConfirmPending;
+                      setPromoConfirmPending(null);
+                      markProductAsPurchased(p.giftPlan, p.productId, {
+                        storeName: p.storeName,
+                        price: p.basePrice,
+                        fromImportedStore: true,
+                        imageUrl: p.imageUrl,
+                      });
+                    }}
+                  >
+                    <Text style={styles.cancelGiftButtonText}>
+                      Nu, fără cod — {promoConfirmPending.basePrice} RON
+                    </Text>
+                  </Pressable>
+
+                  <Pressable style={{ alignItems: 'center', paddingVertical: 12 }} onPress={() => setPromoConfirmPending(null)}>
+                    <Text style={styles.closeButtonText}>Anulează</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+          </View>
+        </Modal>
 
         <Modal
           visible={otherStoreModalVisible}
@@ -3998,24 +4172,61 @@ export default function LovedOneDetailsScreen({
                                 {product.offerCount} magazine disponibile
                               </Text>
                             )}
-                            {!!product.promoCode && (
-                              <Text style={styles.productMeta}>
-                                Pret cu cod {product.promoCode}
-                              </Text>
-                            )}
                             {!!product.category && (
                               <Text style={styles.productMeta}>
                                 {product.category}
-                                {product.subcategory
-                                  ? ` - ${product.subcategory}`
-                                  : ''}
+                                {product.subcategory ? ` - ${product.subcategory}` : ''}
                               </Text>
+                            )}
+                            {!!product.promoCode && !!product.promoDiscountPercent && (
+                              <View style={styles.promoTagWrap}>
+                                <View style={styles.promoTag}>
+                                  <Text style={styles.promoTagText}>
+                                    -{product.promoDiscountPercent}% cod {product.promoCode}
+                                  </Text>
+                                </View>
+                                {!!(product as any).promoMinOrder ? (
+                                  <View style={styles.promoMinOrderBadge}>
+                                    <Text style={styles.promoMinOrderBadgeText}>
+                                      cos minim {(product as any).promoMinOrder} {(product as any).promoMinOrderCurrency || 'RON'}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                {(product as any).promoEndDate ? (
+                                  <Text style={styles.promoEndDate}>
+                                    valabil până {formatPromoEndDate((product as any).promoEndDate)}
+                                  </Text>
+                                ) : (
+                                  <Text style={styles.promoEndDate}>Promoție permanentă</Text>
+                                )}
+                              </View>
                             )}
                           </View>
                           <View style={styles.productPriceBox}>
-                            <Text style={styles.productPrice}>
-                              {formatMoney(product.price, product.currency)}
-                            </Text>
+                            {!!product.promoCode && !!product.promoDiscountPercent ? (
+                              !!(product as any).promoMinOrder ? (
+                                // Has minimum order — show base price + promo price as hint
+                                <>
+                                  <Text style={styles.productPrice}>
+                                    {formatMoney(product.price, product.currency)}
+                                  </Text>
+                                  {!!(product as any).promoEffectivePrice && (
+                                    <Text style={styles.promoPrice}>
+                                      {formatMoney((product as any).promoEffectivePrice, product.currency)} cu cod
+                                    </Text>
+                                  )}
+                                </>
+                              ) : (
+                                // No minimum — show only promo price (already calculated in product.price)
+                                <Text style={styles.productPrice}>
+                                  {formatMoney(product.price, product.currency)}
+                                </Text>
+                              )
+                            ) : (
+                              <Text style={styles.productPrice}>
+                                {formatMoney(product.price, product.currency)}
+                              </Text>
+                            )}
                             <Pressable
                               style={[
                                 styles.addProductButton,
@@ -7814,7 +8025,7 @@ const styles = StyleSheet.create({
   },
   productPriceBox: {
     alignItems: 'flex-end',
-    gap: 8,
+    gap: 6,
     maxWidth: 170,
   },
   productPrice: {
@@ -7822,6 +8033,50 @@ const styles = StyleSheet.create({
     color: C.sage,
     fontSize: 14,
     fontWeight: '400',
+  },
+  promoPrice: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.accent,
+  },
+  promoTagWrap: {
+    gap: 2,
+    marginTop: 2,
+  },
+  promoTag: {
+    alignSelf: 'flex-start',
+    backgroundColor: C.accentSoft,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: R.sm,
+  },
+  promoTagText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.accent,
+  },
+  promoEndDate: {
+    fontSize: 10,
+    color: C.textDim,
+  },
+  promoMinOrder: {
+    fontSize: 10,
+    color: C.textFaint,
+    fontStyle: 'italic',
+  },
+  promoMinOrderBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#fff3e0',
+    borderWidth: 0.5,
+    borderColor: '#f9a825',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: R.sm,
+  },
+  promoMinOrderBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#e65100',
   },
   addProductButton: {
     backgroundColor: C.accent,

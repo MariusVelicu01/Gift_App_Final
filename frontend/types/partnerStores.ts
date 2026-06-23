@@ -24,6 +24,11 @@ export type ProductImportItem = {
     discountAmount?: number;
     discountPercent?: number;
     note?: string;
+    startDate?: string;
+    endDate?: string;
+    hasMinimumOrderValue?: boolean;
+    minimumOrderValue?: number;
+    minimumOrderCurrency?: string;
   };
   availability?: {
     inStock?: boolean;
@@ -99,6 +104,7 @@ export type PartnerStore = {
   lastImportName?: string;
   createdAt: string;
   updatedAt?: string;
+  promotionIndicator?: PromotionIndicator;
 };
 
 export type PartnerProductUsageOccurrence = {
@@ -137,6 +143,23 @@ export type PartnerProductUsageStats = {
   occurrences: PartnerProductUsageOccurrence[];
 };
 
+export type PromotionIndicator = {
+  hasPromotion?: boolean;
+  code?: string;
+  discountPercent?: number;
+  hasMinimumOrderValue?: boolean;
+  minimumOrderValue?: number;
+  currency?: string;
+  note?: string;
+  hasLimitedDuration?: boolean;
+  duration?: {
+    startDate?: string;
+    endDate?: string;
+    timezone?: string;
+    durationText?: string;
+  };
+};
+
 export type PartnerProductsImportPayload = {
   products: ProductImportItem[];
   source?: string;
@@ -153,6 +176,7 @@ export type PartnerProductsImportPayload = {
     maxCommissionPercent?: number;
     cookieDurationDays?: number;
   };
+  promotionIndicator?: PromotionIndicator;
 };
 
 export type PartnerStorePayload = {
