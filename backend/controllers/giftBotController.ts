@@ -37,6 +37,7 @@ export async function recommend(req: Request, res: Response) {
         name: item.name,
         brand: item.brand || undefined,
         category: item.category || undefined,
+        subcategory: item.subcategory || undefined,
         price: item.price,
         store: item.store || '',
       }));

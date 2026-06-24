@@ -32,7 +32,6 @@ function norm(value?: string): string {
     .replace(/\s+/g, ' '); // collapse multiple spaces
 }
 
-// Cross-store identity key: ALWAYS name|brand (same product = same key regardless of store)
 function crossStoreKey(name?: string, brand?: string): string {
   const n = norm(name);
   const b = norm(brand);
@@ -57,7 +56,6 @@ function buildBestPriceMap(partnerStores: PartnerStore[]): Map<string, BestOffer
       const currentPrice = Number(product.price?.current);
       if (!Number.isFinite(currentPrice) || currentPrice <= 0) return;
 
-      // Resolve effective promo: per-product first, then store-level
       const promo = product.promo?.code ? product.promo : (
         pi?.hasPromotion && pi.code ? {
           hasPromoCode: true,
@@ -68,13 +66,11 @@ function buildBestPriceMap(partnerStores: PartnerStore[]): Map<string, BestOffer
         } : null
       );
 
-      // Effective price: apply promo only if no minimum order requirement
       let effectivePrice = currentPrice;
       if (promo?.code && promo.discountPercent && !promo.hasMinimumOrderValue) {
         effectivePrice = Math.round((currentPrice * (1 - promo.discountPercent / 100)) * 100) / 100;
       }
 
-      // Use name|brand as cross-store key
       const key = crossStoreKey(product.name, product.brand);
       if (!key) return;
 
@@ -121,7 +117,6 @@ export async function generatePriceChangeAlerts(
       for (const product of (plan.selectedProducts || [])) {
         if (product.isPurchased) continue;
 
-        // Match by name|brand across ALL stores
         const key = crossStoreKey(product.name, product.brand);
         if (!key) continue;
 
@@ -172,7 +167,6 @@ export async function generatePriceChangeAlerts(
     }
   }
 
-  // Save new prices (merge with existing to not lose unrelated entries)
   try {
     await AsyncStorage.setItem(LAST_PRICES_KEY, JSON.stringify({
       ...lastPrices,
@@ -183,7 +177,6 @@ export async function generatePriceChangeAlerts(
   return alerts;
 }
 
-// Call once when app first loads to establish baseline prices (no alerts on first run)
 export async function primePriceObserver(
   calendarData: CalendarCacheData,
   partnerStores: PartnerStore[]

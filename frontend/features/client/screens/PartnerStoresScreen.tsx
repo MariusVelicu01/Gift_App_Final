@@ -17,6 +17,10 @@ import { pushAppBackEntry } from '../../../services/navigationHistory';
 import { PartnerStore } from '../../../types/partnerStores';
 import { C, R, S } from '../../../constants/theme';
 
+function fmt(value: number) {
+  return Number.isFinite(value) ? Number(value.toFixed(2)) : value;
+}
+
 function buildStoreUrl(domain?: string) {
   const cleanDomain = String(domain || '').trim();
 
@@ -68,11 +72,20 @@ function pickFeaturedProducts(store: PartnerStore, userProductGender: 'barbati' 
     return 0; // opposite gender - put last
   }
 
+  const pi = (store as any).promotionIndicator;
   const sorted = shuffleProducts(store.products).sort((a, b) => score(b) - score(a));
-  const discounted = sorted.filter(p => p.price?.hasDiscount || Number(p.price?.discountPercent || 0) > 0);
+  const hasPromoDiscount = (p: any) => {
+    const excluded = Array.isArray(pi?.excludedProductIds) && pi.excludedProductIds.includes(p.id);
+    const productPromo = p.promo?.code ? p.promo : null;
+    const storePromo = !excluded && pi?.hasPromotion && pi?.code ? pi : null;
+    const promo = productPromo || storePromo;
+    return !!(promo?.discountPercent && !promo.hasMinimumOrderValue && !promo.minimumOrderValue);
+  };
+  const discounted = sorted.filter(p =>
+    p.price?.hasDiscount || Number(p.price?.discountPercent || 0) > 0 || hasPromoDiscount(p)
+  );
   const regular = sorted.filter(p => !discounted.includes(p));
 
-  // Primary: matching/unisex discounted first, then regular; opposite gender at the end
   const primary = [...discounted.filter(p => (p as any).gender !== opposite), ...regular.filter(p => (p as any).gender !== opposite)];
   const opp = [...discounted.filter(p => (p as any).gender === opposite), ...regular.filter(p => (p as any).gender === opposite)];
   const result: typeof store.products = [];
@@ -340,24 +353,57 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
                   )}
                 </View>
                 <View style={styles.priceBlock}>
-                  {product.price?.current !== undefined && Number.isFinite(product.price.current) && (
-                    <Text style={styles.productPrice}>
-                      {product.price.current} {selectedStore.currency || 'RON'}
-                    </Text>
-                  )}
-                  {product.price?.hasDiscount && product.price.original !== undefined && (
-                    <Text style={styles.originalPrice}>
-                      {product.price.original} {selectedStore.currency || 'RON'}
-                    </Text>
-                  )}
-                  {product.price?.discountPercent !== undefined && product.price.discountPercent > 0 && (
-                    <Text style={styles.discountText}>
-                      -{product.price.discountPercent}%
-                    </Text>
-                  )}
-                  {product.price?.hasDiscount && (
-                    <Text style={styles.discountBadge}>Reducere</Text>
-                  )}
+                  {(() => {
+                    const currency = selectedStore.currency || 'RON';
+                    const currentPrice = product.price?.current;
+                    if (currentPrice === undefined || !Number.isFinite(currentPrice)) return null;
+
+                    const pi = (selectedStore as any).promotionIndicator;
+                    const excluded = Array.isArray(pi?.excludedProductIds) && pi.excludedProductIds.includes(product.id);
+                    const productPromo = product.promo?.code ? product.promo : null;
+                    const storePromo = !excluded && pi?.hasPromotion && pi?.code ? pi : null;
+                    const effectivePromo = productPromo || storePromo;
+                    const hasNoMinOrder = effectivePromo &&
+                      !effectivePromo.hasMinimumOrderValue &&
+                      !effectivePromo.minimumOrderValue;
+
+                    if (effectivePromo?.discountPercent) {
+                      const promoPrice = productPromo?.priceAfterPromo && productPromo.priceAfterPromo > 0
+                        ? productPromo.priceAfterPromo
+                        : Math.round(currentPrice * (1 - effectivePromo.discountPercent / 100) * 100) / 100;
+                      const minOrder = effectivePromo.hasMinimumOrderValue && effectivePromo.minimumOrderValue
+                        ? effectivePromo.minimumOrderValue
+                        : null;
+                      return (
+                        <>
+                          <Text style={styles.originalPrice}>{fmt(currentPrice)} {currency}</Text>
+                          <Text style={styles.productPrice}>{fmt(promoPrice)} {currency}</Text>
+                          {minOrder ? (
+                            <Text style={styles.promoMinBadge}>coș min. {minOrder} RON</Text>
+                          ) : (
+                            <Text style={styles.discountBadge}>Cod {effectivePromo.code}</Text>
+                          )}
+                        </>
+                      );
+                    }
+
+                    return (
+                      <>
+                        <Text style={styles.productPrice}>{fmt(currentPrice)} {currency}</Text>
+                        {product.price?.hasDiscount && product.price.original !== undefined && (
+                          <Text style={styles.originalPrice}>
+                            {fmt(product.price.original)} {currency}
+                          </Text>
+                        )}
+                        {product.price?.discountPercent !== undefined && product.price.discountPercent > 0 && (
+                          <Text style={styles.discountText}>-{product.price.discountPercent}%</Text>
+                        )}
+                        {product.price?.hasDiscount && (
+                          <Text style={styles.discountBadge}>Reducere</Text>
+                        )}
+                      </>
+                    );
+                  })()}
                 </View>
               </Pressable>
             ))
@@ -765,5 +811,17 @@ const styles = StyleSheet.create({
     marginTop: 5,
     paddingHorizontal: 8,
     paddingVertical: 3,
+  },
+  promoMinBadge: {
+    overflow: 'hidden',
+    borderRadius: R.pill,
+    backgroundColor: C.warnBg,
+    color: C.warn,
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    textAlign: 'center',
   },
 });

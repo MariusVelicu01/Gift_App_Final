@@ -734,7 +734,6 @@ export async function complete(req: Request, res: Response) {
             storeCommissionMap.set(storeId, pct);
           }
         } catch {
-          // store not found — skip
         }
       })
     );
@@ -925,8 +924,6 @@ export async function updateProducts(req: Request, res: Response) {
       return res.status(400).json({ message: error.message });
     }
 
-    // Preserve wasEverPurchased from existing Firestore data —
-    // once a product was marked purchased it stays tracked even if unchecked.
     const existingById = new Map(
       (existing.selectedProducts || []).map((p: any) => [String(p?.id || ''), p])
     );

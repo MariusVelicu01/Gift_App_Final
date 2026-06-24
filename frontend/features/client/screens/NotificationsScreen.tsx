@@ -19,7 +19,8 @@ type Props = {
 };
 
 function formatMoney(value: number, currency = 'RON') {
-  return `${value} ${currency}`;
+  if (!Number.isFinite(value)) return `- ${currency}`;
+  return `${Number(value.toFixed(2))} ${currency}`;
 }
 
 function formatDate(value: string) {

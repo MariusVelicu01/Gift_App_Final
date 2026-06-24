@@ -370,7 +370,6 @@ export async function refreshGiftPlanProductPricesForImport({
       const newPrice = details.effectivePrice;
       const changeAmount = Number((newPrice - oldPrice).toFixed(2));
 
-      // Create price alert if price changed
       if (Math.abs(changeAmount) > 0.009 && oldPrice > 0) {
         const productId = String(selectedProduct.id || selectedProduct.productId || '').trim();
         const alertId = buildAlertDocId(

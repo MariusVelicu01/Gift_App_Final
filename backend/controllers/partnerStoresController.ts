@@ -542,7 +542,6 @@ function daysFromNow(dateStr: string): number {
   return Math.round((target.getTime() - now.getTime()) / 86400000);
 }
 
-// Returns YYYY-MM-DD for the last day of the current month (local time)
 function lastDayOfCurrentMonth(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -563,7 +562,6 @@ export async function getAffiliateStats(req: Request, res: Response) {
     const storeCommissionPct = Number((existing as any)?.affiliate?.commissionPercent || 0);
     const paymentTermDays = Number((existing as any)?.affiliate?.paymentTermDays || 30);
 
-    // Build per-product commission lookup from store catalog
     const storeProducts = Array.isArray((existing as any).products) ? (existing as any).products : [];
     const catalogPctByExternalId = new Map<string, number>();
     const catalogPctByName = new Map<string, number>();
@@ -643,12 +641,10 @@ export async function getAffiliateStats(req: Request, res: Response) {
         if (status === 'received') {
           totalReceived = Math.round((totalReceived + received) * 100) / 100;
         } else {
-          // Pending: split by month
           if (purchaseMonthKey === curMonth) {
             currentMonthExpected = Math.round((currentMonthExpected + expected) * 100) / 100;
           } else {
             previousMonthsPending = Math.round((previousMonthsPending + expected) * 100) / 100;
-            // Track earliest purchase from previous months for payment ETA
             if (purchasedAt && (!earliestPendingPurchaseDate || purchasedAt < earliestPendingPurchaseDate)) {
               earliestPendingPurchaseDate = purchasedAt;
             }
@@ -668,7 +664,6 @@ export async function getAffiliateStats(req: Request, res: Response) {
       });
     });
 
-    // Payment due: last day of current month (for previous months' pending)
     const nextPaymentDate = previousMonthsPending > 0 ? lastDayOfCurrentMonth() : null;
     const daysUntilPayment = nextPaymentDate ? daysFromNow(nextPaymentDate) : null;
 
@@ -694,7 +689,6 @@ export async function getAffiliateSummary(req: Request, res: Response) {
   try {
     const allStores = await getPartnerStores();
 
-    // Build catalog commission map per store
     const storeCommissionMap = new Map<string, number>();
     const catalogPctByStoreAndExternalId = new Map<string, Map<string, number>>();
     const catalogPctByStoreAndName = new Map<string, Map<string, number>>();
@@ -791,7 +785,6 @@ export async function getAffiliateSummary(req: Request, res: Response) {
         if (pct > existing.commissionPercent) existing.commissionPercent = pct;
         storeMap.set(storeId, existing);
 
-        // Track for global monthly totals
         if (status !== 'received') {
           if (purchaseMonthKey === curMonth) {
             globalCurrentMonth = Math.round((globalCurrentMonth + expected) * 100) / 100;

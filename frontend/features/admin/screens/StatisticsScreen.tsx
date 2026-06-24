@@ -37,7 +37,7 @@ type TopEntry = {
 
 function formatMoney(value: number) {
   if (!Number.isFinite(value)) return '-';
-  return `${Math.round(value)} RON`;
+  return `${Number(value.toFixed(2))} RON`;
 }
 
 function formatNumber(value: number) {
@@ -245,7 +245,6 @@ export default function StatisticsScreen() {
       if (product.manualSearchFallback || product.storeId === 'manual' || !product.productKey) {
         addCount(productDemandAddedMap, product.name || 'Produs fara nume');
 
-        // wasEverPurchased rămâne true chiar dacă isPurchased a fost bifat înapoi
         if (product.isPurchased || product.wasEverPurchased) {
           const label = (product.name || 'Produs fara nume').trim();
           addCount(productDemandPurchasedMap, label);
@@ -279,7 +278,6 @@ export default function StatisticsScreen() {
       }
     });
 
-    // Separate partner stores from non-partner stores
     const partnerStoreEntries: TopEntry[] = [];
     const nonPartnerStoreMap = new Map<string, number>();
     purchasedStoreMap.forEach((entry, key) => {

@@ -1,27 +1,20 @@
-// PresentPerfect — design system
-// Warm cream palette · rose accent · landing-page style throughout
 
 export const C = {
-  // Backgrounds — landing-page warm cream
   bg: '#fff7ed',
   surface: '#ffffff',
   surface2: '#fff1f2',
 
-  // Text — crisp charcoal scale (landing-page)
   text: '#111827',
   textDim: '#4b5563',
   textFaint: '#9ca3af',
 
-  // Borders — warm rose-tinted
   border: '#fce7e0',
   borderStrong: '#fecdd3',
 
-  // Accent — landing-page rose
   accent: '#be123c',
   accentSoft: '#fff1f2',
   accentInk: '#ffffff',
 
-  // Semantic
   sage: '#0d9488',
   sageBg: '#f0fdfa',
   warn: '#b45309',

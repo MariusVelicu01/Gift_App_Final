@@ -38,7 +38,6 @@ type Props = {
   onOpenGift?: (target: GiftDetailsTarget) => void;
 };
 
-// Maps profile gender ('Masculin'/'male') to product gender ('barbati'/'femei')
 function profileGenderToProductGender(g?: string): 'barbati' | 'femei' | null {
   if (!g) return null;
   const lower = g.toLowerCase();
@@ -47,7 +46,6 @@ function profileGenderToProductGender(g?: string): 'barbati' | 'femei' | null {
   return null;
 }
 
-// Sort products: matching gender + unisex first, opposite gender ~1-in-6 chance mixed in
 function sortProductsByGender(products: any[], userProductGender: 'barbati' | 'femei' | null) {
   if (!userProductGender) return products;
   const opposite = userProductGender === 'barbati' ? 'femei' : 'barbati';
@@ -58,7 +56,6 @@ function sortProductsByGender(products: any[], userProductGender: 'barbati' | 'f
     if (g === opposite) opp.push(p);
     else primary.push(p); // matching or unisex
   });
-  // Shuffle primary, then sprinkle 1 opposite per every 5 primary
   const shuffled = [...primary].sort(() => Math.random() - 0.5);
   const result: any[] = [];
   shuffled.forEach((item, i) => {
@@ -95,7 +92,8 @@ function formatDate(dateKey?: string) {
 }
 
 function formatMoney(value: number, currency = 'RON') {
-  return `${value} ${currency}`;
+  if (!Number.isFinite(value)) return `- ${currency}`;
+  return `${Number(value.toFixed(2))} ${currency}`;
 }
 
 function openProductLink(affiliateUrl?: string, productUrl?: string) {
@@ -365,7 +363,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Hero
   hero: {
     paddingVertical: 8,
     paddingHorizontal: 4,
@@ -405,7 +402,6 @@ const styles = StyleSheet.create({
   heroKicker: { fontSize: 11, color: C.textFaint },
   heroAccent: { color: C.accent, fontStyle: 'italic' },
 
-  // Stat card
   statCard: {
     backgroundColor: C.accent,
     padding: 16,
@@ -428,7 +424,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Cards
   card: {
     backgroundColor: C.surface,
     padding: 16,
@@ -469,7 +464,6 @@ const styles = StyleSheet.create({
     color: C.textDim,
   },
 
-  // Gift rows
   giftRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -526,7 +520,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Promotions
   promotionRow: {
     flexDirection: 'row',
     alignItems: 'center',

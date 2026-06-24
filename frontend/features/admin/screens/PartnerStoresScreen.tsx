@@ -1238,21 +1238,52 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
                 <Text style={styles.productHistoryText}>Detalii produs</Text>
               </View>
               <View style={styles.priceBlock}>
-                {product.price?.current !== undefined && Number.isFinite(product.price.current) && (
-                  <Text style={styles.productPrice}>
-                    {product.price.current} {selectedStore.currency || 'RON'}
-                  </Text>
-                )}
-                {product.price?.hasDiscount && product.price.original !== undefined && (
-                  <Text style={styles.originalPrice}>
-                    {product.price.original} {selectedStore.currency || 'RON'}
-                  </Text>
-                )}
-                {product.price?.discountPercent !== undefined && product.price.discountPercent > 0 && (
-                  <Text style={styles.discountText}>
-                    -{product.price.discountPercent}%
-                  </Text>
-                )}
+                {(() => {
+                  const currency = selectedStore.currency || 'RON';
+                  const currentPrice = product.price?.current;
+                  if (currentPrice === undefined || !Number.isFinite(currentPrice)) return null;
+
+                  const pi = (selectedStore as any).promotionIndicator;
+                  const excluded = Array.isArray(pi?.excludedProductIds) && pi.excludedProductIds.includes(product.id);
+                  const productPromo = product.promo?.code ? product.promo : null;
+                  const storePromo = !excluded && pi?.hasPromotion && pi?.code ? pi : null;
+                  const effectivePromo = productPromo || storePromo;
+                  const hasNoMinOrder = effectivePromo &&
+                    !effectivePromo.hasMinimumOrderValue &&
+                    !effectivePromo.minimumOrderValue;
+
+                  if (effectivePromo?.discountPercent) {
+                    const promoPrice = productPromo?.priceAfterPromo && productPromo.priceAfterPromo > 0
+                      ? productPromo.priceAfterPromo
+                      : Math.round(currentPrice * (1 - effectivePromo.discountPercent / 100) * 100) / 100;
+                    const minOrder = effectivePromo.hasMinimumOrderValue && effectivePromo.minimumOrderValue
+                      ? effectivePromo.minimumOrderValue
+                      : null;
+                    return (
+                      <>
+                        <Text style={styles.originalPrice}>{formatMoney(currentPrice, currency)}</Text>
+                        <Text style={styles.productPrice}>{formatMoney(promoPrice, currency)}</Text>
+                        {minOrder && (
+                          <Text style={styles.promoMinBadge}>coș min. {minOrder} RON</Text>
+                        )}
+                      </>
+                    );
+                  }
+
+                  return (
+                    <>
+                      <Text style={styles.productPrice}>{formatMoney(currentPrice, currency)}</Text>
+                      {product.price?.hasDiscount && product.price.original !== undefined && (
+                        <Text style={styles.originalPrice}>
+                          {formatMoney(product.price.original, currency)}
+                        </Text>
+                      )}
+                      {product.price?.discountPercent !== undefined && product.price.discountPercent > 0 && (
+                        <Text style={styles.discountText}>-{product.price.discountPercent}%</Text>
+                      )}
+                    </>
+                  );
+                })()}
               </View>
             </Pressable>
           ))}
@@ -2479,6 +2510,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     marginTop: 2,
+  },
+  promoMinBadge: {
+    overflow: 'hidden',
+    borderRadius: 20,
+    backgroundColor: C.warnBg,
+    color: C.warn,
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    textAlign: 'center',
   },
   closeButton: {
     marginTop: 12,

@@ -5,6 +5,7 @@ export type CatalogItem = {
   name: string;
   brand?: string;
   category?: string;
+  subcategory?: string;
   price: number;
   store: string;
 };

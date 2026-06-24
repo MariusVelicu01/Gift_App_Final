@@ -23,6 +23,8 @@ export type ProductImportItem = {
     discount?: number;
     discountAmount?: number;
     discountPercent?: number;
+    priceBeforePromo?: number;
+    priceAfterPromo?: number;
     note?: string;
     startDate?: string;
     endDate?: string;

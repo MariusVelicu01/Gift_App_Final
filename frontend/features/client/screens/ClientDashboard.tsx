@@ -69,10 +69,8 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
   const loadAlerts = useCallback(async () => {
     if (!token) return;
 
-    // Load price alerts independently — must not fail due to calendar errors
     const priceAlerts = await getPriceAlerts(token).catch(() => [] as any[]);
 
-    // Load calendar + catalog based alerts separately — failure doesn't block price alerts
     let deadlineAlerts: any[] = [];
     let birthdayAlerts: any[] = [];
     let observedPriceAlerts: any[] = [];
@@ -97,19 +95,16 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
 
   useEffect(() => { loadAlerts(); }, [loadAlerts]);
 
-  // Re-run alerts when catalog updates (e.g., admin imports new prices)
   useEffect(() => {
     if (!token) return;
     return subscribePartnerStoresCache(() => { loadAlerts(); });
   }, [token, loadAlerts]);
 
-  // Price observer: poll catalog every 20s, detect price changes in real-time
   useEffect(() => {
     if (!token) return;
 
     const checkPrices = async () => {
       try {
-        // Force refresh catalog (bypass 30s cache)
         const [stores, calendarData] = await Promise.all([
           getPartnerStoresCache(token, { forceRefresh: true }),
           getCalendarCache(token),
@@ -138,7 +133,6 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
       } else if ((alert as any).notificationKind === 'deadline') {
         await markDeadlineAlertRead(alert.id);
       } else if (alert.id.startsWith('price-obs-')) {
-        // Observer-generated alert — mark locally, not via API
         await markObserverAlertRead(alert.id);
       } else if (token) {
         await markPriceAlertRead(token, alert.id);

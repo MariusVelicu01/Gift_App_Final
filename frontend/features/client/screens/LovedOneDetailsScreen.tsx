@@ -96,7 +96,6 @@ type ProductSuggestion = GiftPlanProduct & {
 
 function formatPromoEndDate(endDate?: string): string | null {
   if (!endDate) return null;
-  // Handle DD-MM-YYYY or YYYY-MM-DD formats
   let d: Date;
   if (/^\d{2}-\d{2}-\d{4}$/.test(endDate)) {
     const [day, month, year] = endDate.split('-');
@@ -445,7 +444,8 @@ function getGiftTimingNote(giftPlan: GiftPlan) {
 }
 
 function formatMoney(value: number, currency = 'RON') {
-  return `${value} ${currency}`;
+  if (!Number.isFinite(value)) return `- ${currency}`;
+  return `${Number(value.toFixed(2))} ${currency}`;
 }
 
 function roundMoney(value: number) {
@@ -557,7 +557,6 @@ function toProductSuggestion(
   product: ProductImportItem,
   index: number
 ): ProductSuggestion | null {
-  // Resolve effective promo: per-product promo takes precedence over store-level promotionIndicator
   const pi = (store as any).promotionIndicator;
   const effectiveProduct = product.promo?.code
     ? product
@@ -580,10 +579,8 @@ function toProductSuggestion(
 
   const priceDetails = getProductPriceDetails(effectiveProduct);
   const hasMinOrder = Boolean(effectiveProduct.promo?.hasMinimumOrderValue && effectiveProduct.promo?.minimumOrderValue);
-  // effectivePrice = price with promo; currentPrice = base catalog price
   const effectivePriceWithPromo = priceDetails?.effectivePrice ?? null;
   const baseCatalogPrice = priceDetails?.currentPrice ?? effectivePriceWithPromo;
-  // price used for display & sorting: base when has min order, promo when no min order
   const price = hasMinOrder ? baseCatalogPrice : effectivePriceWithPromo;
 
   if (price === null) {
@@ -1303,7 +1300,6 @@ export default function LovedOneDetailsScreen({
     };
   }, [addedProductToast]);
 
-  // Compute the effective deadline date directly from purpose (avoids state sync issues)
   const computedFixedDeadline = useMemo((): { day: number; month: number; year: number } | null => {
     console.log('[deadline] giftPurpose=', giftPurpose, 'canEdit=', canEditFixedGiftDate);
     if (canEditFixedGiftDate) return null;
@@ -1412,8 +1408,6 @@ export default function LovedOneDetailsScreen({
     setCustomBudget(isCustomBudgetValue ? String(giftPlan.budget) : '');
     setIsCustomBudget(isCustomBudgetValue);
 
-    // For fixed-date purposes (Paste, Craciun, Zi de nastere), recalculate from current date
-    // to avoid stale stored dates being shown
     let parts = parseDateParts(giftPlan.deadlineDate);
     if (giftPlan.purpose === 'Paste') {
       const easter = getNextEasterDateParts();
@@ -1510,7 +1504,6 @@ export default function LovedOneDetailsScreen({
       return;
     }
 
-    // Use computed fixed deadline (from purpose) or manually set deadline
     const effectiveDeadline = computedFixedDeadline ?? (
       deadlineDay && deadlineMonth && deadlineYear
         ? { day: deadlineDay, month: deadlineMonth, year: deadlineYear }
@@ -2809,6 +2802,7 @@ export default function LovedOneDetailsScreen({
             name: product.name,
             brand: product.brand,
             category: product.category,
+            subcategory: product.subcategory,
             price,
             store: store.displayName,
           } as CatalogItem;
@@ -2942,7 +2936,6 @@ export default function LovedOneDetailsScreen({
         setAiResponse((prev) => prev.map((r) => (r.id === recId ? recommendations[0] : r)));
       }
     } catch {
-      // silent
     } finally {
       setRetryingAiProductId(null);
     }
@@ -2975,7 +2968,6 @@ export default function LovedOneDetailsScreen({
         );
       }
     } catch {
-      // silent
     } finally {
       setRetryingChangeProductAiId(null);
     }
@@ -3182,7 +3174,6 @@ export default function LovedOneDetailsScreen({
     if (!recipientProductGender) return all;
     const opposite = recipientProductGender === 'barbati' ? 'femei' : 'barbati';
 
-    // Sort by gender relevance: matching gender first, then unisex, then opposite gender last
     const genderScore = (p: ProductSuggestion) => {
       const g = p.gender || 'unisex';
       if (g === recipientProductGender) return 0; // exact match — top
@@ -3249,7 +3240,6 @@ export default function LovedOneDetailsScreen({
         const diff = score(a) - score(b);
         if (diff !== 0) return diff;
       }
-      // p.price is already correct: base price when has min order, promo price when no min order
       return a.price - b.price;
     })
     .slice(0, 12);
@@ -3288,7 +3278,6 @@ export default function LovedOneDetailsScreen({
         const diff = score(a) - score(b);
         if (diff !== 0) return diff;
       }
-      // p.price is already correct: base price when has min order, promo price when no min order
       return a.price - b.price;
     })
     .slice(0, 12);
@@ -3452,8 +3441,6 @@ export default function LovedOneDetailsScreen({
               );
               const promoMinOrder = (offer as any).promoMinOrder as number | undefined;
               const promoEffectivePrice = (offer as any).promoEffectivePrice as number | undefined;
-              // When has min order: offer.price = base price, promoEffectivePrice = price with code
-              // When no min order: offer.price = already promo price
               const hasDiscount =
                 Boolean(offer.hasDiscount) && originalPrice > offer.price;
               const isBestOffer = index === 0;
@@ -3610,7 +3597,6 @@ export default function LovedOneDetailsScreen({
                           openOtherStoreModal('manual');
                           return;
                         }
-                        // If offer has promo with minimum order, ask how they purchased
                         if (promoMinOrder && promoEffectivePrice) {
                           setPromoConfirmPending({
                             giftPlan: visibleSelectedGiftPlan,
@@ -4205,7 +4191,6 @@ export default function LovedOneDetailsScreen({
                           <View style={styles.productPriceBox}>
                             {!!product.promoCode && !!product.promoDiscountPercent ? (
                               !!(product as any).promoMinOrder ? (
-                                // Has minimum order — show base price + promo price as hint
                                 <>
                                   <Text style={styles.productPrice}>
                                     {formatMoney(product.price, product.currency)}
@@ -4217,7 +4202,6 @@ export default function LovedOneDetailsScreen({
                                   )}
                                 </>
                               ) : (
-                                // No minimum — show only promo price (already calculated in product.price)
                                 <Text style={styles.productPrice}>
                                   {formatMoney(product.price, product.currency)}
                                 </Text>

@@ -41,7 +41,6 @@ export async function generateDeadlineAlerts(
     for (const plan of plans) {
       if (plan.status === 'completed') continue;
 
-      // Purchase deadline alert
       const purchaseDeadline = plan.purchaseDeadlineDate || plan.deadlineDate;
       if (purchaseDeadline && plan.status === 'planned') {
         const days = daysUntil(purchaseDeadline);
@@ -64,7 +63,6 @@ export async function generateDeadlineAlerts(
         }
       }
 
-      // Gift offering deadline alert
       if (plan.deadlineDate && plan.status === 'purchased') {
         const days = daysUntil(plan.deadlineDate);
         if (days <= UPCOMING_DAYS) {
@@ -88,7 +86,6 @@ export async function generateDeadlineAlerts(
     }
   }
 
-  // Sort: unread first, then by urgency (fewer days = more urgent)
   return alerts.sort((a, b) => {
     if (!a.readAt && b.readAt) return -1;
     if (a.readAt && !b.readAt) return 1;
