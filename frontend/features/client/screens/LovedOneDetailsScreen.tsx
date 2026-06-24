@@ -86,7 +86,32 @@ type ProductSuggestion = GiftPlanProduct & {
   inStock?: boolean;
   searchText: string;
   offerCount?: number;
+  gender?: 'barbati' | 'femei' | 'unisex';
+  promoEndDate?: string;
+  promoMinOrder?: number;
+  promoMinOrderCurrency?: string;
+  promoEffectivePrice?: number; // price WITH code applied (always calculated)
+  basePrice?: number;           // price WITHOUT code (catalog price before promo)
 };
+
+function formatPromoEndDate(endDate?: string): string | null {
+  if (!endDate) return null;
+  // Handle DD-MM-YYYY or YYYY-MM-DD formats
+  let d: Date;
+  if (/^\d{2}-\d{2}-\d{4}$/.test(endDate)) {
+    const [day, month, year] = endDate.split('-');
+    d = new Date(`${year}-${month}-${day}`);
+  } else {
+    d = new Date(endDate);
+  }
+  if (isNaN(d.getTime())) return null;
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+}
+
+function getPromoEffectivePrice(basePrice: number, discountPercent?: number): number | null {
+  if (!discountPercent || discountPercent <= 0) return null;
+  return Math.round((basePrice * (1 - discountPercent / 100)) * 100) / 100;
+}
 
 type ProductReactionDraft = {
   reactionRating: number | null;
@@ -513,20 +538,60 @@ function getNextDateParts(day: number, month: number) {
   return { day, month, year };
 }
 
+const ORTHODOX_EASTER_DATES = [
+  '2026-04-12', '2027-05-02', '2028-04-16', '2029-04-08', '2030-04-28',
+  '2031-04-13', '2032-05-02', '2033-04-24', '2034-04-09', '2035-04-29',
+];
+
+function getNextEasterDateParts() {
+  const today = getTodayParts();
+  const todayKey = `${today.year}-${pad(today.month)}-${pad(today.day)}`;
+  const next = ORTHODOX_EASTER_DATES.find((d) => d >= todayKey);
+  if (!next) return null;
+  const [year, month, day] = next.split('-').map(Number);
+  return { day, month, year };
+}
+
 function toProductSuggestion(
   store: PartnerStore,
   product: ProductImportItem,
   index: number
 ): ProductSuggestion | null {
-  const priceDetails = getProductPriceDetails(product);
-  const price = priceDetails?.effectivePrice ?? null;
+  // Resolve effective promo: per-product promo takes precedence over store-level promotionIndicator
+  const pi = (store as any).promotionIndicator;
+  const effectiveProduct = product.promo?.code
+    ? product
+    : pi?.hasPromotion
+    ? {
+        ...product,
+        promo: {
+          hasPromoCode: true,
+          code: String(pi.code || ''),
+          discountPercent: Number(pi.discountPercent || 0),
+          hasMinimumOrderValue: Boolean(pi.hasMinimumOrderValue),
+          minimumOrderValue: pi.minimumOrderValue ? Number(pi.minimumOrderValue) : undefined,
+          minimumOrderCurrency: pi.currency ? String(pi.currency) : undefined,
+          endDate: pi.duration?.endDate ? String(pi.duration.endDate) : undefined,
+          startDate: pi.duration?.startDate ? String(pi.duration.startDate) : undefined,
+          note: pi.note ? String(pi.note) : undefined,
+        },
+      }
+    : product;
+
+  const priceDetails = getProductPriceDetails(effectiveProduct);
+  const hasMinOrder = Boolean(effectiveProduct.promo?.hasMinimumOrderValue && effectiveProduct.promo?.minimumOrderValue);
+  // effectivePrice = price with promo; currentPrice = base catalog price
+  const effectivePriceWithPromo = priceDetails?.effectivePrice ?? null;
+  const baseCatalogPrice = priceDetails?.currentPrice ?? effectivePriceWithPromo;
+  // price used for display & sorting: base when has min order, promo when no min order
+  const price = hasMinOrder ? baseCatalogPrice : effectivePriceWithPromo;
 
   if (price === null) {
     return null;
   }
 
-  const baseDiscount = Number(product.price?.discount);
-  const baseDiscountPercent = Number(product.price?.discountPercent);
+  const baseDiscount = Number(effectiveProduct.price?.discount);
+  const baseDiscountPercent = Number(effectiveProduct.price?.discountPercent);
   const hasPromoDiscount = Boolean(priceDetails && priceDetails.promoDiscount > 0);
   const suggestion: ProductSuggestion = {
     id: getProductSuggestionId(store, product, index),
@@ -559,6 +624,14 @@ function toProductSuggestion(
     addedAt: new Date().toISOString(),
     availabilityStatus: product.availability?.stockStatus,
     inStock: product.availability?.inStock,
+    gender: (['barbati', 'femei', 'unisex'].includes((product as any).gender)
+      ? (product as any).gender
+      : 'unisex') as 'barbati' | 'femei' | 'unisex',
+    promoEndDate: effectiveProduct.promo?.endDate,
+    promoMinOrder: effectiveProduct.promo?.minimumOrderValue,
+    promoMinOrderCurrency: effectiveProduct.promo?.minimumOrderCurrency,
+    promoEffectivePrice: (priceDetails?.promoDiscount || 0) > 0 ? effectivePriceWithPromo ?? undefined : undefined,
+    basePrice: baseCatalogPrice ?? undefined,
     searchText: [
       product.name,
       product.brand,
@@ -831,6 +904,19 @@ export default function LovedOneDetailsScreen({
   const [otherStoreImageUri, setOtherStoreImageUri] = useState('');
   const [otherStoreImageFile, setOtherStoreImageFile] = useState<File | null>(null);
   const [otherStoreError, setOtherStoreError] = useState('');
+  const [promoConfirmPending, setPromoConfirmPending] = useState<{
+    giftPlan: GiftPlan;
+    productId: string;
+    storeName: string;
+    basePrice: number;
+    promoPrice: number;
+    promoCode: string;
+    promoMinOrder: number;
+    promoMinOrderCurrency: string;
+    imageUrl?: string;
+  } | null>(null);
+  const [budgetChartContainerWidth, setBudgetChartContainerWidth] = useState(BUDGET_CHART_WIDTH);
+  const budgetPlotWidth = Math.max(200, budgetChartContainerWidth - 116 - 24);
 
   const years = getYearOptions();
   const actionYears = getActionYearOptions();
@@ -954,10 +1040,10 @@ export default function LovedOneDetailsScreen({
         : (entry.value - historyBudgetMin) / historyBudgetRange;
     const x =
       historyBudgetValues.length <= 1
-        ? BUDGET_CHART_PLOT_WIDTH / 2
+        ? budgetPlotWidth / 2
         : BUDGET_CHART_PLOT_PADDING +
           (index / (historyBudgetValues.length - 1)) *
-            (BUDGET_CHART_PLOT_WIDTH - BUDGET_CHART_PLOT_PADDING * 2);
+            (budgetPlotWidth - BUDGET_CHART_PLOT_PADDING * 2);
     const y =
       BUDGET_CHART_PLOT_PADDING +
       (1 - normalized) *
@@ -1217,6 +1303,20 @@ export default function LovedOneDetailsScreen({
     };
   }, [addedProductToast]);
 
+  // Compute the effective deadline date directly from purpose (avoids state sync issues)
+  const computedFixedDeadline = useMemo((): { day: number; month: number; year: number } | null => {
+    console.log('[deadline] giftPurpose=', giftPurpose, 'canEdit=', canEditFixedGiftDate);
+    if (canEditFixedGiftDate) return null;
+    if (giftPurpose === 'Paste') {
+      const e = getNextEasterDateParts();
+      console.log('[deadline] Easter =', e);
+      return e;
+    }
+    if (giftPurpose === 'Craciun') return getNextDateParts(25, 12);
+    if (giftPurpose === 'Zi de nastere' && data) return getNextDateParts(Number(data.day), Number(data.month));
+    return null;
+  }, [giftPurpose, canEditFixedGiftDate, data]);
+
   const resetGiftForm = () => {
     setGiftPurpose(null);
     setGiftBudget(200);
@@ -1312,7 +1412,17 @@ export default function LovedOneDetailsScreen({
     setCustomBudget(isCustomBudgetValue ? String(giftPlan.budget) : '');
     setIsCustomBudget(isCustomBudgetValue);
 
-    const parts = parseDateParts(giftPlan.deadlineDate);
+    // For fixed-date purposes (Paste, Craciun, Zi de nastere), recalculate from current date
+    // to avoid stale stored dates being shown
+    let parts = parseDateParts(giftPlan.deadlineDate);
+    if (giftPlan.purpose === 'Paste') {
+      const easter = getNextEasterDateParts();
+      if (easter) parts = easter;
+    } else if (giftPlan.purpose === 'Craciun') {
+      parts = getNextDateParts(25, 12);
+    } else if (giftPlan.purpose === 'Zi de nastere' && data) {
+      parts = getNextDateParts(Number(data.day), Number(data.month));
+    }
     setDeadlineDay(parts.day);
     setDeadlineMonth(parts.month);
     setDeadlineYear(parts.year);
@@ -1343,6 +1453,13 @@ export default function LovedOneDetailsScreen({
       setDeadlineDay(christmas.day);
       setDeadlineMonth(christmas.month);
       setDeadlineYear(christmas.year);
+    } else if (purpose === 'Paste') {
+      const easter = getNextEasterDateParts();
+      if (easter) {
+        setDeadlineDay(easter.day);
+        setDeadlineMonth(easter.month);
+        setDeadlineYear(easter.year);
+      }
     } else {
       const today = getTodayParts();
       if (!deadlineDay || !deadlineMonth || !deadlineYear) {
@@ -1393,12 +1510,21 @@ export default function LovedOneDetailsScreen({
       return;
     }
 
-    if (!deadlineDay || !deadlineMonth || !deadlineYear) {
+    // Use computed fixed deadline (from purpose) or manually set deadline
+    const effectiveDeadline = computedFixedDeadline ?? (
+      deadlineDay && deadlineMonth && deadlineYear
+        ? { day: deadlineDay, month: deadlineMonth, year: deadlineYear }
+        : null
+    );
+
+    if (!effectiveDeadline) {
       setGiftError('Selecteaza data in care vrei sa oferi cadoul.');
       return;
     }
 
-    if (isDateBeforeToday(deadlineDay, deadlineMonth, deadlineYear)) {
+    const { day: dDay, month: dMonth, year: dYear } = effectiveDeadline;
+
+    if (isDateBeforeToday(dDay, dMonth, dYear)) {
       setGiftError('Data oferirii nu poate fi in trecut.');
       return;
     }
@@ -1406,9 +1532,7 @@ export default function LovedOneDetailsScreen({
     const purchaseDateKey = `${purchaseDeadlineYear}-${pad(
       purchaseDeadlineMonth
     )}-${pad(purchaseDeadlineDay)}`;
-    const giftDateKey = `${deadlineYear}-${pad(deadlineMonth)}-${pad(
-      deadlineDay
-    )}`;
+    const giftDateKey = `${dYear}-${pad(dMonth)}-${pad(dDay)}`;
 
     if (purchaseDateKey > giftDateKey) {
       setGiftError(
@@ -1425,9 +1549,9 @@ export default function LovedOneDetailsScreen({
       const payload = {
         purpose: giftPurpose,
         budget: selectedBudget,
-        deadlineDay,
-        deadlineMonth,
-        deadlineYear,
+        deadlineDay: dDay,
+        deadlineMonth: dMonth,
+        deadlineYear: dYear,
         purchaseDeadlineDay,
         purchaseDeadlineMonth,
         purchaseDeadlineYear,
@@ -2665,13 +2789,21 @@ export default function LovedOneDetailsScreen({
     );
   };
 
-  const buildCatalog = (): CatalogItem[] =>
-    partnerStores
+  const buildCatalog = (promptText?: string): CatalogItem[] => {
+    const explicitlyWantsOpposite = (() => {
+      if (!recipientProductGender || !promptText) return false;
+      const lower = promptText.toLowerCase();
+      return lower.includes('feminin') || lower.includes('femei') || lower.includes('barbati') || lower.includes('masculin') || lower.includes('unisex');
+    })();
+    const opposite = recipientProductGender === 'barbati' ? 'femei' : 'barbati';
+
+    return partnerStores
       .flatMap((store) =>
         store.products.map((product, index) => {
-          const price =
-            product.price?.current ?? product.price?.original ?? 0;
+          const price = product.price?.current ?? product.price?.original ?? 0;
           if (!price || price <= 0) return null;
+          const productGender = (product as any).gender || 'unisex';
+          if (recipientProductGender && !explicitlyWantsOpposite && productGender === opposite) return null;
           return {
             id: getProductSuggestionId(store, product, index),
             name: product.name,
@@ -2684,6 +2816,7 @@ export default function LovedOneDetailsScreen({
       )
       .filter((item): item is CatalogItem => Boolean(item))
       .slice(0, 500);
+  };
 
   const buildSuggestionsById = (): Map<string, ProductSuggestion> => {
     const map = new Map<string, ProductSuggestion>();
@@ -2711,7 +2844,7 @@ export default function LovedOneDetailsScreen({
   const sendAiHelp = async () => {
     if (!token || !aiPromptInput.trim() || aiLoading) return;
 
-    const catalog = buildCatalog();
+    const catalog = buildCatalog(aiPromptInput || changeProductAiPromptInput);
     if (catalog.length === 0) {
       setAiHelpError('Nu există produse în catalog pentru a trimite la GiftBot.');
       return;
@@ -2741,7 +2874,7 @@ export default function LovedOneDetailsScreen({
   const sendChangeProductAiHelp = async () => {
     if (!token || !changeProductAiPromptInput.trim() || changeProductAiLoading) return;
 
-    const catalog = buildCatalog();
+    const catalog = buildCatalog(aiPromptInput || changeProductAiPromptInput);
     if (catalog.length === 0) return;
 
     setChangeProductAiLoading(true);
@@ -2787,7 +2920,7 @@ export default function LovedOneDetailsScreen({
   const retryAiSingleProduct = async (recId: string, giftPlan: GiftPlan) => {
     if (!token || !!retryingAiProductId) return;
 
-    const catalog = buildCatalog();
+    const catalog = buildCatalog(aiPromptInput || changeProductAiPromptInput);
     if (catalog.length === 0) return;
 
     const suggestionsById = buildSuggestionsById();
@@ -2818,7 +2951,7 @@ export default function LovedOneDetailsScreen({
   const retryChangeProductAiSingle = async (recId: string) => {
     if (!token || !!retryingChangeProductAiId) return;
 
-    const catalog = buildCatalog();
+    const catalog = buildCatalog(aiPromptInput || changeProductAiPromptInput);
     if (catalog.length === 0) return;
 
     const suggestionsById = buildSuggestionsById();
@@ -3037,11 +3170,28 @@ export default function LovedOneDetailsScreen({
       selectedGiftPlan
     : null;
   const selectedGiftProducts = visibleSelectedGiftPlan?.selectedProducts || [];
-  const allProductOffers = partnerStores.flatMap((store) =>
-    store.products
-      .map((product, index) => toProductSuggestion(store, product, index))
-      .filter((product): product is ProductSuggestion => Boolean(product))
-  );
+  const recipientGender = data?.gender; // 'male' | 'female' | undefined
+  const recipientProductGender = recipientGender === 'male' ? 'barbati' : recipientGender === 'female' ? 'femei' : null;
+
+  const allProductOffers = (() => {
+    const all = partnerStores.flatMap((store) =>
+      store.products
+        .map((product, index) => toProductSuggestion(store, product, index))
+        .filter((product): product is ProductSuggestion => Boolean(product))
+    );
+    if (!recipientProductGender) return all;
+    const opposite = recipientProductGender === 'barbati' ? 'femei' : 'barbati';
+
+    // Sort by gender relevance: matching gender first, then unisex, then opposite gender last
+    const genderScore = (p: ProductSuggestion) => {
+      const g = p.gender || 'unisex';
+      if (g === recipientProductGender) return 0; // exact match — top
+      if (g === 'unisex') return 1;               // neutral — middle
+      return 2;                                    // opposite — bottom
+    };
+
+    return [...all].sort((a, b) => genderScore(a) - genderScore(b));
+  })();
   const lowestPriceByKey = new Map<string, number>();
   const bestImageByKey = new Map<string, string>();
   allProductOffers.forEach((offer) => {
@@ -3088,7 +3238,20 @@ export default function LovedOneDetailsScreen({
     });
 
   const productSuggestions = Array.from(productSuggestionsByKey.values())
-    .sort((a, b) => a.price - b.price)
+    .sort((a, b) => {
+      if (recipientProductGender) {
+        const score = (p: ProductSuggestion) => {
+          const g = p.gender || 'unisex';
+          if (g === recipientProductGender) return 0;
+          if (g === 'unisex') return 1;
+          return 2;
+        };
+        const diff = score(a) - score(b);
+        if (diff !== 0) return diff;
+      }
+      // p.price is already correct: base price when has min order, promo price when no min order
+      return a.price - b.price;
+    })
     .slice(0, 12);
   const changeProductSearchQuery = changeProductSearch.trim().toLowerCase();
   const changeProductSuggestionsByKey = new Map<string, ProductSuggestion>();
@@ -3114,7 +3277,20 @@ export default function LovedOneDetailsScreen({
     });
 
   const changeProductSuggestions = Array.from(changeProductSuggestionsByKey.values())
-    .sort((a, b) => a.price - b.price)
+    .sort((a, b) => {
+      if (recipientProductGender) {
+        const score = (p: ProductSuggestion) => {
+          const g = p.gender || 'unisex';
+          if (g === recipientProductGender) return 0;
+          if (g === 'unisex') return 1;
+          return 2;
+        };
+        const diff = score(a) - score(b);
+        if (diff !== 0) return diff;
+      }
+      // p.price is already correct: base price when has min order, promo price when no min order
+      return a.price - b.price;
+    })
     .slice(0, 12);
   const selectedGiftProductsTotal = selectedGiftProducts.reduce(
     (sum, product) => sum + getDisplayedProductPrice(product),
@@ -3146,10 +3322,10 @@ export default function LovedOneDetailsScreen({
         : (entry.value - budgetHistoryMin) / budgetHistoryRange;
     const x =
       budgetHistoryValues.length <= 1
-        ? BUDGET_CHART_PLOT_WIDTH / 2
+        ? budgetPlotWidth / 2
         : BUDGET_CHART_PLOT_PADDING +
           (index / (budgetHistoryValues.length - 1)) *
-            (BUDGET_CHART_PLOT_WIDTH - BUDGET_CHART_PLOT_PADDING * 2);
+            (budgetPlotWidth - BUDGET_CHART_PLOT_PADDING * 2);
     const y =
       BUDGET_CHART_PLOT_PADDING +
       (1 - normalized) *
@@ -3274,6 +3450,10 @@ export default function LovedOneDetailsScreen({
               const hasPromoCode = Boolean(
                 offer.hasPromoCode && offer.promoCode && promoDiscount > 0
               );
+              const promoMinOrder = (offer as any).promoMinOrder as number | undefined;
+              const promoEffectivePrice = (offer as any).promoEffectivePrice as number | undefined;
+              // When has min order: offer.price = base price, promoEffectivePrice = price with code
+              // When no min order: offer.price = already promo price
               const hasDiscount =
                 Boolean(offer.hasDiscount) && originalPrice > offer.price;
               const isBestOffer = index === 0;
@@ -3316,6 +3496,13 @@ export default function LovedOneDetailsScreen({
                           Cu cod {offer.promoCode}
                         </Text>
                       )}
+                      {hasPromoCode && !!promoMinOrder && (
+                        <View style={styles.promoMinOrderBadge}>
+                          <Text style={styles.promoMinOrderBadgeText}>
+                            cos minim {promoMinOrder} {(offer as any).promoMinOrderCurrency || 'RON'}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={styles.reducedPriceDetail}>
                       {formatMoney(offer.price, offer.currency)}
@@ -3357,11 +3544,27 @@ export default function LovedOneDetailsScreen({
                         <Text style={styles.priceDetailLabel}>Reducere cod</Text>
                         <Text style={styles.priceDetailValue}>
                           {formatMoney(promoDiscount, offer.currency)}
-                          {promoDiscountPercent > 0
-                            ? ` (${promoDiscountPercent}%)`
-                            : ''}
+                          {promoDiscountPercent > 0 ? ` (${promoDiscountPercent}%)` : ''}
                         </Text>
                       </View>
+                      {!!promoMinOrder && !!promoEffectivePrice && (
+                        <>
+                          <View style={[styles.priceDetailRow, { marginTop: 6, paddingTop: 6, borderTopWidth: 0.5, borderTopColor: C.border }]}>
+                            <Text style={styles.priceDetailLabel}>Fara cod (pret curent)</Text>
+                            <Text style={styles.priceDetailValue}>
+                              {formatMoney(offer.price, offer.currency)}
+                            </Text>
+                          </View>
+                          <View style={styles.priceDetailRow}>
+                            <Text style={[styles.priceDetailLabel, { color: C.accent, fontWeight: '600' }]}>
+                              Cu cod (cos min. {promoMinOrder} {(offer as any).promoMinOrderCurrency || 'RON'})
+                            </Text>
+                            <Text style={[styles.priceDetailValue, { color: C.accent, fontWeight: '700' }]}>
+                              {formatMoney(promoEffectivePrice, offer.currency)}
+                            </Text>
+                          </View>
+                        </>
+                      )}
                       <Text style={styles.productMeta}>
                         Codul {offer.promoCode} trebuie introdus pe site pentru pretul final.
                       </Text>
@@ -3402,19 +3605,36 @@ export default function LovedOneDetailsScreen({
                         styles.offerPurchaseButton,
                         savingGiftProducts && styles.disabledButton,
                       ]}
-                      onPress={() =>
-                        isManualProduct
-                          ? openOtherStoreModal('manual')
-                          : markProductAsPurchased(
-                              visibleSelectedGiftPlan,
-                              selectedProductDetail.id,
-                              {
-                                storeName: offer.storeName,
-                                price: offer.price,
-                                fromImportedStore: true,
-                              }
-                            )
-                      }
+                      onPress={() => {
+                        if (isManualProduct) {
+                          openOtherStoreModal('manual');
+                          return;
+                        }
+                        // If offer has promo with minimum order, ask how they purchased
+                        if (promoMinOrder && promoEffectivePrice) {
+                          setPromoConfirmPending({
+                            giftPlan: visibleSelectedGiftPlan,
+                            productId: selectedProductDetail.id,
+                            storeName: offer.storeName,
+                            basePrice: offer.price,
+                            promoPrice: promoEffectivePrice,
+                            promoCode: offer.promoCode || '',
+                            promoMinOrder,
+                            promoMinOrderCurrency: (offer as any).promoMinOrderCurrency || 'RON',
+                            imageUrl: offer.imageUrl,
+                          });
+                          return;
+                        }
+                        markProductAsPurchased(
+                          visibleSelectedGiftPlan,
+                          selectedProductDetail.id,
+                          {
+                            storeName: offer.storeName,
+                            price: offer.price,
+                            fromImportedStore: true,
+                          }
+                        );
+                      }}
                       disabled={savingGiftProducts}
                     >
                       <Text style={styles.purchasedButtonText}>
@@ -3484,6 +3704,68 @@ export default function LovedOneDetailsScreen({
             ) : null}
           </View>
         </View>
+
+        <Modal
+          visible={!!promoConfirmPending}
+          animationType="fade"
+          transparent
+          onRequestClose={() => setPromoConfirmPending(null)}
+        >
+          <View style={styles.modalOverlay} {...getModalBackdropResponder(() => setPromoConfirmPending(null))}>
+            <View style={styles.confirmModalCard}>
+              {!!promoConfirmPending && (
+                <>
+                  <Text style={styles.modalTitle}>Cum ai cumpărat?</Text>
+                  <Text style={styles.confirmText}>
+                    Cod <Text style={{ fontWeight: '700', color: C.accent }}>{promoConfirmPending.promoCode}</Text>
+                    {' '}(-{Math.round((1 - promoConfirmPending.promoPrice / promoConfirmPending.basePrice) * 100)}%) la comenzi min.{' '}
+                    <Text style={{ fontWeight: '700' }}>{promoConfirmPending.promoMinOrder} {promoConfirmPending.promoMinOrderCurrency}</Text>.
+                  </Text>
+
+                  <Pressable
+                    style={styles.cancelGiftButton}
+                    onPress={() => {
+                      const p = promoConfirmPending;
+                      setPromoConfirmPending(null);
+                      markProductAsPurchased(p.giftPlan, p.productId, {
+                        storeName: p.storeName,
+                        price: p.promoPrice,
+                        fromImportedStore: true,
+                        imageUrl: p.imageUrl,
+                      });
+                    }}
+                  >
+                    <Text style={styles.cancelGiftButtonText}>
+                      Da, am aplicat codul — {promoConfirmPending.promoPrice} RON
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={styles.cancelGiftButton}
+                    onPress={() => {
+                      const p = promoConfirmPending;
+                      setPromoConfirmPending(null);
+                      markProductAsPurchased(p.giftPlan, p.productId, {
+                        storeName: p.storeName,
+                        price: p.basePrice,
+                        fromImportedStore: true,
+                        imageUrl: p.imageUrl,
+                      });
+                    }}
+                  >
+                    <Text style={styles.cancelGiftButtonText}>
+                      Nu, fără cod — {promoConfirmPending.basePrice} RON
+                    </Text>
+                  </Pressable>
+
+                  <Pressable style={{ alignItems: 'center', paddingVertical: 12 }} onPress={() => setPromoConfirmPending(null)}>
+                    <Text style={styles.closeButtonText}>Anulează</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+          </View>
+        </Modal>
 
         <Modal
           visible={otherStoreModalVisible}
@@ -3890,24 +4172,61 @@ export default function LovedOneDetailsScreen({
                                 {product.offerCount} magazine disponibile
                               </Text>
                             )}
-                            {!!product.promoCode && (
-                              <Text style={styles.productMeta}>
-                                Pret cu cod {product.promoCode}
-                              </Text>
-                            )}
                             {!!product.category && (
                               <Text style={styles.productMeta}>
                                 {product.category}
-                                {product.subcategory
-                                  ? ` - ${product.subcategory}`
-                                  : ''}
+                                {product.subcategory ? ` - ${product.subcategory}` : ''}
                               </Text>
+                            )}
+                            {!!product.promoCode && !!product.promoDiscountPercent && (
+                              <View style={styles.promoTagWrap}>
+                                <View style={styles.promoTag}>
+                                  <Text style={styles.promoTagText}>
+                                    -{product.promoDiscountPercent}% cod {product.promoCode}
+                                  </Text>
+                                </View>
+                                {!!(product as any).promoMinOrder ? (
+                                  <View style={styles.promoMinOrderBadge}>
+                                    <Text style={styles.promoMinOrderBadgeText}>
+                                      cos minim {(product as any).promoMinOrder} {(product as any).promoMinOrderCurrency || 'RON'}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                {(product as any).promoEndDate ? (
+                                  <Text style={styles.promoEndDate}>
+                                    valabil până {formatPromoEndDate((product as any).promoEndDate)}
+                                  </Text>
+                                ) : (
+                                  <Text style={styles.promoEndDate}>Promoție permanentă</Text>
+                                )}
+                              </View>
                             )}
                           </View>
                           <View style={styles.productPriceBox}>
-                            <Text style={styles.productPrice}>
-                              {formatMoney(product.price, product.currency)}
-                            </Text>
+                            {!!product.promoCode && !!product.promoDiscountPercent ? (
+                              !!(product as any).promoMinOrder ? (
+                                // Has minimum order — show base price + promo price as hint
+                                <>
+                                  <Text style={styles.productPrice}>
+                                    {formatMoney(product.price, product.currency)}
+                                  </Text>
+                                  {!!(product as any).promoEffectivePrice && (
+                                    <Text style={styles.promoPrice}>
+                                      {formatMoney((product as any).promoEffectivePrice, product.currency)} cu cod
+                                    </Text>
+                                  )}
+                                </>
+                              ) : (
+                                // No minimum — show only promo price (already calculated in product.price)
+                                <Text style={styles.productPrice}>
+                                  {formatMoney(product.price, product.currency)}
+                                </Text>
+                              )
+                            ) : (
+                              <Text style={styles.productPrice}>
+                                {formatMoney(product.price, product.currency)}
+                              </Text>
+                            )}
                             <Pressable
                               style={[
                                 styles.addProductButton,
@@ -5068,15 +5387,14 @@ export default function LovedOneDetailsScreen({
                 showsVerticalScrollIndicator={false}
               >
                 <Text style={styles.modalTitle}>Istoric buget</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
+                <View
                   style={styles.budgetChartScroll}
+                  onLayout={(e) => setBudgetChartContainerWidth(e.nativeEvent.layout.width)}
                 >
                   <View
                     style={[
                       styles.budgetLineChart,
-                      { width: BUDGET_CHART_WIDTH, height: BUDGET_CHART_HEIGHT },
+                      { width: budgetChartContainerWidth, height: BUDGET_CHART_HEIGHT },
                     ]}
                   >
                     <View style={styles.budgetChartTitleBlock}>
@@ -5111,9 +5429,9 @@ export default function LovedOneDetailsScreen({
                       ))}
                     </View>
 
-                    <View style={styles.budgetLineChartPlot}>
+                    <View style={[styles.budgetLineChartPlot, { width: budgetPlotWidth }]}>
                       <View style={styles.budgetLineChartYAxisLine} />
-                      <View style={styles.budgetLineChartXAxisLine} />
+                      <View style={[styles.budgetLineChartXAxisLine, { width: budgetPlotWidth }]} />
 
                       {budgetChartSegments.map((segment) => (
                         <View
@@ -5166,7 +5484,7 @@ export default function LovedOneDetailsScreen({
                       ))}
                     </View>
                   </View>
-                </ScrollView>
+                </View>
 
                 {selectedGiftBudgetHistory.map((entry, index) => (
                   <View key={`${entry.changedAt}-row-${index}`} style={styles.budgetHistoryRow}>
@@ -6179,15 +6497,14 @@ export default function LovedOneDetailsScreen({
           ) : (
             <>
               {historyBudgetChartPoints.length > 0 && (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
+                <View
                   style={styles.budgetChartScroll}
+                  onLayout={(e) => setBudgetChartContainerWidth(e.nativeEvent.layout.width)}
                 >
                   <View
                     style={[
                       styles.budgetLineChart,
-                      { width: BUDGET_CHART_WIDTH, height: BUDGET_CHART_HEIGHT },
+                      { width: budgetChartContainerWidth, height: BUDGET_CHART_HEIGHT },
                     ]}
                   >
                     <View style={styles.budgetChartTitleBlock}>
@@ -6222,9 +6539,9 @@ export default function LovedOneDetailsScreen({
                       ))}
                     </View>
 
-                    <View style={styles.budgetLineChartPlot}>
+                    <View style={[styles.budgetLineChartPlot, { width: budgetPlotWidth }]}>
                       <View style={styles.budgetLineChartYAxisLine} />
-                      <View style={styles.budgetLineChartXAxisLine} />
+                      <View style={[styles.budgetLineChartXAxisLine, { width: budgetPlotWidth }]} />
 
                       {historyBudgetChartSegments.map((segment) => (
                         <View
@@ -6274,7 +6591,7 @@ export default function LovedOneDetailsScreen({
                       ))}
                     </View>
                   </View>
-                </ScrollView>
+                </View>
               )}
 
               {completedGiftPlanGroups.map((group) => (
@@ -6705,10 +7022,10 @@ export default function LovedOneDetailsScreen({
                 <View style={styles.duplicateInfoBox}>
                   <Text style={styles.duplicateInfoTitle}>Data oferirii</Text>
                   <Text style={styles.duplicateInfoText}>
-                    {deadlineDay && deadlineMonth && deadlineYear
+                    {computedFixedDeadline
                       ? formatDate(
-                          `${deadlineYear}-${pad(deadlineMonth)}-${pad(
-                            deadlineDay
+                          `${computedFixedDeadline.year}-${pad(computedFixedDeadline.month)}-${pad(
+                            computedFixedDeadline.day
                           )}`
                         )
                       : 'Se calculeaza automat pentru aceasta ocazie.'}
@@ -7708,7 +8025,7 @@ const styles = StyleSheet.create({
   },
   productPriceBox: {
     alignItems: 'flex-end',
-    gap: 8,
+    gap: 6,
     maxWidth: 170,
   },
   productPrice: {
@@ -7716,6 +8033,50 @@ const styles = StyleSheet.create({
     color: C.sage,
     fontSize: 14,
     fontWeight: '400',
+  },
+  promoPrice: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.accent,
+  },
+  promoTagWrap: {
+    gap: 2,
+    marginTop: 2,
+  },
+  promoTag: {
+    alignSelf: 'flex-start',
+    backgroundColor: C.accentSoft,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: R.sm,
+  },
+  promoTagText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.accent,
+  },
+  promoEndDate: {
+    fontSize: 10,
+    color: C.textDim,
+  },
+  promoMinOrder: {
+    fontSize: 10,
+    color: C.textFaint,
+    fontStyle: 'italic',
+  },
+  promoMinOrderBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#fff3e0',
+    borderWidth: 0.5,
+    borderColor: '#f9a825',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: R.sm,
+  },
+  promoMinOrderBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#e65100',
   },
   addProductButton: {
     backgroundColor: C.accent,

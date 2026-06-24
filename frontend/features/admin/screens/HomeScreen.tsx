@@ -17,6 +17,7 @@ import { PartnerStore } from '../../../types/partnerStores';
 
 type Props = {
   firstName: string;
+  lastName?: string;
   onOpenStore: (storeId: string) => void;
 };
 
@@ -48,7 +49,7 @@ function formatDate(value?: string) {
   return `${day}.${month}.${year}`;
 }
 
-export default function HomeScreen({ firstName, onOpenStore }: Props) {
+export default function HomeScreen({ firstName, lastName, onOpenStore }: Props) {
   const { token } = useAuth();
   const [stores, setStores] = useState<PartnerStore[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,16 +98,14 @@ export default function HomeScreen({ firstName, onOpenStore }: Props) {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.heroBanner} />
-
-      <View>
-        <Text style={styles.title}>Acasa</Text>
-        <Text style={styles.subtitle}>Bun venit, {firstName}.</Text>
-      </View>
-
-      <View style={styles.summaryCard}>
-        <Text style={styles.summaryValue}>{dashboardStats.partnerStores}</Text>
-        <Text style={styles.summaryLabel}>Magazine partenere</Text>
+      <View style={styles.heroBlock}>
+        <View style={styles.roleBadge}>
+          <Text style={styles.roleBadgeText}>Administrator</Text>
+        </View>
+        <Text style={styles.title}>
+          {firstName}{lastName ? ` ${lastName}` : ''}
+        </Text>
+        <Text style={styles.subtitle}>Bun venit în panoul de administrare.</Text>
       </View>
 
       <View style={styles.headerCard}>
@@ -295,13 +294,24 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
-  heroBanner: {
-    height: 120,
+  heroBlock: {
+    gap: 6,
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
+  roleBadge: {
+    alignSelf: 'flex-start',
     backgroundColor: C.accentSoft,
-    borderRadius: R.xl,
-    borderWidth: 0.5,
-    borderColor: C.border,
-    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: R.pill,
+  },
+  roleBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.accent,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   summaryCard: {
     backgroundColor: C.surface,

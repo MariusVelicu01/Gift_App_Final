@@ -86,10 +86,13 @@ export async function getPartnerStoreProductUsage(
 export type StoreAffiliateStats = {
   storeId: string;
   commissionPercent: number;
+  paymentTermDays: number;
   conversions: number;
-  totalExpected: number;
+  currentMonthExpected: number;
+  previousMonthsPending: number;
   totalReceived: number;
-  totalPending: number;
+  nextPaymentDate: string | null;
+  daysUntilPayment: number | null;
   products: {
     name: string;
     commissionPercent: number;
@@ -97,6 +100,8 @@ export type StoreAffiliateStats = {
     receivedAmount: number;
     status: string;
     purchasePrice: number;
+    purchasedAt?: string;
+    paymentDueDate?: string;
   }[];
 };
 
@@ -105,4 +110,27 @@ export async function getStoreAffiliateStats(
   storeId: string
 ): Promise<StoreAffiliateStats> {
   return apiFetch(`/partner-stores/${storeId}/affiliate-stats`, { method: 'GET' }, token);
+}
+
+export type AffiliateSummary = {
+  totals: {
+    conversions: number;
+    currentMonthExpected: number;
+    previousMonthsPending: number;
+    totalReceived: number;
+    nextPaymentDate: string | null;
+    daysUntilPayment: number | null;
+  };
+  stores: {
+    storeId: string;
+    storeName: string;
+    conversions: number;
+    totalExpected: number;
+    totalReceived: number;
+    commissionPercent: number;
+  }[];
+};
+
+export async function getAffiliateSummary(token: string): Promise<AffiliateSummary> {
+  return apiFetch('/partner-stores/affiliate-summary', { method: 'GET' }, token);
 }

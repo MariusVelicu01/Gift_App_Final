@@ -945,14 +945,16 @@ export default function CalendarScreen({ resetRef }: Props) {
                 return (
                   <View
                     key={`${dateKey || 'empty'}-${index}`}
-                    style={[styles.dayCell, !day && styles.emptyDayCell]}
+                    style={[styles.dayCell, !day && styles.emptyDayCell, isToday && styles.todayCell]}
                   >
                     {day && (
                       <>
-                        <View style={styles.dayHeader}>
-                          <Text style={[styles.dayNumber, isToday && styles.todayText]}>
-                            {day}
-                          </Text>
+                        <View style={[styles.dayHeader, isToday && styles.todayDayHeader]}>
+                          <View style={isToday ? styles.todayNumberWrap : undefined}>
+                            <Text style={[styles.dayNumber, isToday && styles.todayText]}>
+                              {day}
+                            </Text>
+                          </View>
                           {isToday && <Text style={styles.todayBadge}>azi</Text>}
                         </View>
 
@@ -1447,15 +1449,36 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
   },
+  todayCell: {
+    backgroundColor: C.accentSoft,
+    borderColor: C.accent,
+    borderLeftWidth: 2,
+    borderRightWidth: 0.5,
+    borderTopWidth: 2,
+    borderBottomWidth: 0.5,
+  },
+  todayDayHeader: {
+    marginBottom: 5,
+  },
+  todayNumberWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: C.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   todayText: {
-    color: C.accent,
+    color: '#fff',
     fontWeight: '700',
+    fontSize: 13,
   },
   todayBadge: {
     color: C.accent,
     fontSize: 9,
     fontWeight: '700',
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   dayEvents: {
     gap: 5,

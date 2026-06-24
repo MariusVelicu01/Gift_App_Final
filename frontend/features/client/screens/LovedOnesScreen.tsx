@@ -218,13 +218,6 @@ export default function LovedOnesScreen({
 
             <View style={styles.infoBlock}>
               <Text style={styles.name}>{item.name}</Text>
-              <Text style={styles.meta}>
-                {String(item.day).padStart(2, '0')}.{String(item.month).padStart(2, '0')}
-                {item.year ? `.${item.year}` : ''}
-              </Text>
-              {!!item.estimatedAgeRange && (
-                <Text style={styles.meta}>Vârstă: {item.estimatedAgeRange}</Text>
-              )}
             </View>
 
             <Text style={styles.chevron}>›</Text>

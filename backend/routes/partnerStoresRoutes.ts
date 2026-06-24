@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   create,
   getAffiliateStats,
+  getAffiliateSummary,
   getAll,
   getProductUsage,
   importProducts,
@@ -15,6 +16,7 @@ const router = Router();
 router.use(requireAuth);
 
 router.get('/', getAll);
+router.get('/affiliate-summary', requireRole('admin'), getAffiliateSummary);
 router.get('/:storeId/product-usage', requireRole('admin'), getProductUsage);
 router.get('/:storeId/affiliate-stats', requireRole('admin'), getAffiliateStats);
 router.post('/', requireRole('admin'), create);

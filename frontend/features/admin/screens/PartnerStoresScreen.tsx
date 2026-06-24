@@ -17,6 +17,8 @@ import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
 import {
   createPartnerStore,
+  getAffiliateSummary,
+  AffiliateSummary,
   getPartnerStoreProductUsage,
   getStoreAffiliateStats,
   importPartnerStoreProducts,
@@ -39,13 +41,13 @@ import {
 import { C, R, S } from '../../../constants/theme';
 import { getModalBackdropResponder } from '../../../utils/modalBackdrop';
 
-const PRODUCTS_PER_PAGE = 20;
-const PRICE_CHART_WIDTH = 720;
-const PRICE_CHART_HEIGHT = 310;
-const PRICE_CHART_LEFT = 58;
-const PRICE_CHART_TOP = 74;
-const PRICE_CHART_PLOT_WIDTH = 600;
-const PRICE_CHART_PLOT_HEIGHT = 168;
+const PRODUCTS_PER_PAGE = 10;
+const PRICE_CHART_WIDTH = 760;
+const PRICE_CHART_HEIGHT = 360;
+const PRICE_CHART_LEFT = 80;
+const PRICE_CHART_TOP = 70;
+const PRICE_CHART_PLOT_WIDTH = 616;
+const PRICE_CHART_PLOT_HEIGHT = 210;
 
 const DAYS = Array.from({ length: 31 }, (_, i) => ({
   label: String(i + 1).padStart(2, '0'),
@@ -99,7 +101,7 @@ function formatImportDate(value: string) {
 
   return `${String(date.getDate()).padStart(2, '0')}.${String(
     date.getMonth() + 1
-  ).padStart(2, '0')}.${date.getFullYear()}`;
+  ).padStart(2, '0')}.${date.getFullYear()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
 function formatDateKey(value: string) {
@@ -238,20 +240,17 @@ function normalizeProduct(item: any, index: number) {
     ...(promo
       ? {
           promo: {
-            ...(promo.hasPromoCode !== undefined
-              ? { hasPromoCode: Boolean(promo.hasPromoCode) }
-              : {}),
+            ...(promo.hasPromoCode !== undefined ? { hasPromoCode: Boolean(promo.hasPromoCode) } : {}),
             ...(promo.code ? { code: String(promo.code) } : {}),
-            ...(promo.discount !== undefined
-              ? { discount: Number(promo.discount) }
-              : {}),
-            ...(promo.discountAmount !== undefined
-              ? { discountAmount: Number(promo.discountAmount) }
-              : {}),
-            ...(promo.discountPercent !== undefined
-              ? { discountPercent: Number(promo.discountPercent) }
-              : {}),
+            ...(promo.discount !== undefined ? { discount: Number(promo.discount) } : {}),
+            ...(promo.discountAmount !== undefined ? { discountAmount: Number(promo.discountAmount) } : {}),
+            ...(promo.discountPercent !== undefined ? { discountPercent: Number(promo.discountPercent) } : {}),
             ...(promo.note ? { note: String(promo.note) } : {}),
+            ...(promo.startDate ? { startDate: String(promo.startDate) } : {}),
+            ...(promo.endDate ? { endDate: String(promo.endDate) } : {}),
+            ...(promo.hasMinimumOrderValue !== undefined ? { hasMinimumOrderValue: Boolean(promo.hasMinimumOrderValue) } : {}),
+            ...(promo.minimumOrderValue !== undefined ? { minimumOrderValue: Number(promo.minimumOrderValue) } : {}),
+            ...(promo.minimumOrderCurrency ? { minimumOrderCurrency: String(promo.minimumOrderCurrency) } : {}),
           },
         }
       : {}),
@@ -267,6 +266,13 @@ function normalizeProduct(item: any, index: number) {
           },
         }
       : {}),
+    ...(() => {
+      const aff = item.affiliate || {};
+      const pct = Number(aff.commissionPercent);
+      if (!Number.isFinite(pct) || pct <= 0) return {};
+      return { affiliate: { commissionPercent: pct } };
+    })(),
+    ...(['barbati', 'femei', 'unisex'].includes(item.gender) ? { gender: item.gender } : {}),
   };
 }
 
@@ -284,6 +290,8 @@ function parseJsonProducts(content: string): PartnerProductsImportPayload {
     ...(parsed.currency ? { currency: String(parsed.currency) } : {}),
     ...(parsed.lastUpdated ? { lastUpdated: String(parsed.lastUpdated) } : {}),
     ...(parsed.merchant ? { merchant: parsed.merchant } : {}),
+    ...(parsed.affiliateProgram ? { affiliateProgram: parsed.affiliateProgram } : {}),
+    ...(parsed.promotionIndicator ? { promotionIndicator: parsed.promotionIndicator } : {}),
   };
 }
 
@@ -372,22 +380,38 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
   const [usageError, setUsageError] = useState('');
   const [usagePurposeFilter, setUsagePurposeFilter] = useState('all');
   const [usageYearFilter, setUsageYearFilter] = useState('all');
+  const [chartYearFilter, setChartYearFilter] = useState<number | 'all'>('all');
   const [affiliateStats, setAffiliateStats] = useState<StoreAffiliateStats | null>(null);
   const [affiliateLoading, setAffiliateLoading] = useState(false);
+  const [affiliateError, setAffiliateError] = useState<string | null>(null);
+  const [affiliateExpanded, setAffiliateExpanded] = useState(false);
+  const [affiliateSummary, setAffiliateSummary] = useState<AffiliateSummary | null>(null);
+  const [affiliateSummaryLoading, setAffiliateSummaryLoading] = useState(false);
+  const [affiliateSummaryModalVisible, setAffiliateSummaryModalVisible] = useState(false);
+  const [chartContainerWidth, setChartContainerWidth] = useState(PRICE_CHART_WIDTH);
   const [productSearchText, setProductSearchText] = useState('');
   const [productCategoryFilter, setProductCategoryFilter] = useState('all');
+  const [productUsageFilter, setProductUsageFilter] = useState<'all' | 'used' | 'unused'>('all');
   const [productPage, setProductPage] = useState(0);
 
   useEffect(() => {
     if (!selectedStoreId || !token) {
       setAffiliateStats(null);
+      setAffiliateError(null);
       return;
     }
     let cancelled = false;
     setAffiliateLoading(true);
+    setAffiliateError(null);
     getStoreAffiliateStats(token, selectedStoreId)
       .then((data) => { if (!cancelled) setAffiliateStats(data); })
-      .catch(() => { if (!cancelled) setAffiliateStats(null); })
+      .catch((err) => {
+        if (!cancelled) {
+          setAffiliateStats(null);
+          setAffiliateError(String(err?.message || err || 'Eroare necunoscuta'));
+          console.error('[affiliate-stats] fetch error:', err);
+        }
+      })
       .finally(() => { if (!cancelled) setAffiliateLoading(false); });
     return () => { cancelled = true; };
   }, [selectedStoreId, token]);
@@ -396,24 +420,76 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
     return stores.find((store) => store.id === selectedStoreId) || null;
   }, [selectedStoreId, stores]);
 
+  const groupedAffiliateProducts = useMemo(() => {
+    if (!affiliateStats?.products?.length) return [];
+    const map = new Map<string, {
+      name: string;
+      commissionPercent: number;
+      conversions: number;
+      totalExpected: number;
+      totalReceived: number;
+      entries: typeof affiliateStats.products;
+    }>();
+    affiliateStats.products.forEach((p) => {
+      const key = p.name.toLowerCase().trim();
+      const existing = map.get(key);
+      if (existing) {
+        existing.conversions += 1;
+        existing.totalExpected = Math.round((existing.totalExpected + p.expectedAmount) * 100) / 100;
+        if (p.status === 'received') existing.totalReceived = Math.round((existing.totalReceived + p.receivedAmount) * 100) / 100;
+        existing.entries.push(p);
+      } else {
+        map.set(key, {
+          name: p.name,
+          commissionPercent: p.commissionPercent,
+          conversions: 1,
+          totalExpected: p.expectedAmount,
+          totalReceived: p.status === 'received' ? p.receivedAmount : 0,
+          entries: [p],
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => b.totalExpected - a.totalExpected);
+  }, [affiliateStats]);
+
   const selectedPriceHistory = useMemo(() => {
     if (!selectedStore || !selectedPriceProduct) return null;
     return findPriceHistory(selectedStore, selectedPriceProduct);
   }, [selectedPriceProduct, selectedStore]);
 
+  const chartAvailableYears = useMemo(() => {
+    const years = new Set<number>();
+    (selectedPriceHistory?.history || []).forEach((entry) => {
+      const y = new Date(entry.importedAt).getFullYear();
+      if (!isNaN(y)) years.add(y);
+    });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [selectedPriceHistory]);
+
   const priceChartData = useMemo(() => {
-    const history = selectedPriceHistory?.history || [];
+    const allHistory = selectedPriceHistory?.history || [];
+    const history = chartYearFilter === 'all'
+      ? allHistory
+      : allHistory.filter((e) => new Date(e.importedAt).getFullYear() === chartYearFilter);
     const values = history.map((entry) => entry.currentPrice);
-    const min = values.length ? Math.min(...values) : 0;
-    const max = values.length ? Math.max(...values) : 0;
-    const range = Math.max(1, max - min);
+    const rawMin = values.length ? Math.min(...values) : 0;
+    const rawMax = values.length ? Math.max(...values) : 0;
+
+    const flat = rawMin === rawMax;
+    const pad = flat ? Math.max(rawMax * 0.08, 1) : 0;
+    const displayMin = Number((rawMin - pad).toFixed(2));
+    const displayMax = Number((rawMax + pad).toFixed(2));
+    const range = Math.max(0.01, displayMax - displayMin);
+
+    const plotWidth = chartContainerWidth - PRICE_CHART_LEFT - 40;
+
     const points = history.map((entry, index) => {
       const x =
         history.length <= 1
-          ? PRICE_CHART_LEFT + PRICE_CHART_PLOT_WIDTH / 2
+          ? PRICE_CHART_LEFT + plotWidth / 2
           : PRICE_CHART_LEFT +
-            (index / (history.length - 1)) * PRICE_CHART_PLOT_WIDTH;
-      const normalized = (entry.currentPrice - min) / range;
+            (index / (history.length - 1)) * plotWidth;
+      const normalized = (entry.currentPrice - displayMin) / range;
       const y =
         PRICE_CHART_TOP + PRICE_CHART_PLOT_HEIGHT - normalized * PRICE_CHART_PLOT_HEIGHT;
 
@@ -441,8 +517,13 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
       };
     });
 
-    return { min, max, points, segments };
-  }, [selectedPriceHistory]);
+    const mid = Number(((displayMin + displayMax) / 2).toFixed(2));
+    return { min: displayMin, max: displayMax, mid, points, segments, plotWidth };
+  }, [selectedPriceHistory, chartYearFilter, chartContainerWidth]);
+
+  useEffect(() => {
+    setChartYearFilter('all');
+  }, [selectedPriceProduct]);
 
   useEffect(() => {
     if (!token || !selectedStore || !selectedPriceProduct) {
@@ -601,10 +682,18 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
         String(p.category || '').trim().toLowerCase() ===
           productCategoryFilter.toLowerCase();
       if (!matchesCategory) return false;
+      if (productUsageFilter !== 'all') {
+        const key = String(p.name || '').toLowerCase().trim();
+        const isUsed = groupedAffiliateProducts.some(
+          (g) => g.name.toLowerCase().trim() === key
+        );
+        if (productUsageFilter === 'used' && !isUsed) return false;
+        if (productUsageFilter === 'unused' && isUsed) return false;
+      }
       if (!normalizedSearch) return true;
       return String(p.name || '').toLowerCase().includes(normalizedSearch);
     });
-  }, [selectedStore, productSearchText, productCategoryFilter]);
+  }, [selectedStore, productSearchText, productCategoryFilter, productUsageFilter, groupedAffiliateProducts]);
 
   const totalProductPages = Math.ceil(filteredProducts.length / PRODUCTS_PER_PAGE);
   const pagedProducts = filteredProducts.slice(
@@ -633,6 +722,17 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
     loadStores();
     if (!token) return;
     return subscribeAdminPartnerStoresCache(loadStores);
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    setAffiliateSummaryLoading(true);
+    getAffiliateSummary(token)
+      .then((data) => { if (!cancelled) setAffiliateSummary(data); })
+      .catch(() => { if (!cancelled) setAffiliateSummary(null); })
+      .finally(() => { if (!cancelled) setAffiliateSummaryLoading(false); });
+    return () => { cancelled = true; };
   }, [token]);
 
   const resetForm = () => {
@@ -854,59 +954,75 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
           <Text style={styles.meta}>
             Contract: {formatDateKey(selectedStore.contractStartDate)} - {formatDateKey(selectedStore.contractEndDate)}
           </Text>
-          {!!selectedStore.merchant?.domain && (
-            <Text style={styles.meta}>Domeniu: {selectedStore.merchant.domain}</Text>
-          )}
-          {!!selectedStore.merchant?.affiliateNetwork && (
-            <Text style={styles.meta}>
-              Retea afiliere: {selectedStore.merchant.affiliateNetwork}
-            </Text>
-          )}
-          {!!selectedStore.currency && (
-            <Text style={styles.meta}>Moneda catalog: {selectedStore.currency}</Text>
-          )}
+          <View style={{ gap: 8 }}>
+            {!!selectedStore.merchant?.domain && (
+              <Pressable
+                style={[styles.secondaryButton, { borderColor: C.accent, backgroundColor: C.accentSoft }]}
+                onPress={() => Linking.openURL(`https://${selectedStore.merchant!.domain}`).catch(() => {})}
+              >
+                <Text style={[styles.secondaryButtonText, { color: C.accent }]}>Acceseaza magazin</Text>
+              </Pressable>
+            )}
 
-          <Pressable
-            style={styles.secondaryButton}
-            onPress={() => {
-              openEditStoreModal(selectedStore);
-              setSelectedStoreId(null);
-            }}
-          >
-            <Text style={styles.secondaryButtonText}>Editeaza magazinul</Text>
-          </Pressable>
+            <Pressable
+              style={styles.secondaryButton}
+              onPress={() => {
+                openEditStoreModal(selectedStore);
+                setSelectedStoreId(null);
+              }}
+            >
+              <Text style={styles.secondaryButtonText}>Editeaza magazinul</Text>
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Incasari afiliate</Text>
-          {selectedStore.affiliate?.commissionPercent ? (
-            <Text style={styles.meta}>
-              Comision configurat: {selectedStore.affiliate.commissionPercent}%
-            </Text>
-          ) : null}
+          <View style={styles.affiliateHeaderRow}>
+            <Text style={styles.cardTitle}>Incasari afiliate</Text>
+            {selectedStore.affiliate?.commissionPercent ? (
+              <View style={styles.affiliateCommissionBadge}>
+                <Text style={styles.affiliateCommissionBadgeText}>
+                  {selectedStore.affiliate.commissionPercent}% comision
+                </Text>
+              </View>
+            ) : null}
+          </View>
 
           {affiliateLoading ? (
             <ActivityIndicator style={{ marginTop: 12 }} />
+          ) : affiliateError ? (
+            <Text style={[styles.cardText, { color: 'red' }]}>
+              Eroare: {affiliateError}
+            </Text>
           ) : !affiliateStats || affiliateStats.conversions === 0 ? (
             <Text style={styles.cardText}>
-              Nicio conversie afiliata inregistrata pentru acest magazin.
-              Comisioanele apar dupa ce clientii marcheaza cadouri ca si cumparate
-              din produsele acestui magazin.
+              Nicio conversie afiliata inregistrata. Comisioanele apar dupa ce clientii
+              marcheaza cadouri ca si cumparate din produsele acestui magazin.
             </Text>
           ) : (
             <>
               <View style={styles.affiliateGrid}>
                 <View style={styles.affiliateTile}>
-                  <Text style={styles.affiliateTileLabel}>De incasat</Text>
+                  <Text style={styles.affiliateTileLabel}>Luna curentă</Text>
                   <Text style={[styles.affiliateTileValue, styles.affiliateValuePositive]}>
-                    {affiliateStats.totalExpected} RON
+                    {affiliateStats.currentMonthExpected} RON
                   </Text>
+                  <Text style={[styles.affiliateTileLabel, { marginTop: 2 }]}>acumulat în curs</Text>
                 </View>
                 <View style={styles.affiliateTile}>
-                  <Text style={styles.affiliateTileLabel}>In asteptare</Text>
-                  <Text style={styles.affiliateTileValue}>
-                    {affiliateStats.totalPending} RON
+                  <Text style={styles.affiliateTileLabel}>De virat</Text>
+                  <Text style={[styles.affiliateTileValue, affiliateStats.previousMonthsPending > 0 && styles.affiliateValuePending]}>
+                    {affiliateStats.previousMonthsPending} RON
                   </Text>
+                  {affiliateStats.daysUntilPayment !== null && affiliateStats.previousMonthsPending > 0 && (
+                    <Text style={[styles.affiliateTileLabel, { marginTop: 2 }]}>
+                      {affiliateStats.daysUntilPayment > 0
+                        ? `în ${affiliateStats.daysUntilPayment} zile`
+                        : affiliateStats.daysUntilPayment === 0
+                        ? 'scadent azi'
+                        : `întârziat ${Math.abs(affiliateStats.daysUntilPayment)} zile`}
+                    </Text>
+                  )}
                 </View>
                 <View style={styles.affiliateTile}>
                   <Text style={styles.affiliateTileLabel}>Incasat</Text>
@@ -919,37 +1035,83 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
                   <Text style={styles.affiliateTileValue}>
                     {affiliateStats.conversions}
                   </Text>
+                  <Text style={[styles.affiliateTileLabel, { marginTop: 2 }]}>{affiliateStats.paymentTermDays}z termen plată</Text>
                 </View>
               </View>
 
-              <Text style={[styles.cardTitle, { marginTop: 16, marginBottom: 8 }]}>
-                Produse cu comision
-              </Text>
-              {affiliateStats.products.map((product, index) => (
-                <View key={index} style={styles.affiliateProductRow}>
+              <Pressable
+                style={styles.affiliateExpandButton}
+                onPress={() => setAffiliateExpanded((v) => !v)}
+              >
+                <Text style={styles.affiliateExpandText}>
+                  Top {Math.min(10, groupedAffiliateProducts.length)} produse cu incasari
+                </Text>
+                <Text style={styles.affiliateExpandChevron}>
+                  {affiliateExpanded ? '▲' : '▼'}
+                </Text>
+              </Pressable>
+
+              {affiliateExpanded && groupedAffiliateProducts.slice(0, 10).map((group, index) => {
+                const catalogProduct = selectedStore.products.find(
+                  (p) => p.name?.toLowerCase().trim() === group.name.toLowerCase().trim()
+                );
+                return (
+                <Pressable
+                  key={group.name}
+                  style={styles.affiliateGroupRow}
+                  onPress={() => catalogProduct && setSelectedPriceProduct(catalogProduct)}
+                >
+                  <View style={styles.affiliateGroupRank}>
+                    <Text style={styles.affiliateGroupRankText}>{index + 1}</Text>
+                  </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.affiliateProductName}>{product.name}</Text>
+                    <Text style={styles.affiliateProductName} numberOfLines={1}>
+                      {group.name}
+                    </Text>
                     <Text style={styles.affiliateProductMeta}>
-                      Pret achizitie: {product.purchasePrice} RON · Comision: {product.commissionPercent}%
+                      {group.conversions} {group.conversions === 1 ? 'conversie' : 'conversii'} · {group.commissionPercent}%
                     </Text>
                   </View>
-                  <View style={styles.affiliateProductRight}>
+                  <View style={{ alignItems: 'flex-end' }}>
                     <Text style={[styles.affiliateProductAmount, styles.affiliateValuePositive]}>
-                      {product.expectedAmount} RON
+                      {group.totalExpected} RON
                     </Text>
-                    <Text style={[
-                      styles.affiliateProductStatus,
-                      product.status === 'received' && styles.affiliateValuePositive,
-                      product.status === 'pending' && styles.affiliateValuePending,
-                    ]}>
-                      {product.status === 'received' ? 'Incasat' : 'In asteptare'}
-                    </Text>
+                    <Text style={styles.affiliateProductMeta}>
+                    {catalogProduct ? 'Apasa pentru detalii →' : ''}
+                  </Text>
                   </View>
-                </View>
-              ))}
+                </Pressable>
+                );
+              })}
             </>
           )}
         </View>
+
+        {(() => {
+          const pi = (selectedStore as any).promotionIndicator;
+          if (!pi?.hasPromotion || !pi.code) return null;
+          const endDate = pi.duration?.endDate;
+          const endFmt = endDate ? (() => {
+            const d = /^\d{2}-\d{2}-\d{4}$/.test(endDate)
+              ? new Date(endDate.split('-').reverse().join('-'))
+              : new Date(endDate);
+            return isNaN(d.getTime()) ? null : `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
+          })() : null;
+          return (
+            <View style={styles.adminPromoBanner}>
+              <View style={styles.adminPromoBannerHeader}>
+                <Text style={styles.adminPromoBannerTitle}>🏷 Promoție activă: -{pi.discountPercent}% cod {pi.code}</Text>
+                <Text style={styles.adminPromoBannerBadge}>
+                {endFmt ? `până ${endFmt}` : 'Promoție permanentă'}
+              </Text>
+              </View>
+              {pi.hasMinimumOrderValue && pi.minimumOrderValue && (
+                <Text style={styles.adminPromoBannerDetail}>Cos minim: {pi.minimumOrderValue} {pi.currency || 'RON'}</Text>
+              )}
+              {pi.note && <Text style={styles.adminPromoBannerNote}>{pi.note}</Text>}
+            </View>
+          );
+        })()}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Catalog produse</Text>
@@ -975,14 +1137,14 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
 
           {!!importError && <Text style={styles.errorText}>{importError}</Text>}
 
-          {!!selectedStore.lastImportName && (
+          {!!selectedStore.updatedAt && (
             <Text style={styles.helperText}>
-              Ultimul import: {selectedStore.lastImportName}
+              Ultimul import: {formatImportDate(selectedStore.updatedAt)}
             </Text>
           )}
 
           <Text style={styles.productsSummary}>
-            Produse interpretate: {selectedStore.products.length}
+            Total produse: {selectedStore.products.length}
           </Text>
 
           <View style={styles.productFiltersRow}>
@@ -1005,9 +1167,26 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
               value={productCategoryFilter}
               onChange={(item) => setProductCategoryFilter(item.value)}
             />
+            <Dropdown
+              style={[styles.dropdown, styles.productCategoryDropdown]}
+              containerStyle={styles.dropdownContainer}
+              placeholderStyle={styles.dropdownPlaceholder}
+              selectedTextStyle={styles.dropdownSelectedText}
+              data={[
+                { label: 'Toate produsele', value: 'all' },
+                { label: 'Utilizate in liste de cadouri', value: 'used' },
+                { label: 'Neutilizate in liste de cadouri', value: 'unused' },
+              ]}
+              maxHeight={200}
+              labelField="label"
+              valueField="value"
+              placeholder="Toate produsele"
+              value={productUsageFilter}
+              onChange={(item) => setProductUsageFilter(item.value)}
+            />
           </View>
 
-          {(productSearchText.trim() || productCategoryFilter !== 'all') && (
+          {(productSearchText.trim() || productCategoryFilter !== 'all' || productUsageFilter !== 'all') && (
             <Text style={styles.productFilterCount}>
               {filteredProducts.length} produse gasite
             </Text>
@@ -1042,13 +1221,21 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
                     Stoc: {product.availability.stockStatus}
                   </Text>
                 )}
-                {!!product.productUrl && (
-                  <Text style={styles.productMeta}>Product URL: {product.productUrl}</Text>
-                )}
-                {!!product.affiliateUrl && (
-                  <Text style={styles.productLinkText}>Link afiliat activ</Text>
-                )}
-                <Text style={styles.productHistoryText}>Vezi evolutia pretului</Text>
+                {(() => {
+                  const pi = (selectedStore as any).promotionIndicator;
+                  const effectivePromo = product.promo?.code ? product.promo : (pi?.hasPromotion ? pi : null);
+                  if (!effectivePromo?.code && !effectivePromo?.discountPercent) return null;
+                  const pct = effectivePromo.discountPercent;
+                  const code = effectivePromo.code || pi?.code;
+                  const minOrder = effectivePromo.minimumOrderValue ?? (pi?.hasMinimumOrderValue ? pi?.minimumOrderValue : null);
+                  return (
+                    <View style={styles.adminProductPromoRow}>
+                      <Text style={styles.adminProductPromoTag}>-{pct}% {code}</Text>
+                      {minOrder ? <Text style={styles.adminProductPromoMin}>min. {minOrder} RON</Text> : null}
+                    </View>
+                  );
+                })()}
+                <Text style={styles.productHistoryText}>Detalii produs</Text>
               </View>
               <View style={styles.priceBlock}>
                 {product.price?.current !== undefined && Number.isFinite(product.price.current) && (
@@ -1070,27 +1257,55 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
             </Pressable>
           ))}
 
-          {totalProductPages > 1 && (
-            <View style={styles.paginationRow}>
-              <Pressable
-                style={[styles.paginationButton, productPage === 0 && styles.paginationButtonDisabled]}
-                onPress={() => setProductPage((p) => Math.max(0, p - 1))}
-                disabled={productPage === 0}
-              >
-                <Text style={styles.paginationButtonText}>{'<'}</Text>
-              </Pressable>
-              <Text style={styles.paginationInfo}>
-                {productPage + 1} / {totalProductPages}
-              </Text>
-              <Pressable
-                style={[styles.paginationButton, productPage >= totalProductPages - 1 && styles.paginationButtonDisabled]}
-                onPress={() => setProductPage((p) => Math.min(totalProductPages - 1, p + 1))}
-                disabled={productPage >= totalProductPages - 1}
-              >
-                <Text style={styles.paginationButtonText}>{'>'}</Text>
-              </Pressable>
-            </View>
-          )}
+          {totalProductPages > 1 && (() => {
+            const pages: (number | '...')[] = [];
+            if (totalProductPages <= 7) {
+              for (let i = 0; i < totalProductPages; i++) pages.push(i);
+            } else {
+              pages.push(0);
+              if (productPage > 2) pages.push('...');
+              for (let i = Math.max(1, productPage - 1); i <= Math.min(totalProductPages - 2, productPage + 1); i++) {
+                pages.push(i);
+              }
+              if (productPage < totalProductPages - 3) pages.push('...');
+              pages.push(totalProductPages - 1);
+            }
+            return (
+              <View style={styles.paginationRow}>
+                <Pressable
+                  style={[styles.paginationButton, productPage === 0 && styles.paginationButtonDisabled]}
+                  onPress={() => setProductPage((p) => Math.max(0, p - 1))}
+                  disabled={productPage === 0}
+                >
+                  <Text style={styles.paginationButtonText}>‹ Inapoi</Text>
+                </Pressable>
+
+                {pages.map((p, i) =>
+                  p === '...' ? (
+                    <Text key={`ellipsis-${i}`} style={styles.paginationEllipsis}>…</Text>
+                  ) : (
+                    <Pressable
+                      key={p}
+                      style={[styles.paginationPageBtn, p === productPage && styles.paginationPageBtnActive]}
+                      onPress={() => setProductPage(p)}
+                    >
+                      <Text style={[styles.paginationPageText, p === productPage && styles.paginationPageTextActive]}>
+                        {p + 1}
+                      </Text>
+                    </Pressable>
+                  )
+                )}
+
+                <Pressable
+                  style={[styles.paginationButton, productPage >= totalProductPages - 1 && styles.paginationButtonDisabled]}
+                  onPress={() => setProductPage((p) => Math.min(totalProductPages - 1, p + 1))}
+                  disabled={productPage >= totalProductPages - 1}
+                >
+                  <Text style={styles.paginationButtonText}>Inainte ›</Text>
+                </Pressable>
+              </View>
+            );
+          })()}
         </View>
 
         <Modal
@@ -1107,12 +1322,23 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
               <View style={styles.handle} />
 
               <ScrollView contentContainerStyle={styles.modalBody}>
-                <Text style={styles.modalTitle}>
-                  {selectedPriceProduct?.name || 'Istoric pret'}
-                </Text>
-                {!!selectedPriceProduct?.brand && (
-                  <Text style={styles.meta}>Brand: {selectedPriceProduct.brand}</Text>
-                )}
+                <View style={styles.modalProductHeader}>
+                  {!!selectedPriceProduct?.imageUrl && (
+                    <Image
+                      source={{ uri: selectedPriceProduct.imageUrl }}
+                      style={styles.modalProductImage}
+                      resizeMode="contain"
+                    />
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.modalTitle}>
+                      {selectedPriceProduct?.name || 'Istoric pret'}
+                    </Text>
+                    {!!selectedPriceProduct?.brand && (
+                      <Text style={styles.meta}>Brand: {selectedPriceProduct.brand}</Text>
+                    )}
+                  </View>
+                </View>
 
                 {selectedPriceHistory ? (
                   <>
@@ -1122,15 +1348,6 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
                         <Text style={styles.statValue}>
                           {formatMoney(
                             selectedPriceHistory.latestPrice,
-                            selectedStore.currency || 'RON'
-                          )}
-                        </Text>
-                      </View>
-                      <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Pret original</Text>
-                        <Text style={styles.statValue}>
-                          {formatMoney(
-                            selectedPriceHistory.latestOriginalPrice,
                             selectedStore.currency || 'RON'
                           )}
                         </Text>
@@ -1171,38 +1388,48 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
                         </Text>
                       </View>
                       <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Pret mediu</Text>
+                        <Text style={styles.statLabel}>Pret la primul import</Text>
                         <Text style={styles.statValue}>
                           {formatMoney(
-                            selectedPriceHistory.averagePrice,
+                            selectedPriceHistory.latestOriginalPrice,
                             selectedStore.currency || 'RON'
                           )}
                         </Text>
                       </View>
-                      <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Ultima schimbare</Text>
-                        <Text style={styles.statValue}>
-                          {selectedPriceHistory.lastPriceChangeDirection === 'new'
-                            ? 'Produs nou'
-                            : selectedPriceHistory.lastPriceChangeDirection === 'same'
-                            ? 'Fara schimbare'
-                            : `${selectedPriceHistory.lastPriceChangeDirection === 'down' ? '-' : '+'}${formatMoney(
-                                Math.abs(selectedPriceHistory.lastPriceChangeAmount),
-                                selectedStore.currency || 'RON'
-                              )}`}
-                        </Text>
-                      </View>
                     </View>
 
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
+                    {chartAvailableYears.length >= 1 && (
+                      <View style={styles.chartYearFilterRow}>
+                        <Pressable
+                          style={[styles.chartYearBtn, chartYearFilter === 'all' && styles.chartYearBtnActive]}
+                          onPress={() => setChartYearFilter('all')}
+                        >
+                          <Text style={[styles.chartYearBtnText, chartYearFilter === 'all' && styles.chartYearBtnTextActive]}>
+                            Toti anii
+                          </Text>
+                        </Pressable>
+                        {chartAvailableYears.map((year) => (
+                          <Pressable
+                            key={year}
+                            style={[styles.chartYearBtn, chartYearFilter === year && styles.chartYearBtnActive]}
+                            onPress={() => setChartYearFilter(year)}
+                          >
+                            <Text style={[styles.chartYearBtnText, chartYearFilter === year && styles.chartYearBtnTextActive]}>
+                              {year}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
+
+                    <View
                       style={styles.priceChartScroll}
+                      onLayout={(e) => setChartContainerWidth(e.nativeEvent.layout.width)}
                     >
                       <View
                         style={[
                           styles.priceLineChart,
-                          { width: PRICE_CHART_WIDTH, height: PRICE_CHART_HEIGHT },
+                          { width: chartContainerWidth, height: PRICE_CHART_HEIGHT },
                         ]}
                       >
                         <View style={styles.priceChartTitleBlock}>
@@ -1217,7 +1444,7 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
                         <View style={styles.priceLineChartYAxis}>
                           {[
                             priceChartData.max,
-                            Math.round((priceChartData.max + priceChartData.min) / 2),
+                            priceChartData.mid,
                             priceChartData.min,
                           ].map((value, index) => (
                             <Text
@@ -1231,7 +1458,7 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
 
                         <View style={styles.priceLineChartPlot}>
                           <View style={styles.priceLineChartYAxisLine} />
-                          <View style={styles.priceLineChartXAxisLine} />
+                          <View style={[styles.priceLineChartXAxisLine, { width: priceChartData.plotWidth }]} />
 
                           {priceChartData.segments.map((segment) => (
                             <View
@@ -1284,127 +1511,76 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
                           ))}
                         </View>
                       </View>
-                    </ScrollView>
+                    </View>
 
                     <View style={styles.usageBox}>
                       <Text style={styles.productsSummary}>Folosire in liste cadouri</Text>
-
-                      <View style={styles.usageFiltersRow}>
-                        <Dropdown
-                          style={[styles.dropdown, styles.usageDropdown]}
-                          containerStyle={styles.dropdownContainer}
-                          placeholderStyle={styles.dropdownPlaceholder}
-                          selectedTextStyle={styles.dropdownSelectedText}
-                          data={usagePurposeOptions}
-                          maxHeight={240}
-                          labelField="label"
-                          valueField="value"
-                          placeholder="Scop cadou"
-                          value={usagePurposeFilter}
-                          onChange={(item) => setUsagePurposeFilter(item.value)}
-                        />
-
-                        <Dropdown
-                          style={[styles.dropdown, styles.usageDropdown]}
-                          containerStyle={styles.dropdownContainer}
-                          placeholderStyle={styles.dropdownPlaceholder}
-                          selectedTextStyle={styles.dropdownSelectedText}
-                          data={usageYearOptions}
-                          maxHeight={240}
-                          labelField="label"
-                          valueField="value"
-                          placeholder="An"
-                          value={usageYearFilter}
-                          onChange={(item) => setUsageYearFilter(item.value)}
-                        />
-                      </View>
 
                       {usageLoading ? (
                         <View style={styles.usageLoadingRow}>
                           <ActivityIndicator />
                           <Text style={styles.productMeta}>
-                            Se calculeaza statisticile din liste...
+                            Se calculeaza statisticile...
                           </Text>
                         </View>
                       ) : usageError ? (
                         <Text style={styles.errorText}>{usageError}</Text>
                       ) : (
-                        <>
-                          <View style={styles.statsGrid}>
-                            <View style={styles.statBox}>
-                              <Text style={styles.statLabel}>Adaugat in liste</Text>
-                              <Text style={styles.statValue}>
-                                {filteredUsageOccurrences.length}
-                              </Text>
-                            </View>
-                            <View style={styles.statBox}>
-                              <Text style={styles.statLabel}>
-                                Cumparat de pe acest magazin
-                              </Text>
-                              <Text style={styles.statValueSuccess}>
-                                {filteredPurchasedFromThisStoreCount}
-                              </Text>
-                            </View>
-                            <View style={styles.statBox}>
-                              <Text style={styles.statLabel}>
-                                Adaugat, dar necumparat de aici
-                              </Text>
-                              <Text style={styles.statValueDanger}>
-                                {filteredAddedWithoutPurchaseFromThisStoreCount}
-                              </Text>
-                            </View>
-                          </View>
-
-                          {filteredUsageOccurrences.length === 0 ? (
-                            <Text style={styles.cardText}>
-                              Produsul nu apare in liste pentru filtrele selectate.
+                        <View style={styles.statsGrid}>
+                          <View style={styles.statBox}>
+                            <Text style={styles.statLabel}>In lista</Text>
+                            <Text style={styles.statValue}>
+                              {filteredUsageOccurrences.length}
                             </Text>
-                          ) : (
-                            filteredUsageOccurrences.slice(0, 12).map((occurrence, index) => (
-                              <View
-                                key={`${occurrence.giftPlanId}-${occurrence.addedAt}-${index}`}
-                                style={styles.usageRow}
-                              >
-                                <View style={styles.productInfo}>
-                                  <Text style={styles.priceHistoryDate}>
-                                    {occurrence.purpose || 'Cadou'}
-                                    {occurrence.year ? ` - ${occurrence.year}` : ''}
-                                  </Text>
-                                  <Text style={styles.productMeta}>
-                                    Status: {occurrence.status} | Pret lista:{' '}
-                                    {formatMoney(
-                                      occurrence.price,
-                                      selectedStore.currency || 'RON'
-                                    )}
-                                  </Text>
-                                  {!!occurrence.purchasedAt && (
-                                    <Text style={styles.productMeta}>
-                                      Cumparat pe {formatImportDate(occurrence.purchasedAt)}
-                                      {occurrence.purchasedStoreName
-                                        ? ` de la ${occurrence.purchasedStoreName}`
-                                        : ''}
-                                    </Text>
-                                  )}
-                                </View>
-                                <Text
-                                  style={[
-                                    styles.usageBadge,
-                                    occurrence.purchasedFromThisStore
-                                      ? styles.usageBadgeSuccess
-                                      : styles.usageBadgeMuted,
-                                  ]}
-                                >
-                                  {occurrence.purchasedFromThisStore
-                                    ? 'Cumparat aici'
-                                    : 'Necumparat aici'}
-                                </Text>
-                              </View>
-                            ))
-                          )}
-                        </>
+                          </View>
+                          <View style={styles.statBox}>
+                            <Text style={styles.statLabel}>Conversii magazin</Text>
+                            <Text style={styles.statValueSuccess}>
+                              {filteredPurchasedFromThisStoreCount}
+                            </Text>
+                          </View>
+                        </View>
                       )}
                     </View>
 
+                  {(() => {
+                    const key = selectedPriceProduct?.name?.toLowerCase().trim();
+                    const group = key ? groupedAffiliateProducts.find(
+                      (g) => g.name.toLowerCase().trim() === key
+                    ) : null;
+                    const hasAffiliateProgram = !!(selectedPriceProduct as any)?.affiliate?.commissionPercent;
+                    if (!group) {
+                      if (!hasAffiliateProgram) return null;
+                      return (
+                        <View style={styles.usageBox}>
+                          <Text style={styles.productsSummary}>Incasari marketing afiliat</Text>
+                          <Text style={styles.cardText}>
+                            Produsul nu a fost inclus inca intr-o lista de cadouri. Comisioanele vor aparea dupa ce clientii adauga si cumpara acest produs.
+                          </Text>
+                        </View>
+                      );
+                    }
+                    const totalPending = Math.round((group.totalExpected - group.totalReceived) * 100) / 100;
+                    return (
+                      <View style={styles.usageBox}>
+                        <Text style={styles.productsSummary}>Incasari marketing afiliat</Text>
+                        <View style={styles.affiliateGrid}>
+                          <View style={styles.affiliateTile}>
+                            <Text style={styles.affiliateTileLabel}>In asteptare</Text>
+                            <Text style={[styles.affiliateTileValue, styles.affiliateValuePending]}>
+                              {totalPending} RON
+                            </Text>
+                          </View>
+                          <View style={styles.affiliateTile}>
+                            <Text style={styles.affiliateTileLabel}>Incasari</Text>
+                            <Text style={[styles.affiliateTileValue, group.totalReceived > 0 && styles.affiliateValuePositive]}>
+                              {group.totalReceived} RON
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })()}
                   </>
                 ) : (
                   <Text style={styles.cardText}>
@@ -1457,39 +1633,168 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
         <Text style={styles.primaryButtonText}>+ Adauga magazin partener</Text>
       </Pressable>
 
-      <View style={styles.filtersCard}>
-        <TextInput
-          placeholder="Cauta dupa magazin sau CUI"
-          style={styles.searchInput}
-          value={searchText}
-          onChangeText={setSearchText}
-        />
+      {affiliateSummaryLoading ? (
+        <View style={styles.card}>
+          <ActivityIndicator />
+        </View>
+      ) : affiliateSummary && affiliateSummary.totals.conversions > 0 ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Incasari marketing afiliat</Text>
+          <View style={styles.affiliateGrid}>
+            <View style={styles.affiliateTile}>
+              <Text style={styles.affiliateTileLabel}>Luna curentă</Text>
+              <Text style={[styles.affiliateTileValue, styles.affiliateValuePositive]}>
+                {affiliateSummary.totals.currentMonthExpected} RON
+              </Text>
+              <Text style={[styles.affiliateTileLabel, { marginTop: 2 }]}>acumulat în curs</Text>
+            </View>
+            <View style={styles.affiliateTile}>
+              <Text style={styles.affiliateTileLabel}>De virat</Text>
+              <Text style={[styles.affiliateTileValue, affiliateSummary.totals.previousMonthsPending > 0 && styles.affiliateValuePending]}>
+                {affiliateSummary.totals.previousMonthsPending} RON
+              </Text>
+              {affiliateSummary.totals.daysUntilPayment !== null && affiliateSummary.totals.previousMonthsPending > 0 && (
+                <Text style={[styles.affiliateTileLabel, { marginTop: 2 }]}>
+                  {affiliateSummary.totals.daysUntilPayment > 0
+                    ? `în ${affiliateSummary.totals.daysUntilPayment} zile`
+                    : affiliateSummary.totals.daysUntilPayment === 0
+                    ? 'scadent azi'
+                    : `întârziat ${Math.abs(affiliateSummary.totals.daysUntilPayment)} zile`}
+                </Text>
+              )}
+            </View>
+            <View style={styles.affiliateTile}>
+              <Text style={styles.affiliateTileLabel}>Incasari</Text>
+              <Text style={[styles.affiliateTileValue, affiliateSummary.totals.totalReceived > 0 && styles.affiliateValuePositive]}>
+                {affiliateSummary.totals.totalReceived} RON
+              </Text>
+            </View>
+            <View style={styles.affiliateTile}>
+              <Text style={styles.affiliateTileLabel}>Conversii totale</Text>
+              <Text style={styles.affiliateTileValue}>
+                {affiliateSummary.totals.conversions}
+              </Text>
+            </View>
+          </View>
+          <View style={[styles.affiliateHeaderRow, { marginTop: 14 }]}>
+            <Text style={styles.cardTitle}>Pe magazine</Text>
+            {affiliateSummary.stores.length > 3 && (
+              <Pressable onPress={() => setAffiliateSummaryModalVisible(true)}>
+                <Text style={[styles.affiliateDetailButtonText, { fontSize: 13 }]}>
+                  Vezi toate ({affiliateSummary.stores.length}) ↗
+                </Text>
+              </Pressable>
+            )}
+          </View>
+          {[...affiliateSummary.stores]
+            .sort((a, b) => b.totalExpected - a.totalExpected)
+            .slice(0, 3)
+            .map((s) => (
+              <Pressable
+                key={s.storeId}
+                style={styles.affiliateProductRow}
+                onPress={() => setSelectedStoreId(s.storeId)}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.affiliateProductName}>{s.storeName}</Text>
+                  <Text style={styles.affiliateProductMeta}>
+                    {s.conversions} {s.conversions === 1 ? 'conversie' : 'conversii'} · {s.commissionPercent}%
+                  </Text>
+                </View>
+                <View style={styles.affiliateProductRight}>
+                  <Text style={[styles.affiliateProductAmount, styles.affiliateValuePositive]}>
+                    {s.totalExpected} RON
+                  </Text>
+                  <Text style={styles.affiliateProductMeta}>Vezi magazin →</Text>
+                </View>
+              </Pressable>
+            ))}
 
-        <Dropdown
-          style={styles.dropdown}
-          containerStyle={styles.dropdownContainer}
-          placeholderStyle={styles.dropdownPlaceholder}
-          selectedTextStyle={styles.dropdownSelectedText}
-          data={categoryOptions}
-          maxHeight={260}
-          labelField="label"
-          valueField="value"
-          placeholder="Filtreaza dupa categorie"
-          value={selectedCategory}
-          onChange={(item) => setSelectedCategory(item.value)}
-        />
-
-        {(searchText.trim() || selectedCategory !== 'all') && (
-          <Pressable
-            style={styles.clearFiltersButton}
-            onPress={() => {
-              setSearchText('');
-              setSelectedCategory('all');
-            }}
+          <Modal
+            visible={affiliateSummaryModalVisible}
+            animationType="slide"
+            transparent
+            onRequestClose={() => setAffiliateSummaryModalVisible(false)}
           >
-            <Text style={styles.clearFiltersText}>Curata filtrele</Text>
-          </Pressable>
-        )}
+            <View style={styles.overlay} {...getModalBackdropResponder(() => setAffiliateSummaryModalVisible(false))}>
+              <View style={styles.modalCard}>
+                <View style={styles.handle} />
+                <ScrollView contentContainerStyle={styles.modalBody}>
+                  <Text style={styles.modalTitle}>Incasari pe magazine</Text>
+                  <Text style={styles.meta}>Sortate descrescator dupa valoarea estimata</Text>
+                  {[...affiliateSummary.stores]
+                    .sort((a, b) => b.totalExpected - a.totalExpected)
+                    .map((s, index) => (
+                      <Pressable
+                        key={s.storeId}
+                        style={styles.affiliateProductRow}
+                        onPress={() => { setAffiliateSummaryModalVisible(false); setSelectedStoreId(s.storeId); }}
+                      >
+                        <View style={[styles.affiliateGroupRank, { marginRight: 10 }]}>
+                          <Text style={styles.affiliateGroupRankText}>{index + 1}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.affiliateProductName}>{s.storeName}</Text>
+                          <Text style={styles.affiliateProductMeta}>
+                            {s.conversions} {s.conversions === 1 ? 'conversie' : 'conversii'} · {s.commissionPercent}%
+                          </Text>
+                        </View>
+                        <View style={styles.affiliateProductRight}>
+                          <Text style={[styles.affiliateProductAmount, styles.affiliateValuePositive]}>
+                            {s.totalExpected} RON
+                          </Text>
+                          <Text style={[styles.affiliateProductMeta, { color: C.accent }]}>→</Text>
+                        </View>
+                      </Pressable>
+                    ))}
+                </ScrollView>
+                <Pressable
+                  style={[styles.secondaryButton, { margin: 16 }]}
+                  onPress={() => setAffiliateSummaryModalVisible(false)}
+                >
+                  <Text style={styles.secondaryButtonText}>Inchide</Text>
+                </Pressable>
+              </View>
+            </View>
+          </Modal>
+        </View>
+      ) : null}
+
+      <View style={styles.stickyFiltersWrapper}>
+        <View style={styles.filtersCard}>
+          <TextInput
+            placeholder="Cauta dupa magazin sau CUI"
+            style={styles.searchInput}
+            value={searchText}
+            onChangeText={setSearchText}
+          />
+
+          <Dropdown
+            style={styles.dropdown}
+            containerStyle={styles.dropdownContainer}
+            placeholderStyle={styles.dropdownPlaceholder}
+            selectedTextStyle={styles.dropdownSelectedText}
+            data={categoryOptions}
+            maxHeight={260}
+            labelField="label"
+            valueField="value"
+            placeholder="Filtreaza dupa categorie"
+            value={selectedCategory}
+            onChange={(item) => setSelectedCategory(item.value)}
+          />
+
+          {(searchText.trim() || selectedCategory !== 'all') && (
+            <Pressable
+              style={styles.clearFiltersButton}
+              onPress={() => {
+                setSearchText('');
+                setSelectedCategory('all');
+              }}
+            >
+              <Text style={styles.clearFiltersText}>Curata filtrele</Text>
+            </Pressable>
+          )}
+        </View>
       </View>
 
       {stores.length === 0 ? (
@@ -1795,6 +2100,15 @@ const styles = StyleSheet.create({
     color: C.textDim,
     marginBottom: 14,
   },
+  stickyFiltersWrapper: {
+    position: 'sticky' as any,
+    top: 0,
+    zIndex: 10,
+    backgroundColor: C.bg,
+    paddingVertical: 4,
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
+  },
   filtersCard: {
     padding: 14,
     borderRadius: R.xl,
@@ -1980,6 +2294,20 @@ const styles = StyleSheet.create({
   modalBody: {
     padding: 16,
   },
+  modalProductHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 16,
+    marginBottom: 16,
+  },
+  modalProductImage: {
+    width: 100,
+    height: 100,
+    borderRadius: R.md,
+    backgroundColor: C.surface2,
+    borderWidth: 0.5,
+    borderColor: C.border,
+  },
   modalTitle: {
     fontSize: 24,
     fontFamily: 'serif',
@@ -2070,6 +2398,67 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 4,
   },
+  adminPromoBanner: {
+    backgroundColor: '#fff8e1',
+    borderWidth: 1,
+    borderColor: '#f9a825',
+    borderRadius: R.md,
+    padding: 12,
+    marginBottom: 8,
+    gap: 4,
+  },
+  adminPromoBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  adminPromoBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#e65100',
+    flex: 1,
+  },
+  adminPromoBannerBadge: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#e65100',
+    backgroundColor: '#ffe0b2',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: R.sm,
+  },
+  adminPromoBannerDetail: {
+    fontSize: 13,
+    color: '#6d4c41',
+  },
+  adminPromoBannerNote: {
+    fontSize: 11,
+    color: C.textDim,
+    fontStyle: 'italic',
+  },
+  adminProductPromoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 3,
+    marginBottom: 2,
+  },
+  adminProductPromoTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#e65100',
+    backgroundColor: '#fff3e0',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: R.xs,
+  },
+  adminProductPromoMin: {
+    fontSize: 10,
+    color: C.textDim,
+    fontStyle: 'italic',
+  },
   priceBlock: {
     alignItems: 'flex-end',
     maxWidth: 96,
@@ -2137,6 +2526,32 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
   },
+  chartYearFilterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+    flexWrap: 'wrap',
+  },
+  chartYearBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: R.sm,
+    backgroundColor: C.surface2,
+    borderWidth: 0.5,
+    borderColor: C.border,
+  },
+  chartYearBtnActive: {
+    backgroundColor: C.accent,
+    borderColor: C.accent,
+  },
+  chartYearBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.textDim,
+  },
+  chartYearBtnTextActive: {
+    color: '#fff',
+  },
   priceChartScroll: {
     marginVertical: 12,
   },
@@ -2149,8 +2564,8 @@ const styles = StyleSheet.create({
   },
   priceChartTitleBlock: {
     position: 'absolute',
-    left: 22,
-    top: 18,
+    left: PRICE_CHART_LEFT + 10,
+    top: 12,
   },
   priceLineChartTitle: {
     color: C.text,
@@ -2166,12 +2581,12 @@ const styles = StyleSheet.create({
   },
   priceLineChartYAxis: {
     position: 'absolute',
-    left: 14,
+    left: 4,
     top: PRICE_CHART_TOP - 7,
     height: PRICE_CHART_PLOT_HEIGHT + 14,
     justifyContent: 'space-between',
     alignItems: 'flex-end',
-    width: 40,
+    width: PRICE_CHART_LEFT - 8,
   },
   priceLineChartAxisText: {
     color: C.textDim,
@@ -2211,34 +2626,38 @@ const styles = StyleSheet.create({
   priceLineChartPointWrap: {
     position: 'absolute',
     alignItems: 'center',
-    width: 48,
+    width: 60,
   },
   priceLineChartPoint: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     backgroundColor: C.accent,
+    borderWidth: 2,
+    borderColor: C.surface,
   },
   priceLineChartPointValue: {
     color: C.text,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
-    marginTop: 4,
+    marginTop: 3,
+    backgroundColor: C.surface,
+    paddingHorizontal: 2,
   },
   priceLineChartXLabel: {
     position: 'absolute',
-    top: PRICE_CHART_TOP + PRICE_CHART_PLOT_HEIGHT + 18,
+    top: PRICE_CHART_TOP + PRICE_CHART_PLOT_HEIGHT + 22,
     width: 60,
     alignItems: 'center',
   },
   priceLineChartMonth: {
     color: C.textDim,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
   },
   priceLineChartYear: {
     color: C.textFaint,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     marginTop: 2,
   },
@@ -2324,6 +2743,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    flexWrap: 'wrap',
     gap: 16,
     marginTop: 16,
     paddingTop: 12,
@@ -2331,18 +2751,46 @@ const styles = StyleSheet.create({
     borderTopColor: C.border,
   },
   paginationButton: {
-    backgroundColor: C.accent,
-    borderRadius: R.pill,
-    paddingHorizontal: 18,
-    paddingVertical: 9,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: R.sm,
+    backgroundColor: C.surface2,
+    borderWidth: 0.5,
+    borderColor: C.border,
   },
   paginationButtonDisabled: {
-    backgroundColor: C.surface2,
+    opacity: 0.35,
   },
   paginationButtonText: {
-    color: C.accentInk,
+    color: C.text,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  paginationPageBtn: {
+    minWidth: 34,
+    height: 34,
+    borderRadius: R.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  paginationPageBtnActive: {
+    backgroundColor: C.accent,
+  },
+  paginationPageText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: C.textDim,
+  },
+  paginationPageTextActive: {
+    color: '#fff',
     fontWeight: '700',
-    fontSize: 15,
+  },
+  paginationEllipsis: {
+    fontSize: 14,
+    color: C.textDim,
+    paddingHorizontal: 4,
+    alignSelf: 'center',
   },
   paginationInfo: {
     color: C.text,
@@ -2410,6 +2858,104 @@ const styles = StyleSheet.create({
   affiliateProductStatus: {
     fontSize: 12,
     marginTop: 2,
+    color: C.textDim,
+  },
+  affiliateHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  affiliateCommissionBadge: {
+    backgroundColor: C.accentSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: R.sm,
+  },
+  affiliateCommissionBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.accent,
+  },
+  affiliateExpandButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 0.5,
+    borderTopColor: C.border,
+  },
+  affiliateExpandText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: C.text,
+  },
+  affiliateExpandChevron: {
+    fontSize: 12,
+    color: C.textDim,
+  },
+  affiliateGroupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    borderTopWidth: 0.5,
+    borderTopColor: C.border,
+  },
+  affiliateGroupRank: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: C.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  affiliateGroupRankText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.textDim,
+  },
+  affiliateDetailButton: {
+    backgroundColor: C.accentSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: R.sm,
+    marginTop: 4,
+  },
+  affiliateDetailButtonText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: C.accent,
+  },
+  productActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 4,
+  },
+  affiliateEntryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderTopWidth: 0.5,
+    borderTopColor: C.border,
+    gap: 10,
+  },
+  affiliateStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: R.sm,
+  },
+  affiliateStatusReceived: {
+    backgroundColor: C.sageBg,
+  },
+  affiliateStatusPending: {
+    backgroundColor: C.surface2,
+  },
+  affiliateStatusText: {
+    fontSize: 11,
+    fontWeight: '600',
     color: C.textDim,
   },
 });

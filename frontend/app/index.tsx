@@ -259,9 +259,9 @@ function IndexContent() {
         ) : !profile ? (
           <GuestHome onOpenAuth={() => setAuthModalVisible(true)} />
         ) : profile.role === 'client' ? (
-          <ClientDashboard firstName={profile.firstName} onLogout={logout} />
+          <ClientDashboard firstName={profile.firstName} lastName={(profile as any).lastName} userGender={(profile as any).gender} onLogout={logout} />
         ) : (
-          <AdminDashboard firstName={profile.firstName} onLogout={logout} />
+          <AdminDashboard firstName={profile.firstName} lastName={(profile as any).lastName} onLogout={logout} />
         )}
       </View>
 
