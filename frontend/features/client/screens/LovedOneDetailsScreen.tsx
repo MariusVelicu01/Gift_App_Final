@@ -4052,7 +4052,7 @@ export default function LovedOneDetailsScreen({
                       style={[styles.detailTab, styles.aiHelpTab]}
                       onPress={() => openAiHelpModal(visibleSelectedGiftPlan)}
                     >
-                      <Text style={styles.aiHelpButtonText}>Ajutor AI</Text>
+                      <Text style={styles.aiHelpButtonText}>GiftBot</Text>
                     </Pressable>
                   </>
                 )}
@@ -4535,7 +4535,7 @@ export default function LovedOneDetailsScreen({
               <Text style={styles.confirmText}>
                 Lista este goala, asa ca nu ai ce marca drept cumparat. Poti
                 cauta manual produse din magazinele partenere sau poti porni
-                Ajutor AI ca sa primesti un punct de plecare.
+                GiftBot ca să primești un punct de plecare.
               </Text>
 
               <Pressable
@@ -4558,7 +4558,7 @@ export default function LovedOneDetailsScreen({
                 }}
               >
                 <Text style={styles.saveGiftButtonText}>
-                  Cauta cu Ajutor AI
+                  Cauta cu GiftBot
                 </Text>
               </Pressable>
 
@@ -5120,193 +5120,6 @@ export default function LovedOneDetailsScreen({
         </Modal>
 
         <Modal
-          visible={budgetModalVisible}
-          animationType="fade"
-          transparent
-          onRequestClose={closeBudgetModal}
-        >
-          <View
-            style={styles.modalOverlay}
-            {...getModalBackdropResponder(closeTopModal)}
-          >
-            <View style={styles.confirmModalCard}>
-              <Text style={styles.modalTitle}>Modifica bugetul</Text>
-              <Text style={styles.confirmText}>
-                Total produse acum:{' '}
-                {formatMoney(selectedGiftProductsTotal, selectedGiftCurrency)}.
-                Poti seta orice buget pozitiv, chiar daca produsele se incadreaza
-                deja in suma curenta.
-              </Text>
-
-              {!!budgetError && (
-                <Text style={styles.giftErrorText}>{budgetError}</Text>
-              )}
-
-              <Text style={styles.modalLabel}>Buget nou</Text>
-              <TextInput
-                placeholder="Introdu suma"
-                style={styles.modalInput}
-                keyboardType="numeric"
-                value={budgetInput}
-                onChangeText={(value) => {
-                  setBudgetInput(value.replace(/[^0-9]/g, ''));
-                  setBudgetError('');
-                }}
-              />
-
-              <Pressable
-                style={[styles.saveGiftButton, savingGiftProducts && styles.disabledButton]}
-                onPress={() => saveGiftBudget(visibleSelectedGiftPlan)}
-                disabled={savingGiftProducts}
-              >
-                <Text style={styles.saveGiftButtonText}>
-                  {savingGiftProducts ? 'Se salveaza...' : 'Salveaza bugetul'}
-                </Text>
-              </Pressable>
-
-              <Pressable style={styles.cancelGiftButton} onPress={closeBudgetModal}>
-                <Text style={styles.cancelGiftButtonText}>Inchide</Text>
-              </Pressable>
-            </View>
-          </View>
-        </Modal>
-
-        <Modal
-          visible={duplicateProductModalVisible}
-          animationType="fade"
-          transparent
-          onRequestClose={keepDuplicateProductInExistingLists}
-        >
-          <View
-            style={styles.modalOverlay}
-            {...getModalBackdropResponder(closeTopModal)}
-          >
-            <View style={styles.confirmModalCard}>
-              <Text style={styles.modalTitle}>Produs deja folosit</Text>
-              <Text style={styles.confirmText}>
-                {duplicateProductToAdd
-                  ? `"${duplicateProductToAdd.name}"`
-                  : 'Produsul'}{' '}
-                exista deja intr-o alta lista pentru {data.name}.
-              </Text>
-
-              {duplicateActivePlans.length > 0 && (
-                <View style={styles.duplicateInfoBox}>
-                  <Text style={styles.duplicateInfoTitle}>
-                    Lista/liste unde este deja
-                  </Text>
-                  {duplicateActivePlans.map((giftPlan) => (
-                    <Text key={giftPlan.id} style={styles.duplicateInfoText}>
-                      {giftPlan.purpose} din {formatDate(giftPlan.deadlineDate)}
-                    </Text>
-                  ))}
-                </View>
-              )}
-
-              {duplicateCompletedPlans.length > 0 && (
-                <View style={styles.duplicateInfoBox}>
-                  <Text style={styles.duplicateInfoTitle}>
-                    A fost inclus si in cadouri finalizate
-                  </Text>
-                  {duplicateCompletedPlans.map((giftPlan) => (
-                    <Text key={giftPlan.id} style={styles.duplicateInfoText}>
-                      {giftPlan.purpose} din {formatDate(giftPlan.deadlineDate)}
-                    </Text>
-                  ))}
-                </View>
-              )}
-
-              <Pressable
-                style={[
-                  styles.saveGiftButton,
-                  savingGiftProducts && styles.disabledButton,
-                ]}
-                onPress={() =>
-                  keepDuplicateProductInAllLists(visibleSelectedGiftPlan)
-                }
-                disabled={savingGiftProducts}
-              >
-                <Text style={styles.saveGiftButtonText}>
-                  Pune cadoul si in lista pentru {visibleSelectedGiftPlan.purpose}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                style={styles.cancelGiftButton}
-                onPress={keepDuplicateProductInExistingLists}
-              >
-                <Text style={styles.cancelGiftButtonText}>Anulare</Text>
-              </Pressable>
-            </View>
-          </View>
-        </Modal>
-
-        <Modal
-          visible={budgetIncreaseModalVisible}
-          animationType="fade"
-          transparent
-          onRequestClose={closeBudgetIncreaseModal}
-        >
-          <View
-            style={styles.modalOverlay}
-            {...getModalBackdropResponder(closeTopModal)}
-          >
-            <View style={styles.confirmModalCard}>
-              <Text style={styles.modalTitle}>Buget depasit</Text>
-              <Text style={styles.confirmText}>
-                Daca adaugi{' '}
-                {pendingBudgetIncreaseProduct
-                  ? `"${pendingBudgetIncreaseProduct.name}"`
-                  : 'produsul'}
-                , totalul listei devine{' '}
-                {formatMoney(pendingBudgetIncreaseTotal, selectedGiftCurrency)}.
-                Bugetul curent este{' '}
-                {formatMoney(visibleSelectedGiftPlan.budget, selectedGiftCurrency)}.
-              </Text>
-              <Text style={styles.confirmText}>
-                Vrei sa marim bugetul ca sa acopere intreaga lista de cadouri?
-              </Text>
-
-              <Pressable
-                style={[styles.saveGiftButton, savingGiftProducts && styles.disabledButton]}
-                onPress={() =>
-                  confirmAddProductWithBudgetIncrease(visibleSelectedGiftPlan)
-                }
-                disabled={savingGiftProducts}
-              >
-                <Text style={styles.saveGiftButtonText}>
-                  Da, mareste bugetul la{' '}
-                  {formatMoney(pendingBudgetIncreaseTotal, selectedGiftCurrency)}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                style={[
-                  styles.cancelGiftButton,
-                  styles.keepBudgetButton,
-                  savingGiftProducts && styles.disabledButton,
-                ]}
-                onPress={() =>
-                  confirmAddProductWithoutBudgetIncrease(visibleSelectedGiftPlan)
-                }
-                disabled={savingGiftProducts}
-              >
-                <Text style={styles.keepBudgetButtonText}>
-                  Nu, pastreaza bugetul curent
-                </Text>
-              </Pressable>
-
-              <Pressable
-                style={styles.cancelGiftButton}
-                onPress={closeBudgetIncreaseModal}
-              >
-                <Text style={styles.cancelGiftButtonText}>Renunta</Text>
-              </Pressable>
-            </View>
-          </View>
-        </Modal>
-
-        <Modal
           visible={budgetDecreaseConfirmVisible}
           animationType="fade"
           transparent
@@ -5723,7 +5536,7 @@ export default function LovedOneDetailsScreen({
                 contentContainerStyle={styles.giftModalBody}
                 showsVerticalScrollIndicator={false}
               >
-                <Text style={styles.modalTitle}>Ajutor AI</Text>
+                <Text style={styles.modalTitle}>GiftBot</Text>
 
                 {aiLoading ? (
                   <View style={styles.aiSearchingBlock}>
@@ -6015,6 +5828,139 @@ export default function LovedOneDetailsScreen({
         </Modal>
 
         <Modal
+          visible={budgetModalVisible}
+          animationType="fade"
+          transparent
+          onRequestClose={closeBudgetModal}
+        >
+          <View style={styles.modalOverlay} {...getModalBackdropResponder(closeTopModal)}>
+            <View style={styles.confirmModalCard}>
+              <Text style={styles.modalTitle}>Modifica bugetul</Text>
+              <Text style={styles.confirmText}>
+                Total produse acum:{' '}
+                {formatMoney(selectedGiftProductsTotal, selectedGiftCurrency)}.
+                Poti seta orice buget pozitiv, chiar daca produsele se incadreaza
+                deja in suma curenta.
+              </Text>
+              {!!budgetError && <Text style={styles.giftErrorText}>{budgetError}</Text>}
+              <Text style={styles.modalLabel}>Buget nou</Text>
+              <TextInput
+                placeholder="Introdu suma"
+                style={styles.modalInput}
+                keyboardType="numeric"
+                value={budgetInput}
+                onChangeText={(value) => { setBudgetInput(value.replace(/[^0-9]/g, '')); setBudgetError(''); }}
+              />
+              <Pressable
+                style={[styles.saveGiftButton, savingGiftProducts && styles.disabledButton]}
+                onPress={() => saveGiftBudget(visibleSelectedGiftPlan)}
+                disabled={savingGiftProducts}
+              >
+                <Text style={styles.saveGiftButtonText}>
+                  {savingGiftProducts ? 'Se salveaza...' : 'Salveaza bugetul'}
+                </Text>
+              </Pressable>
+              <Pressable style={styles.cancelGiftButton} onPress={closeBudgetModal}>
+                <Text style={styles.cancelGiftButtonText}>Inchide</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={duplicateProductModalVisible}
+          animationType="fade"
+          transparent
+          onRequestClose={keepDuplicateProductInExistingLists}
+        >
+          <View style={styles.modalOverlay} {...getModalBackdropResponder(closeTopModal)}>
+            <View style={styles.confirmModalCard}>
+              <Text style={styles.modalTitle}>Produs deja folosit</Text>
+              <Text style={styles.confirmText}>
+                {duplicateProductToAdd ? `"${duplicateProductToAdd.name}"` : 'Produsul'}{' '}
+                exista deja intr-o alta lista pentru {data.name}.
+              </Text>
+              {duplicateActivePlans.length > 0 && (
+                <View style={styles.duplicateInfoBox}>
+                  <Text style={styles.duplicateInfoTitle}>Lista/liste unde este deja</Text>
+                  {duplicateActivePlans.map((giftPlan) => (
+                    <Text key={giftPlan.id} style={styles.duplicateInfoText}>
+                      {giftPlan.purpose} din {formatDate(giftPlan.deadlineDate)}
+                    </Text>
+                  ))}
+                </View>
+              )}
+              {duplicateCompletedPlans.length > 0 && (
+                <View style={styles.duplicateInfoBox}>
+                  <Text style={styles.duplicateInfoTitle}>A fost inclus si in cadouri finalizate</Text>
+                  {duplicateCompletedPlans.map((giftPlan) => (
+                    <Text key={giftPlan.id} style={styles.duplicateInfoText}>
+                      {giftPlan.purpose} din {formatDate(giftPlan.deadlineDate)}
+                    </Text>
+                  ))}
+                </View>
+              )}
+              <Pressable
+                style={[styles.saveGiftButton, savingGiftProducts && styles.disabledButton]}
+                onPress={() => keepDuplicateProductInAllLists(visibleSelectedGiftPlan)}
+                disabled={savingGiftProducts}
+              >
+                <Text style={styles.saveGiftButtonText}>
+                  Pune cadoul si in lista pentru {visibleSelectedGiftPlan.purpose}
+                </Text>
+              </Pressable>
+              <Pressable style={styles.cancelGiftButton} onPress={keepDuplicateProductInExistingLists}>
+                <Text style={styles.cancelGiftButtonText}>Anulare</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={budgetIncreaseModalVisible}
+          animationType="fade"
+          transparent
+          onRequestClose={closeBudgetIncreaseModal}
+        >
+          <View style={styles.modalOverlay} {...getModalBackdropResponder(closeTopModal)}>
+            <View style={styles.confirmModalCard}>
+              <Text style={styles.modalTitle}>Buget depasit</Text>
+              <Text style={styles.confirmText}>
+                Daca adaugi{' '}
+                {pendingBudgetIncreaseProduct ? `"${pendingBudgetIncreaseProduct.name}"` : 'produsul'}
+                , totalul listei devine{' '}
+                {formatMoney(pendingBudgetIncreaseTotal, selectedGiftCurrency)}.
+                Bugetul curent este{' '}
+                {formatMoney(visibleSelectedGiftPlan.budget, selectedGiftCurrency)}.
+              </Text>
+              <Text style={styles.confirmText}>
+                Vrei sa marim bugetul ca sa acopere intreaga lista de cadouri?
+              </Text>
+              <Pressable
+                style={[styles.saveGiftButton, savingGiftProducts && styles.disabledButton]}
+                onPress={() => confirmAddProductWithBudgetIncrease(visibleSelectedGiftPlan)}
+                disabled={savingGiftProducts}
+              >
+                <Text style={styles.saveGiftButtonText}>
+                  Da, mareste bugetul la{' '}
+                  {formatMoney(pendingBudgetIncreaseTotal, selectedGiftCurrency)}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.cancelGiftButton, styles.keepBudgetButton, savingGiftProducts && styles.disabledButton]}
+                onPress={() => confirmAddProductWithoutBudgetIncrease(visibleSelectedGiftPlan)}
+                disabled={savingGiftProducts}
+              >
+                <Text style={styles.keepBudgetButtonText}>Nu, pastreaza bugetul curent</Text>
+              </Pressable>
+              <Pressable style={styles.cancelGiftButton} onPress={closeBudgetIncreaseModal}>
+                <Text style={styles.cancelGiftButtonText}>Renunta</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
           visible={changeProductModeVisible}
           animationType="fade"
           transparent
@@ -6041,7 +5987,7 @@ export default function LovedOneDetailsScreen({
                 disabled={!changeProduct}
               >
                 <Text style={styles.saveGiftButtonText}>
-                  Cauta cu ajutor AI
+                  Cauta cu GiftBot
                 </Text>
               </Pressable>
 
@@ -6242,7 +6188,7 @@ export default function LovedOneDetailsScreen({
                 contentContainerStyle={styles.giftModalBody}
                 showsVerticalScrollIndicator={false}
               >
-                <Text style={styles.modalTitle}>Ajutor AI pentru schimbare</Text>
+                <Text style={styles.modalTitle}>GiftBot pentru schimbare</Text>
 
                 <View style={styles.aiPersonBox}>
                   <Text style={styles.notesTitle}>Persoana draga</Text>
@@ -6383,11 +6329,15 @@ export default function LovedOneDetailsScreen({
                             <Pressable
                               style={styles.addProductButton}
                               onPress={() => {
-                                addProductToGift(visibleSelectedGiftPlan, suggestion);
+                                if (changeProduct) {
+                                  replaceProductInGift(visibleSelectedGiftPlan, changeProduct, suggestion);
+                                } else {
+                                  addProductToGift(visibleSelectedGiftPlan, suggestion);
+                                }
                                 closeChangeProductFlow();
                               }}
                             >
-                              <Text style={styles.addProductButtonText}>Adaugă</Text>
+                              <Text style={styles.addProductButtonText}>Înlocuiește</Text>
                             </Pressable>
                             {retryingChangeProductAiId === rec.id ? (
                               <ActivityIndicator size="small" color={C.accent} style={{ marginTop: 8 }} />

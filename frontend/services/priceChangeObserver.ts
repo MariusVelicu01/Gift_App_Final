@@ -25,11 +25,11 @@ async function getReadAlerts(): Promise<Record<string, string>> {
 function norm(value?: string): string {
   return String(value || '')
     .normalize('NFD')
-    .replace(/[̀-ͯ™®©]/g, '') // remove diacritics + ™®©
+    .replace(/[̀-ͯ™®©]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
-    .replace(/\s+/g, ' '); // collapse multiple spaces
+    .replace(/\s+/g, ' '); 
 }
 
 function crossStoreKey(name?: string, brand?: string): string {
