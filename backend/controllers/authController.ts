@@ -3,10 +3,12 @@ import {
   changeUserPassword,
   getMyProfile,
   loginWithFirebase,
+  refreshFirebaseToken,
   registerUser,
   sendPasswordReset,
   updateUserName,
 } from '../services/authService';
+import { updateSubscription, SubscriptionTier } from '../services/userService';
 
 function calculateAge(dateString: string) {
   const birth = new Date(dateString);
@@ -42,7 +44,7 @@ export async function register(req: Request, res: Response) {
       return res.status(400).json({ message: 'Completează toate câmpurile obligatorii.' });
     }
 
-    if (!['client', 'admin'].includes(role)) {
+    if (role !== 'client') {
       return res.status(400).json({ message: 'Rol invalid.' });
     }
 
@@ -91,6 +93,26 @@ export async function register(req: Request, res: Response) {
     return res.status(500).json({
       message: 'Nu am putut crea contul.',
     });
+  }
+}
+
+export async function refreshToken(req: Request, res: Response) {
+  try {
+    const { refreshToken: rt } = req.body;
+
+    if (!rt || typeof rt !== 'string') {
+      return res.status(400).json({ message: 'Refresh token lipsă.' });
+    }
+
+    const result = await refreshFirebaseToken(rt);
+
+    return res.status(200).json({
+      token: result.idToken,
+      refreshToken: result.refreshToken,
+      expiresIn: result.expiresIn,
+    });
+  } catch {
+    return res.status(401).json({ message: 'Sesiunea a expirat. Autentifică-te din nou.' });
   }
 }
 
@@ -180,6 +202,29 @@ export async function updateProfile(req: Request, res: Response) {
     return res.status(200).json(profile);
   } catch {
     return res.status(500).json({ message: 'Nu am putut actualiza profilul.' });
+  }
+}
+
+export async function patchSubscription(req: Request, res: Response) {
+  try {
+    const targetUid = String(req.params.uid || '').trim();
+    if (!targetUid) {
+      return res.status(400).json({ message: 'UID lipsă.' });
+    }
+
+    const { subscriptionTier, subscriptionExpiresAt } = req.body;
+    if (!subscriptionTier || !['free', 'premium'].includes(subscriptionTier)) {
+      return res.status(400).json({ message: 'subscriptionTier trebuie să fie "free" sau "premium".' });
+    }
+
+    const profile = await updateSubscription(
+      targetUid,
+      subscriptionTier as SubscriptionTier,
+      typeof subscriptionExpiresAt === 'string' ? subscriptionExpiresAt : undefined
+    );
+    return res.status(200).json(profile);
+  } catch {
+    return res.status(500).json({ message: 'Nu am putut actualiza abonamentul.' });
   }
 }
 

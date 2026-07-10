@@ -17,6 +17,7 @@ import { uploadImageApi } from '../services/uploadApi';
 import { LovedOne } from '../types/lovedOnes';
 import { getModalBackdropResponder } from '../utils/modalBackdrop';
 import { C, R, S } from '../constants/theme';
+import UpgradeModal from './UpgradeModal';
 
 const MONTHS = [
   { label: 'Ianuarie', value: 1 },
@@ -101,6 +102,7 @@ export default function AddLovedOneModal({
   const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showUpgrade, setShowUpgrade] = useState(false);
 
   const years = useMemo(() => getYearOptions(), []);
   const estimatedAgeOptions = useMemo(() => getEstimatedAgeOptions(), []);
@@ -252,16 +254,20 @@ export default function AddLovedOneModal({
 
       handleClose();
       onSaved();
-    } catch {
-      setError(
-        initialData ? 'Nu am putut actualiza.' : 'Nu am putut salva.'
-      );
+    } catch (e: any) {
+      if (!initialData && e?.code === 'LIMIT_LOVED_ONES') {
+        handleClose();
+        setShowUpgrade(true);
+      } else {
+        setError(initialData ? 'Nu am putut actualiza.' : 'Nu am putut salva.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   return (
+    <React.Fragment>
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
       <View style={styles.overlay} {...getModalBackdropResponder(handleClose)}>
         <View style={styles.modalCard}>
@@ -439,6 +445,13 @@ export default function AddLovedOneModal({
         </View>
       </View>
     </Modal>
+
+    <UpgradeModal
+      visible={showUpgrade}
+      reason="loved_ones"
+      onClose={() => setShowUpgrade(false)}
+    />
+    </React.Fragment>
   );
 }
 

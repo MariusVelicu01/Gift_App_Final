@@ -40,6 +40,9 @@ export async function recommend(req: Request, res: Response) {
         subcategory: item.subcategory || undefined,
         price: item.price,
         store: item.store || '',
+        ...(typeof item.affiliateUrl === 'string' && item.affiliateUrl ? { affiliateUrl: item.affiliateUrl } : {}),
+        ...(typeof item.productUrl === 'string' && item.productUrl ? { productUrl: item.productUrl } : {}),
+        ...(typeof item.imageUrl === 'string' && item.imageUrl ? { imageUrl: item.imageUrl } : {}),
       }));
 
     if (safeCatalog.length === 0) {

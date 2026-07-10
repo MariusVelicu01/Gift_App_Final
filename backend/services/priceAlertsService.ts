@@ -173,7 +173,9 @@ export async function createPriceDropAlertsForImport({
     return 0;
   }
 
-  const snapshot = await db.collectionGroup('giftPlans').get();
+  const snapshot = await db.collectionGroup('giftPlans')
+    .where('status', '==', 'planned')
+    .get();
   const batch = db.batch();
   let createdCount = 0;
   const now = new Date().toISOString();
@@ -181,9 +183,7 @@ export async function createPriceDropAlertsForImport({
   for (const doc of snapshot.docs) {
     const giftPlan = doc.data();
 
-    if (giftPlan.status !== 'planned') {
-      continue;
-    }
+    if (giftPlan.deletedAt != null) continue;
 
     const pathData = getUserIdFromGiftPlanPath(doc.ref.path);
 
@@ -334,7 +334,9 @@ export async function refreshGiftPlanProductPricesForImport({
   currency?: string;
   importedAt?: string;
 }) {
-  const snapshot = await db.collectionGroup('giftPlans').get();
+  const snapshot = await db.collectionGroup('giftPlans')
+    .where('status', '==', 'planned')
+    .get();
   const planBatches: ReturnType<typeof db.batch>[] = [db.batch()];
   const alertBatches: ReturnType<typeof db.batch>[] = [db.batch()];
   let planOps = 0;
@@ -344,7 +346,8 @@ export async function refreshGiftPlanProductPricesForImport({
 
   for (const doc of snapshot.docs) {
     const giftPlan = doc.data();
-    if (giftPlan.status !== 'planned') continue;
+
+    if (giftPlan.deletedAt != null) continue;
 
     const pathData = getUserIdFromGiftPlanPath(doc.ref.path);
     if (!pathData) continue;
@@ -459,14 +462,14 @@ function alertsCollection(uid: string) {
 }
 
 export async function getPriceAlerts(uid: string) {
-  const snapshot = await alertsCollection(uid).limit(200).get();
+  const snapshot = await alertsCollection(uid)
+    .orderBy('createdAt', 'desc')
+    .limit(150)
+    .get();
 
   return snapshot.docs
     .map((doc) => doc.data())
-    .filter((item) => !item.deletedAt)
-    .sort((a, b) =>
-      String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
-    )
+    .filter((alert) => alert.deletedAt == null)
     .slice(0, 50);
 }
 
@@ -482,19 +485,20 @@ export async function markPriceAlertRead(uid: string, notificationId: string) {
 }
 
 export async function markAllPriceAlertsRead(uid: string) {
-  const snapshot = await alertsCollection(uid).limit(200).get();
+  const snapshot = await alertsCollection(uid)
+    .where('readAt', '==', null)
+    .limit(200)
+    .get();
   const batch = db.batch();
   const readAt = new Date().toISOString();
   let changed = 0;
 
-  snapshot.docs.forEach((doc) => {
-    const data = doc.data();
-
-    if (data.deletedAt || data.readAt) return;
-
-    batch.update(doc.ref, { readAt });
-    changed += 1;
-  });
+  snapshot.docs
+    .filter((doc) => doc.data().deletedAt == null)
+    .forEach((doc) => {
+      batch.update(doc.ref, { readAt });
+      changed += 1;
+    });
 
   if (changed > 0) {
     await batch.commit();
@@ -512,15 +516,16 @@ export async function deletePriceAlerts(
   const deletedAt = new Date().toISOString();
   let changed = 0;
 
-  snapshot.docs.forEach((doc) => {
-    const data = doc.data();
-
-    if (data.deletedAt) return;
-    if (mode === 'read' && !data.readAt) return;
-
-    batch.update(doc.ref, { deletedAt });
-    changed += 1;
-  });
+  snapshot.docs
+    .filter((doc) => {
+      const data = doc.data();
+      if (data.deletedAt != null) return false;
+      return mode === 'all' || data.readAt != null;
+    })
+    .forEach((doc) => {
+      batch.update(doc.ref, { deletedAt });
+      changed += 1;
+    });
 
   if (changed > 0) {
     await batch.commit();

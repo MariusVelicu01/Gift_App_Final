@@ -1,0 +1,18 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ─── Imagini persoane dragi ──────────────────────────────────────────
+    // Utilizatorul poate citi propriile imagini; scrierile sunt controlate de Admin SDK
+    match /loved-ones/{userId}/{fileName} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+    }
+
+    // ─── Orice alt path: blocat ──────────────────────────────────────────
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

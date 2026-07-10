@@ -8,11 +8,20 @@ export type CatalogItem = {
   subcategory?: string;
   price: number;
   store: string;
+  affiliateUrl?: string;
+  productUrl?: string;
+  imageUrl?: string;
 };
 
 export type GiftBotRecommendation = {
   id: string;
   reason: string;
+  name?: string;
+  price?: number;
+  store?: string;
+  affiliateUrl?: string;
+  productUrl?: string;
+  imageUrl?: string;
 };
 
 export async function getGiftBotRecommendations(

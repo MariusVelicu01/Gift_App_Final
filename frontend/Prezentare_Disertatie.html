@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PresentPerfect — Prezentare Disertație</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #1a1a1a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      user-select: none;
+    }
+
+    /* ── Slide container ── */
+    .deck {
+      width: min(95vw, 1100px);
+      aspect-ratio: 16 / 9;
+      position: relative;
+      overflow: hidden;
+      border-radius: 6px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.6);
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      background: #fff7ed;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .35s ease;
+    }
+    .slide.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* ── Common elements ── */
+    .accent-bar {
+      height: 6px;
+      background: #be123c;
+      width: 100%;
+      flex-shrink: 0;
+    }
+    .slide-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 36px 56px 28px;
+      gap: 0;
+    }
+    .slide-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: #be123c;
+      margin-bottom: 10px;
+    }
+    .slide-title {
+      font-size: 32px;
+      font-weight: 800;
+      color: #111827;
+      line-height: 1.15;
+      margin-bottom: 28px;
+    }
+    .slide-title span { color: #be123c; }
+
+    .slide-footer {
+      height: 38px;
+      background: #111827;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      flex-shrink: 0;
+    }
+    .slide-footer-brand {
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: 1px;
+    }
+    .slide-footer-num {
+      font-size: 11px;
+      color: #9ca3af;
+    }
+
+    /* ── Navigation ── */
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .nav-btn {
+      background: #be123c;
+      color: #fff;
+      border: none;
+      padding: 10px 24px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    .nav-btn:hover { background: #9f1239; }
+    .nav-btn:disabled { background: #555; cursor: default; }
+    .nav-dots {
+      display: flex;
+      gap: 8px;
+    }
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #555;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    .dot.active { background: #be123c; }
+
+
+    /* ══════════════════════════════
+       SLIDE 1 — Introducere
+    ══════════════════════════════ */
+    .s1-hero {
+      display: flex;
+      align-items: flex-start;
+      gap: 48px;
+      flex: 1;
+    }
+    .s1-left { flex: 1.1; display: flex; flex-direction: column; gap: 6px; }
+    .s1-tagline {
+      font-size: 14.5px;
+      color: #4b5563;
+      line-height: 1.55;
+      max-width: 420px;
+      margin-bottom: 20px;
+    }
+    .s1-features {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .s1-feature {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #fff;
+      border: 1.5px solid #fce7e0;
+      border-radius: 10px;
+      padding: 9px 14px;
+    }
+    .s1-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: #fff1f2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .s1-feature-text { font-size: 13px; color: #111827; font-weight: 500; }
+    .s1-feature-sub  { font-size: 11px; color: #6b7280; }
+
+    .s1-right {
+      flex: 0.9;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      justify-content: center;
+    }
+    .s1-roles-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+    .s1-role {
+      background: #fff;
+      border: 1.5px solid #fce7e0;
+      border-radius: 10px;
+      padding: 14px 18px;
+    }
+    .s1-role-name {
+      font-size: 14px;
+      font-weight: 800;
+      color: #be123c;
+      margin-bottom: 4px;
+    }
+    .s1-role-desc {
+      font-size: 12px;
+      color: #4b5563;
+      line-height: 1.5;
+    }
+    .s1-divider {
+      width: 1.5px;
+      background: #fce7e0;
+      align-self: stretch;
+      margin: 0 4px;
+    }
+
+
+    /* ══════════════════════════════
+       SLIDE 2 — Arhitectura
+    ══════════════════════════════ */
+    .arch-diagram {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0;
+    }
+    .arch-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+    }
+    .arch-layer {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .arch-layer-label {
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: #9ca3af;
+    }
+    .arch-boxes {
+      display: flex;
+      gap: 10px;
+    }
+    .arch-box {
+      background: #fff;
+      border: 2px solid #fce7e0;
+      border-radius: 10px;
+      padding: 12px 18px;
+      text-align: center;
+      min-width: 110px;
+    }
+    .arch-box.primary { border-color: #be123c; }
+    .arch-box-icon { font-size: 20px; margin-bottom: 4px; }
+    .arch-box-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: #111827;
+    }
+    .arch-box-tech {
+      font-size: 10px;
+      color: #6b7280;
+      margin-top: 2px;
+    }
+    .arch-arrow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 6px;
+    }
+    .arch-arrow-line {
+      width: 2px;
+      height: 28px;
+      background: #fce7e0;
+      margin: 0 auto;
+    }
+    .arch-arrow-tip {
+      width: 0;
+      height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 7px solid #be123c;
+    }
+    .arch-horiz-arrow {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: #d1d5db;
+      font-size: 18px;
+      padding: 0 4px;
+    }
+    .arch-note {
+      text-align: center;
+      font-size: 11.5px;
+      color: #6b7280;
+      margin-top: 10px;
+      font-style: italic;
+    }
+
+
+    /* ══════════════════════════════
+       SLIDE 3 — Tehnologii
+    ══════════════════════════════ */
+    .tech-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      flex: 1;
+      align-content: center;
+    }
+    .tech-card {
+      background: #fff;
+      border: 1.5px solid #fce7e0;
+      border-radius: 12px;
+      padding: 18px 20px;
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .tech-card-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: #fff1f2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .tech-card-name {
+      font-size: 14px;
+      font-weight: 800;
+      color: #111827;
+      margin-bottom: 3px;
+    }
+    .tech-card-role {
+      font-size: 11px;
+      color: #be123c;
+      font-weight: 600;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .tech-card-desc {
+      font-size: 12px;
+      color: #4b5563;
+      line-height: 1.5;
+    }
+
+
+    /* ══════════════════════════════
+       SLIDE 4 — Demo
+    ══════════════════════════════ */
+    .demo-body {
+      flex: 1;
+      display: flex;
+      gap: 40px;
+      align-items: center;
+    }
+    .demo-left {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .demo-intro {
+      font-size: 14px;
+      color: #4b5563;
+      line-height: 1.6;
+      margin-bottom: 4px;
+    }
+    .demo-step {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 14px;
+      background: #fff;
+      border: 1.5px solid #fce7e0;
+      border-radius: 10px;
+    }
+    .demo-step-num {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #be123c;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .demo-step-text { font-size: 12.5px; color: #111827; font-weight: 500; }
+    .demo-right {
+      flex: 0.8;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+    .demo-badge {
+      background: #be123c;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 14px 32px;
+      border-radius: 999px;
+    }
+    .demo-time {
+      font-size: 12px;
+      color: #9ca3af;
+      text-align: center;
+    }
+    .demo-roles {
+      display: flex;
+      gap: 10px;
+      margin-top: 4px;
+    }
+    .demo-role-pill {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 14px;
+      border-radius: 999px;
+      border: 1.5px solid #fce7e0;
+      color: #be123c;
+      background: #fff1f2;
+    }
+
+
+    /* ══════════════════════════════
+       SLIDE 5 — Concluzii
+    ══════════════════════════════ */
+    .conc-body {
+      flex: 1;
+      display: flex;
+      gap: 40px;
+    }
+    .conc-col { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+    .conc-col-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #be123c;
+      margin-bottom: 4px;
+    }
+    .conc-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      background: #fff;
+      border: 1.5px solid #fce7e0;
+      border-radius: 10px;
+      padding: 10px 14px;
+    }
+    .conc-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+    .conc-text { font-size: 12.5px; color: #111827; line-height: 1.45; }
+    .conc-sep {
+      width: 1.5px;
+      background: #fce7e0;
+      align-self: stretch;
+      margin: 0 4px;
+    }
+    .conc-closing {
+      margin-top: 14px;
+      padding: 12px 16px;
+      background: #111827;
+      border-radius: 10px;
+      font-size: 12px;
+      color: #e5e7eb;
+      line-height: 1.55;
+      text-align: center;
+    }
+    .conc-closing strong { color: #fca5a5; }
+
+    @media print {
+      body { background: #fff; }
+      .nav { display: none; }
+      .slide { position: relative; opacity: 1; pointer-events: auto; page-break-after: always; }
+      .deck { box-shadow: none; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="deck" id="deck">
+
+  <!-- ════════════════════════════
+       SLIDE 1 — Introducere
+  ════════════════════════════ -->
+  <div class="slide active" id="s1">
+    <div class="accent-bar"></div>
+    <div class="slide-body">
+      <div class="slide-label">Prezentare disertație · 2026</div>
+      <div class="slide-title">Ce este <span>PresentPerfect</span>?</div>
+
+      <div class="s1-hero">
+        <div class="s1-left">
+          <p class="s1-tagline">
+            O aplicație care te ajută să găsești cadoul potrivit,
+            la cel mai bun preț, pentru persoana potrivită —
+            fără să pierzi timp sau bani.
+          </p>
+          <div class="s1-features">
+            <div class="s1-feature">
+              <div class="s1-icon">🎁</div>
+              <div>
+                <div class="s1-feature-text">Planifici cadouri pentru persoanele dragi</div>
+                <div class="s1-feature-sub">Profiluri cu preferințe, vârstă, zodie, zile de naștere</div>
+              </div>
+            </div>
+            <div class="s1-feature">
+              <div class="s1-icon">🏪</div>
+              <div>
+                <div class="s1-feature-text">Compari prețuri din mai multe magazine</div>
+                <div class="s1-feature-sub">Același produs, oferte diferite, coduri promoționale</div>
+              </div>
+            </div>
+            <div class="s1-feature">
+              <div class="s1-icon">🔔</div>
+              <div>
+                <div class="s1-feature-text">Primești alertă automată când prețul scade</div>
+                <div class="s1-feature-sub">Monitorizare continuă, fără să verifici manual</div>
+              </div>
+            </div>
+            <div class="s1-feature">
+              <div class="s1-icon">🤖</div>
+              <div>
+                <div class="s1-feature-text">Recomandări personalizate cu ajutorul AI</div>
+                <div class="s1-feature-sub">Bazate pe personalitate, zodie, preferințe, buget</div>
+              </div>
+            </div>
+            <div class="s1-feature">
+              <div class="s1-icon">📅</div>
+              <div>
+                <div class="s1-feature-text">Calendar cu toate planurile de cadouri</div>
+                <div class="s1-feature-sub">Deadline de cumpărare și oferire, vizibile dintr-o privire</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="s1-divider"></div>
+
+        <div class="s1-right">
+          <div class="s1-roles-title">Două tipuri de utilizatori</div>
+          <div class="s1-role">
+            <div class="s1-role-name">👤 Clientul</div>
+            <div class="s1-role-desc">
+              Planifică cadouri, compară prețuri, urmărește bugetul
+              și primește recomandări inteligente pentru fiecare
+              persoană dragă din viața sa.
+            </div>
+          </div>
+          <div class="s1-role">
+            <div class="s1-role-name">🏢 Administratorul de magazin</div>
+            <div class="s1-role-desc">
+              Gestionează catalogul de produse, configurează
+              promoții și urmărește statisticile comenzilor
+              generate prin platformă.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="slide-footer">
+      <div class="slide-footer-brand">PRESENTPERFECT</div>
+      <div class="slide-footer-num">1 / 5</div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════════════
+       SLIDE 2 — Arhitectura
+  ════════════════════════════ -->
+  <div class="slide" id="s2">
+    <div class="accent-bar"></div>
+    <div class="slide-body">
+      <div class="slide-label">Structura aplicației</div>
+      <div class="slide-title">Cum este <span>construită</span> platforma?</div>
+
+      <div class="arch-diagram">
+        <!-- Layer 1: Users -->
+        <div class="arch-row">
+          <div class="arch-layer">
+            <div class="arch-layer-label">Utilizatori</div>
+            <div class="arch-boxes">
+              <div class="arch-box primary">
+                <div class="arch-box-icon">👤</div>
+                <div class="arch-box-name">Client</div>
+                <div class="arch-box-tech">Web / Mobil</div>
+              </div>
+              <div class="arch-box primary">
+                <div class="arch-box-icon">🏢</div>
+                <div class="arch-box-name">Admin</div>
+                <div class="arch-box-tech">Web / Mobil</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="arch-arrow"><div class="arch-arrow-line"></div><div class="arch-arrow-tip"></div></div>
+
+        <!-- Layer 2: Frontend -->
+        <div class="arch-row">
+          <div class="arch-layer">
+            <div class="arch-layer-label">Interfața — React Native + Expo</div>
+            <div class="arch-boxes">
+              <div class="arch-box">
+                <div class="arch-box-icon">📱</div>
+                <div class="arch-box-name">Aplicația</div>
+                <div class="arch-box-tech">iOS · Android · Web</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="arch-arrow"><div class="arch-arrow-line"></div><div class="arch-arrow-tip"></div></div>
+
+        <!-- Layer 3: Backend + Services side by side -->
+        <div class="arch-row" style="gap:20px; align-items:flex-start; justify-content:center;">
+          <div class="arch-layer">
+            <div class="arch-layer-label">Server — Node.js</div>
+            <div class="arch-boxes">
+              <div class="arch-box">
+                <div class="arch-box-icon">⚙️</div>
+                <div class="arch-box-name">API REST</div>
+                <div class="arch-box-tech">Logica aplicației</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;padding-top:28px;gap:6px;color:#d1d5db;font-size:20px;">
+            ⟷
+          </div>
+
+          <div class="arch-layer">
+            <div class="arch-layer-label">Baza de date</div>
+            <div class="arch-boxes">
+              <div class="arch-box">
+                <div class="arch-box-icon">🔥</div>
+                <div class="arch-box-name">Firebase</div>
+                <div class="arch-box-tech">Date în timp real</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;padding-top:28px;gap:6px;color:#d1d5db;font-size:20px;">
+            ⟷
+          </div>
+
+          <div class="arch-layer">
+            <div class="arch-layer-label">Inteligență Artificială</div>
+            <div class="arch-boxes">
+              <div class="arch-box">
+                <div class="arch-box-icon">🤖</div>
+                <div class="arch-box-name">OpenAI</div>
+                <div class="arch-box-tech">Recomandări</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="arch-note">
+          Aplicația funcționează simultan pe browser, iOS și Android din același cod sursă,
+          fără a necesita versiuni separate pentru fiecare platformă.
+        </p>
+      </div>
+    </div>
+    <div class="slide-footer">
+      <div class="slide-footer-brand">PRESENTPERFECT</div>
+      <div class="slide-footer-num">2 / 5</div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════════════
+       SLIDE 3 — Tehnologii
+  ════════════════════════════ -->
+  <div class="slide" id="s3">
+    <div class="accent-bar"></div>
+    <div class="slide-body">
+      <div class="slide-label">Stack tehnic</div>
+      <div class="slide-title">Tehnologii <span>utilizate</span></div>
+
+      <div class="tech-grid">
+        <div class="tech-card">
+          <div class="tech-card-icon">📱</div>
+          <div>
+            <div class="tech-card-role">Interfața utilizatorului</div>
+            <div class="tech-card-name">React Native + Expo</div>
+            <div class="tech-card-desc">
+              Permite scrierea unui singur cod care rulează pe
+              iOS, Android și Web simultan. Componente vizuale
+              native, performanță ridicată pe orice dispozitiv.
+            </div>
+          </div>
+        </div>
+
+        <div class="tech-card">
+          <div class="tech-card-icon">⚙️</div>
+          <div>
+            <div class="tech-card-role">Serverul aplicației</div>
+            <div class="tech-card-name">Node.js + Express</div>
+            <div class="tech-card-desc">
+              Procesează toate cererile utilizatorilor, gestionează
+              autentificarea, importul cataloagelor și declanșează
+              automat alertele de preț la fiecare import.
+            </div>
+          </div>
+        </div>
+
+        <div class="tech-card">
+          <div class="tech-card-icon">🔥</div>
+          <div>
+            <div class="tech-card-role">Baza de date</div>
+            <div class="tech-card-name">Firebase Firestore</div>
+            <div class="tech-card-desc">
+              Bază de date NoSQL în timp real. Stochează utilizatori,
+              planuri de cadouri, cataloage de produse, istoricul
+              prețurilor și alertele generate.
+            </div>
+          </div>
+        </div>
+
+        <div class="tech-card">
+          <div class="tech-card-icon">🤖</div>
+          <div>
+            <div class="tech-card-role">Inteligența Artificială</div>
+            <div class="tech-card-name">OpenAI GPT-4o mini</div>
+            <div class="tech-card-desc">
+              Analizează profilul persoanei (vârstă, gen, zodie,
+              preferințe) și selectează creativ produse din catalogul
+              partenerilor, cu explicații personalizate.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="slide-footer">
+      <div class="slide-footer-brand">PRESENTPERFECT</div>
+      <div class="slide-footer-num">3 / 5</div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════════════
+       SLIDE 4 — Demo
+  ════════════════════════════ -->
+  <div class="slide" id="s4">
+    <div class="accent-bar"></div>
+    <div class="slide-body">
+      <div class="slide-label">Demonstrație live</div>
+      <div class="slide-title">Aplicația în <span>acțiune</span></div>
+
+      <div class="demo-body">
+        <div class="demo-left">
+          <p class="demo-intro">
+            În continuare vom urmări un scenariu real: planificarea
+            unui cadou pentru un băiat, de la alegerea produsului
+            până la notificarea de scădere de preț.
+          </p>
+
+          <div class="demo-step">
+            <div class="demo-step-num">1</div>
+            <div class="demo-step-text">Profilul persoanei dragi — preferințe, zodie, zi de naștere</div>
+          </div>
+          <div class="demo-step">
+            <div class="demo-step-num">2</div>
+            <div class="demo-step-text">Comparare prețuri pentru același produs în 3 magazine</div>
+          </div>
+          <div class="demo-step">
+            <div class="demo-step-num">3</div>
+            <div class="demo-step-text">Coduri promoționale și condiții de coș minim</div>
+          </div>
+          <div class="demo-step">
+            <div class="demo-step-num">4</div>
+            <div class="demo-step-text">Recomandare AI bazată pe personalitate și zodie</div>
+          </div>
+          <div class="demo-step">
+            <div class="demo-step-num">5</div>
+            <div class="demo-step-text">Calendar cu deadline-uri + alertă de scădere de preț</div>
+          </div>
+          <div class="demo-step">
+            <div class="demo-step-num">6</div>
+            <div class="demo-step-text">Admin: cataloage, model afiliat, statistici</div>
+          </div>
+        </div>
+
+        <div class="demo-right">
+          <div class="demo-badge">DEMO LIVE</div>
+          <div class="demo-time">~10 minute de demonstrație</div>
+          <div style="font-size:12px;color:#9ca3af;text-align:center;">module prezentate</div>
+          <div class="demo-roles">
+            <div class="demo-role-pill">Client</div>
+            <div class="demo-role-pill">Admin</div>
+          </div>
+          <div style="margin-top:8px;padding:12px 16px;background:#fff;border:1.5px solid #fce7e0;border-radius:10px;text-align:center;">
+            <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">Magazine partenere</div>
+            <div style="font-size:13px;font-weight:700;color:#111827;">Sephora · Douglas · Notino · Decathlon</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="slide-footer">
+      <div class="slide-footer-brand">PRESENTPERFECT</div>
+      <div class="slide-footer-num">4 / 5</div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════════════
+       SLIDE 5 — Concluzii
+  ════════════════════════════ -->
+  <div class="slide" id="s5">
+    <div class="accent-bar"></div>
+    <div class="slide-body">
+      <div class="slide-label">Sinteză și perspective</div>
+      <div class="slide-title">Concluzii și <span>direcții viitoare</span></div>
+
+      <div class="conc-body">
+        <div class="conc-col">
+          <div class="conc-col-title">Ce s-a realizat</div>
+          <div class="conc-item">
+            <div class="conc-icon">✅</div>
+            <div class="conc-text">Aplicație completă și funcțională pe Web, iOS și Android din același cod</div>
+          </div>
+          <div class="conc-item">
+            <div class="conc-icon">✅</div>
+            <div class="conc-text">Comparare prețuri între magazine cu suport pentru coduri promoționale și coș minim</div>
+          </div>
+          <div class="conc-item">
+            <div class="conc-icon">✅</div>
+            <div class="conc-text">Sistem de alerte automate la scăderea prețului, fără intervenție manuală</div>
+          </div>
+          <div class="conc-item">
+            <div class="conc-icon">✅</div>
+            <div class="conc-text">Model de marketing afiliat integrat pentru magazinele partenere</div>
+          </div>
+          <div class="conc-item">
+            <div class="conc-icon">✅</div>
+            <div class="conc-text">Recomandare AI creativă bazată pe profilul și personalitatea beneficiarului</div>
+          </div>
+        </div>
+
+        <div class="conc-sep"></div>
+
+        <div class="conc-col">
+          <div class="conc-col-title">Ce poate urma</div>
+          <div class="conc-item">
+            <div class="conc-icon">🚀</div>
+            <div class="conc-text">Lansare în App Store și Google Play ca aplicație nativă</div>
+          </div>
+          <div class="conc-item">
+            <div class="conc-icon">🔔</div>
+            <div class="conc-text">Notificări push pe telefon pentru alerte de preț în timp real</div>
+          </div>
+          <div class="conc-item">
+            <div class="conc-icon">🔗</div>
+            <div class="conc-text">Integrare automată a cataloagelor prin API-uri sau scraping periodic</div>
+          </div>
+          <div class="conc-item">
+            <div class="conc-icon">⭐</div>
+            <div class="conc-text">Sistem de evaluare a cadourilor după oferire, pentru îmbunătățirea recomandărilor</div>
+          </div>
+          <div class="conc-item">
+            <div class="conc-icon">👥</div>
+            <div class="conc-text">Funcționalitate de cadouri colective — mai multe persoane contribuie la același cadou</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="conc-closing">
+        PresentPerfect demonstrează că o problemă universală — <strong>găsirea cadoului potrivit</strong> —
+        poate fi rezolvată printr-un ecosistem digital bine articulat, care aduce valoare
+        atât utilizatorilor finali, cât și magazinelor partenere.
+      </div>
+    </div>
+    <div class="slide-footer">
+      <div class="slide-footer-brand">PRESENTPERFECT</div>
+      <div class="slide-footer-num">5 / 5</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Navigation -->
+<div class="nav">
+  <button class="nav-btn" id="prevBtn" onclick="go(-1)" disabled>← Înapoi</button>
+  <div class="nav-dots" id="dots"></div>
+  <button class="nav-btn" id="nextBtn" onclick="go(1)">Înainte →</button>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const dotsEl = document.getElementById('dots');
+  let current = 0;
+
+  slides.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '');
+    d.onclick = () => show(i);
+    dotsEl.appendChild(d);
+  });
+
+  function show(n) {
+    slides[current].classList.remove('active');
+    dotsEl.children[current].classList.remove('active');
+    current = n;
+    slides[current].classList.add('active');
+    dotsEl.children[current].classList.add('active');
+    document.getElementById('prevBtn').disabled = current === 0;
+    document.getElementById('nextBtn').disabled = current === slides.length - 1;
+  }
+
+  function go(dir) { show(current + dir); }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') go(1);
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   go(-1);
+  });
+</script>
+
+</body>
+</html>

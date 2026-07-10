@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { useAuth } from '../context/AuthContext';
-import type { AppRole, UserGender } from '../types/user';
+import type { UserGender } from '../types/user';
 import { getModalBackdropResponder } from '../utils/modalBackdrop';
 import { C, R, S } from '../constants/theme';
 
@@ -83,7 +83,6 @@ export default function AuthModal({ visible, onClose }: Props) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [role, setRole] = useState<AppRole>('client');
   const [gender, setGender] = useState<UserGender>('unknown');
 
   const [birthYear, setBirthYear] = useState(defaultBirth.year);
@@ -110,7 +109,6 @@ export default function AuthModal({ visible, onClose }: Props) {
     setConfirmPassword('');
     setShowRegisterPassword(false);
     setShowConfirmPassword(false);
-    setRole('client');
     setGender('unknown');
     setBirthYear(freshDefault.year);
     setBirthMonth(freshDefault.month);
@@ -255,7 +253,7 @@ export default function AuthModal({ visible, onClose }: Props) {
         gender,
         email: registerEmail.trim(),
         password: registerPassword,
-        role,
+        role: 'client',
       });
 
       handleClose();
@@ -593,38 +591,6 @@ export default function AuthModal({ visible, onClose }: Props) {
                       : 'Parolele nu coincid'}
                   </Text>
                 )}
-
-                <Text style={styles.label}>Rol</Text>
-
-                <View style={styles.roleRow}>
-                  <Pressable
-                    style={[styles.roleButton, role === 'client' && styles.roleButtonActive]}
-                    onPress={() => setRole('client')}
-                  >
-                    <Text
-                      style={[
-                        styles.roleButtonText,
-                        role === 'client' && styles.roleButtonTextActive,
-                      ]}
-                    >
-                      Client
-                    </Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={[styles.roleButton, role === 'admin' && styles.roleButtonActive]}
-                    onPress={() => setRole('admin')}
-                  >
-                    <Text
-                      style={[
-                        styles.roleButtonText,
-                        role === 'admin' && styles.roleButtonTextActive,
-                      ]}
-                    >
-                      Admin
-                    </Text>
-                  </Pressable>
-                </View>
 
                 <Pressable
                   style={[

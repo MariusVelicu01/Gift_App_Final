@@ -8,11 +8,20 @@ export type CatalogItem = {
   subcategory?: string;
   price: number;
   store: string;
+  affiliateUrl?: string;
+  productUrl?: string;
+  imageUrl?: string;
 };
 
 export type GiftBotRecommendation = {
   id: string;
   reason: string;
+  affiliateUrl?: string;
+  productUrl?: string;
+  imageUrl?: string;
+  name?: string;
+  price?: number;
+  store?: string;
 };
 
 const SYSTEM_PROMPT = `Ești GiftBot, expertul în cadouri al aplicației PresentPerfect — un motor de recomandare care gândește creativ, nu mecanic.
@@ -120,13 +129,27 @@ export async function getGiftBotRecommendations(
     throw new Error('Format răspuns invalid de la GiftBot.');
   }
 
+  const catalogById = new Map(catalog.map((item) => [item.id, item]));
+
   return recommendations
     .filter(
       (rec: any) =>
         rec &&
         typeof rec.id === 'string' &&
         typeof rec.reason === 'string' &&
-        catalog.some((item) => item.id === rec.id)
+        catalogById.has(rec.id)
     )
-    .map((rec: any) => ({ id: rec.id as string, reason: rec.reason as string }));
+    .map((rec: any) => {
+      const item = catalogById.get(rec.id)!;
+      return {
+        id: rec.id as string,
+        reason: rec.reason as string,
+        name: item.name,
+        price: item.price,
+        store: item.store,
+        ...(item.affiliateUrl ? { affiliateUrl: item.affiliateUrl } : {}),
+        ...(item.productUrl ? { productUrl: item.productUrl } : {}),
+        ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}),
+      };
+    });
 }

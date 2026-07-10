@@ -75,6 +75,17 @@ function getParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value || '';
 }
 
+function sanitizeUrl(raw?: string): string {
+  const url = String(raw || '').trim();
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? url : '';
+  } catch {
+    return '';
+  }
+}
+
 function isExpired(deadlineDate: string) {
   return deadlineDate < getTodayKey();
 }
@@ -340,9 +351,9 @@ function normalizeSelectedProducts(products: unknown) {
       brand: String(product?.brand || '').trim(),
       category: String(product?.category || '').trim(),
       subcategory: String(product?.subcategory || '').trim(),
-      productUrl: String(product?.productUrl || '').trim(),
-      affiliateUrl: String(product?.affiliateUrl || '').trim(),
-      imageUrl: String(product?.imageUrl || '').trim(),
+      productUrl: sanitizeUrl(product?.productUrl),
+      affiliateUrl: sanitizeUrl(product?.affiliateUrl),
+      imageUrl: sanitizeUrl(product?.imageUrl),
       price,
       priceBeforePromo: Number.isFinite(priceBeforePromo)
         ? priceBeforePromo
@@ -924,8 +935,8 @@ export async function updateProducts(req: Request, res: Response) {
       return res.status(400).json({ message: error.message });
     }
 
-    const existingById = new Map(
-      (existing.selectedProducts || []).map((p: any) => [String(p?.id || ''), p])
+    const existingById = new Map<string, any>(
+      ((existing.selectedProducts || []) as any[]).map((p) => [String(p?.id || ''), p])
     );
     const mergedProducts = normalizedProducts.map((p: any) => ({
       ...p,

@@ -71,6 +71,7 @@ export async function createGiftPlan(
   const payload = {
     id: ref.id,
     lovedOneId,
+    deletedAt: null,
     ...data,
   };
 
@@ -83,7 +84,9 @@ export async function getGiftPlans(uid: string, lovedOneId: string) {
     .orderBy('createdAt', 'desc')
     .get();
 
-  return snapshot.docs.map((doc) => doc.data());
+  return snapshot.docs
+    .map((doc) => doc.data())
+    .filter((plan) => plan.deletedAt == null);
 }
 
 export async function getGiftPlanById(
@@ -161,5 +164,7 @@ export async function deleteGiftPlan(
   lovedOneId: string,
   giftPlanId: string
 ) {
-  await giftPlansCollection(uid, lovedOneId).doc(giftPlanId).delete();
+  await giftPlansCollection(uid, lovedOneId).doc(giftPlanId).update({
+    deletedAt: new Date().toISOString(),
+  });
 }

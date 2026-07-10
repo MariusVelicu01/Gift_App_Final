@@ -1,0 +1,39 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Profil utilizator ───────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+
+      // ─── Persoane dragi ──────────────────────────────────────────────
+      match /lovedOnes/{lovedOneId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+
+        // ─── Planuri cadou ─────────────────────────────────────────────
+        match /giftPlans/{giftPlanId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+      }
+
+      // ─── Alerte preț ─────────────────────────────────────────────────
+      match /priceAlerts/{alertId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    // ─── Magazine partenere ───────────────────────────────────────────────
+    // Catalog public pentru utilizatorii autentificați; scrierile doar via Admin SDK
+    match /partnerStores/{storeId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // ─── Orice altceva: blocat implicit ──────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

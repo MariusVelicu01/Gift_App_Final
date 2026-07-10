@@ -1,5 +1,6 @@
 export type AppRole = 'client' | 'admin';
 export type UserGender = 'male' | 'female' | 'unknown';
+export type SubscriptionTier = 'free' | 'premium';
 
 export type UserProfile = {
   uid: string;
@@ -10,4 +11,6 @@ export type UserProfile = {
   email: string;
   role: AppRole;
   createdAt: string;
+  subscriptionTier?: SubscriptionTier;
+  subscriptionExpiresAt?: string;
 };

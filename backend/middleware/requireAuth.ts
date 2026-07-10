@@ -19,6 +19,7 @@ export async function requireAuth(
     req.user = {
       uid: decoded.uid,
       email: decoded.email,
+      role: decoded.role as string | undefined,
     };
 
     next();

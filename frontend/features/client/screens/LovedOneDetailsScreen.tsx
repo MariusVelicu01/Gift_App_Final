@@ -683,14 +683,20 @@ function toGiftPlanProduct(product: ProductSuggestion): GiftPlanProduct {
   };
 }
 
+function isSafeUrl(url?: string): boolean {
+  if (!url) return false;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 function openProductLink(affiliateUrl?: string, productUrl?: string) {
   const targetUrl = affiliateUrl || productUrl;
-
-  if (!targetUrl) return;
-
-  Linking.openURL(targetUrl).catch((error) => {
-    console.error('OPEN PRODUCT LINK ERROR:', error);
-  });
+  if (!isSafeUrl(targetUrl)) return;
+  Linking.openURL(targetUrl!).catch(() => {});
 }
 
 function getZodiac(day: number, month: number) {
@@ -2805,6 +2811,9 @@ export default function LovedOneDetailsScreen({
             subcategory: product.subcategory,
             price,
             store: store.displayName,
+            ...(product.affiliateUrl ? { affiliateUrl: product.affiliateUrl } : {}),
+            ...(product.productUrl ? { productUrl: product.productUrl } : {}),
+            ...(product.imageUrl ? { imageUrl: product.imageUrl } : {}),
           } as CatalogItem;
         })
       )
@@ -3149,7 +3158,7 @@ export default function LovedOneDetailsScreen({
     return (
       <View style={styles.center}>
         <Text>Persoana nu a fost găsită.</Text>
-        <Pressable style={styles.backButton} onPress={onBack}>
+        <Pressable style={styles.backButton} onPress={() => onBack()}>
           <Text style={styles.backButtonText}>Înapoi</Text>
         </Pressable>
       </View>
@@ -3745,7 +3754,7 @@ export default function LovedOneDetailsScreen({
                   </Pressable>
 
                   <Pressable style={{ alignItems: 'center', paddingVertical: 12 }} onPress={() => setPromoConfirmPending(null)}>
-                    <Text style={styles.closeButtonText}>Anulează</Text>
+                    <Text style={styles.cancelGiftButtonText}>Anulează</Text>
                   </Pressable>
                 </>
               )}
@@ -6587,7 +6596,7 @@ export default function LovedOneDetailsScreen({
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Pressable style={styles.backButton} onPress={onBack}>
+      <Pressable style={styles.backButton} onPress={() => onBack()}>
         <Text style={styles.backButtonText}>{backLabel}</Text>
       </Pressable>
 

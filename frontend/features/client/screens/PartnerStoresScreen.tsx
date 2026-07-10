@@ -30,24 +30,26 @@ function buildStoreUrl(domain?: string) {
   return `https://${cleanDomain}`;
 }
 
+function isSafeUrl(url?: string): boolean {
+  if (!url) return false;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 function openProductLink(affiliateUrl?: string, productUrl?: string) {
   const targetUrl = affiliateUrl || productUrl;
-
-  if (!targetUrl) return;
-
-  Linking.openURL(targetUrl).catch((error) => {
-    console.error('OPEN PRODUCT LINK ERROR:', error);
-  });
+  if (!isSafeUrl(targetUrl)) return;
+  Linking.openURL(targetUrl!).catch(() => {});
 }
 
 function openStoreLink(domain?: string) {
   const targetUrl = buildStoreUrl(domain);
-
-  if (!targetUrl) return;
-
-  Linking.openURL(targetUrl).catch((error) => {
-    console.error('OPEN STORE LINK ERROR:', error);
-  });
+  if (!isSafeUrl(targetUrl)) return;
+  Linking.openURL(targetUrl).catch(() => {});
 }
 
 function shuffleProducts<T>(items: T[]) {

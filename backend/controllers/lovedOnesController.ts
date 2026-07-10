@@ -1,11 +1,13 @@
 import { Request, Response } from "express";
 import {
+  countActiveLovedOnes,
   createLovedOne,
   deleteLovedOne,
   getLovedOneById,
   getLovedOnes,
   updateLovedOne,
 } from "../services/lovedOnesService";
+import { getUserProfileByUid } from "../services/userService";
 
 function isDateInFuture(day: number, month: number, year: number) {
   const selected = new Date(year, month - 1, day, 23, 59, 59, 999);
@@ -15,6 +17,17 @@ function isDateInFuture(day: number, month: number, year: number) {
 
 function getParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value || '';
+}
+
+function sanitizeUrl(raw?: string): string {
+  const url = String(raw || '').trim();
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? url : '';
+  } catch {
+    return '';
+  }
 }
 
 function buildLovedOnePayload(body: any) {
@@ -76,12 +89,9 @@ function buildLovedOnePayload(body: any) {
     payload.notes = String(notes).trim();
   }
 
-  if (
-    imageUrl !== undefined &&
-    imageUrl !== null &&
-    String(imageUrl).trim() !== ""
-  ) {
-    payload.imageUrl = String(imageUrl).trim();
+  if (imageUrl !== undefined && imageUrl !== null && String(imageUrl).trim() !== '') {
+    const safe = sanitizeUrl(imageUrl);
+    if (safe) payload.imageUrl = safe;
   }
 
   if (year !== undefined && year !== null && year !== "") {
@@ -105,6 +115,17 @@ export async function create(req: Request, res: Response) {
 
     if (!uid) {
       return res.status(401).json({ message: "Unauthorized." });
+    }
+
+    const profile = await getUserProfileByUid(uid);
+    if (!profile || profile.subscriptionTier !== 'premium') {
+      const activeCount = await countActiveLovedOnes(uid);
+      if (activeCount >= 3) {
+        return res.status(403).json({
+          code: 'LIMIT_LOVED_ONES',
+          message: 'Ai atins limita de 3 persoane. Upgradează la Premium pentru persoane nelimitate.',
+        });
+      }
     }
 
     const result = buildLovedOnePayload(req.body);

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import HomeScreen from './HomeScreen';
 import LovedOnesScreen from './LovedOnesScreen';
@@ -9,7 +9,7 @@ import NotificationsScreen from './NotificationsScreen';
 import SettingsScreen from './SettingsScreen';
 import { useAuth } from '../../../context/AuthContext';
 import { C } from '../../../constants/theme';
-import { AppNotification, PriceAlert, PriceAlertTarget } from '../../../types/priceAlerts';
+import { AppNotification, DeadlineAlert, PriceAlert, PriceAlertTarget } from '../../../types/priceAlerts';
 import {
   deletePriceAlerts,
   getPriceAlerts,
@@ -27,7 +27,17 @@ import {
 import { generatePriceChangeAlerts, markObserverAlertRead } from '../../../services/priceChangeObserver';
 import { getLovedOnesCache } from '../../../services/lovedOnesCache';
 import { getCalendarCache } from '../../../services/calendarCache';
-import { getPartnerStoresCache, subscribePartnerStoresCache } from '../../../services/partnerStoresCache';
+import {
+  getPartnerStoresCache,
+  isPartnerStoresCacheStale,
+  refreshPartnerStoresCacheInBackground,
+  subscribePartnerStoresCache,
+} from '../../../services/partnerStoresCache';
+import {
+  registerPushToken,
+  addNotificationResponseListener,
+} from '../../../services/pushNotificationsService';
+import { track, Events } from '../../../services/analytics';
 
 type ClientTab = 'home' | 'lovedOnes' | 'calendar' | 'partnerStores' | 'notifications' | 'settings';
 
@@ -55,7 +65,7 @@ type Props = {
 };
 
 export default function ClientDashboard({ firstName, lastName, userGender, onLogout }: Props) {
-  const { token } = useAuth();
+  const { token, profile } = useAuth();
   const [activeTab, setActiveTab] = useState<ClientTab>('home');
   const [alerts, setAlerts] = useState<AppNotification[]>([]);
   const [priceAlertTarget, setPriceAlertTarget] = useState<PriceAlertTarget | null>(null);
@@ -66,10 +76,24 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
   const calendarResetRef  = useRef<(() => void) | null>(null);
   const lovedOnesResetRef = useRef<(() => void) | null>(null);
 
+  useEffect(() => {
+    if (!token) return;
+    registerPushToken(token);
+    const sub = addNotificationResponseListener((response) => {
+      const data = response.notification.request.content.data as any;
+      track(Events.NOTIFICATION_OPENED, { kind: data?.kind });
+      if (data?.kind === 'price_alert') setActiveTab('notifications');
+      else if (data?.kind === 'birthday' || data?.kind === 'deadline') setActiveTab('notifications');
+    });
+    return () => sub.remove();
+  }, [token]);
+
   const loadAlerts = useCallback(async () => {
     if (!token) return;
 
-    const priceAlerts = await getPriceAlerts(token).catch(() => [] as any[]);
+    const allPriceAlerts = await getPriceAlerts(token).catch(() => [] as any[]);
+    const priceAlerts =
+      profile?.subscriptionTier === 'premium' ? allPriceAlerts : allPriceAlerts.slice(0, 10);
 
     let deadlineAlerts: any[] = [];
     let birthdayAlerts: any[] = [];
@@ -91,7 +115,7 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
     } catch {}
 
     setAlerts([...priceAlerts, ...observedPriceAlerts, ...deadlineAlerts, ...birthdayAlerts]);
-  }, [token]);
+  }, [token, profile]);
 
   useEffect(() => { loadAlerts(); }, [loadAlerts]);
 
@@ -103,11 +127,17 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
   useEffect(() => {
     if (!token) return;
 
-    const checkPrices = async () => {
+    const handleAppStateChange = async (nextState: string) => {
+      if (nextState !== 'active') return;
+
+      if (isPartnerStoresCacheStale()) {
+        refreshPartnerStoresCacheInBackground(token);
+      }
+
       try {
-        const [stores, calendarData] = await Promise.all([
-          getPartnerStoresCache(token, { forceRefresh: true }),
+        const [calendarData, stores] = await Promise.all([
           getCalendarCache(token),
+          getPartnerStoresCache(token),
         ]);
         const newPriceAlerts = await generatePriceChangeAlerts(calendarData, stores).catch(() => []);
         if (newPriceAlerts.length > 0) {
@@ -120,17 +150,18 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
       } catch {}
     };
 
-    const interval = setInterval(checkPrices, 20000); // every 20 seconds
-    return () => clearInterval(interval);
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
   }, [token]);
 
   const unreadCount = alerts.filter((a) => !a.readAt).length;
 
   const handleOpenAlert = useCallback(async (alert: AppNotification) => {
     if (!alert.readAt) {
-      if ((alert as any).notificationKind === 'birthday') {
+      const kind = (alert as any).notificationKind;
+      if (kind === 'birthday') {
         await markBirthdayAlertRead(alert.id);
-      } else if ((alert as any).notificationKind === 'deadline') {
+      } else if (kind === 'deadline') {
         await markDeadlineAlertRead(alert.id);
       } else if (alert.id.startsWith('price-obs-')) {
         await markObserverAlertRead(alert.id);
@@ -141,24 +172,46 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
         prev.map((a) => a.id === alert.id ? { ...a, readAt: new Date().toISOString() } : a)
       );
     }
+    const kind = (alert as any).notificationKind;
     if ((alert as PriceAlert).productId) {
       setPriceAlertTarget({ alert: alert as PriceAlert });
+      setActiveTab('lovedOnes');
+    } else if (kind === 'deadline') {
+      const da = alert as DeadlineAlert;
+      setGiftDetailsTarget({ lovedOneId: da.lovedOneId, giftPlanId: da.giftPlanId });
+      setActiveTab('lovedOnes');
+    } else if (kind === 'birthday') {
       setActiveTab('lovedOnes');
     }
   }, [token]);
 
   const handleMarkAllRead = useCallback(async () => {
     if (!token) return;
+    const now = new Date().toISOString();
     await markAllPriceAlertsRead(token);
     setAlerts((prev) =>
-      prev.map((a) => ({ ...a, readAt: a.readAt ?? new Date().toISOString() }))
+      prev.map((a) => {
+        if (a.readAt) return a;
+        const kind = (a as any).notificationKind;
+        if (kind === 'birthday') markBirthdayAlertRead(a.id);
+        else if (kind === 'deadline') markDeadlineAlertRead(a.id);
+        else if (a.id.startsWith('price-obs-')) markObserverAlertRead(a.id);
+        return { ...a, readAt: now };
+      })
     );
   }, [token]);
 
   const handleDeleteAlerts = useCallback(async (mode: 'read' | 'all') => {
     if (!token) return;
     const remaining = await deletePriceAlerts(token, mode);
-    setAlerts(remaining);
+    setAlerts((prev) => {
+      const local = prev.filter((a) => {
+        const kind = (a as any).notificationKind;
+        return kind === 'birthday' || kind === 'deadline' || a.id.startsWith('price-obs-');
+      });
+      const localToKeep = mode === 'all' ? [] : local.filter((a) => !a.readAt);
+      return [...remaining, ...localToKeep];
+    });
   }, [token]);
 
   const renderScreen = () => {

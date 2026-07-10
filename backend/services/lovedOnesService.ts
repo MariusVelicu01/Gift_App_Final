@@ -66,6 +66,15 @@ export async function updateLovedOne(uid: string, lovedOneId: string, data: any)
   return updated.data();
 }
 
+export async function countActiveLovedOnes(uid: string): Promise<number> {
+  const snapshot = await db
+    .collection(COLLECTION)
+    .doc(uid)
+    .collection('lovedOnes')
+    .get();
+  return snapshot.docs.filter((doc) => !doc.data().isDeleted).length;
+}
+
 export async function deleteLovedOne(uid: string, lovedOneId: string) {
   const ref = db
     .collection(COLLECTION)

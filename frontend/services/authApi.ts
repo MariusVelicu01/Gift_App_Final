@@ -29,6 +29,17 @@ export async function loginRequest(email: string, password: string) {
   });
 }
 
+export async function refreshTokenRequest(refreshToken: string): Promise<{
+  token: string;
+  refreshToken: string;
+  expiresIn: string;
+}> {
+  return apiFetch('/auth/refresh', {
+    method: 'POST',
+    body: JSON.stringify({ refreshToken }),
+  });
+}
+
 export async function forgotPasswordRequest(email: string) {
   return apiFetch('/auth/forgot-password', {
     method: 'POST',

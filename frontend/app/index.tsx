@@ -9,11 +9,20 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import AuthModal from '../components/AuthModal';
+import OnboardingModal from '../components/OnboardingModal';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import ClientDashboard from '../features/client/screens/ClientDashboard';
 import AdminDashboard from '../features/admin/screens/AdminDashboard';
 import { checkServerHealth } from '../services/authApi';
+import { initAnalytics, identifyUser, resetAnalyticsUser, track, Events } from '../services/analytics';
+import { initSentry, setSentryUser, clearSentryUser } from '../services/sentry';
+
+initSentry();
+initAnalytics();
+
+const ONBOARDING_KEY = 'gift_app_onboarding_done';
 
 const FEATURES = [
   {
@@ -204,6 +213,7 @@ function IndexContent() {
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [serverChecking, setServerChecking] = useState(true);
   const [serverUp, setServerUp] = useState(false);
+  const [onboardingVisible, setOnboardingVisible] = useState(false);
 
   const checkServer = async () => {
     setServerChecking(true);
@@ -219,7 +229,40 @@ function IndexContent() {
 
   useEffect(() => {
     checkServer();
+    track(Events.APP_OPEN);
   }, []);
+
+  useEffect(() => {
+    if (!profile) return;
+    identifyUser(profile.uid, { role: profile.role, firstName: profile.firstName });
+    setSentryUser(profile.uid);
+
+    if (profile.role === 'client') {
+      AsyncStorage.getItem(ONBOARDING_KEY).then((done) => {
+        if (!done) {
+          setOnboardingVisible(true);
+          track(Events.ONBOARDING_STARTED);
+        }
+      });
+    }
+  }, [profile?.uid]);
+
+  const handleLogout = () => {
+    resetAnalyticsUser();
+    clearSentryUser();
+    track(Events.LOGOUT);
+    logout();
+  };
+
+  const handleOnboardingDone = () => {
+    setOnboardingVisible(false);
+    AsyncStorage.setItem(ONBOARDING_KEY, 'true');
+  };
+
+  const handleOnboardingSkip = () => {
+    setOnboardingVisible(false);
+    AsyncStorage.setItem(ONBOARDING_KEY, 'true');
+  };
 
   const headerButtonLabel = useMemo(() => {
     if (!profile) return 'Autentificare';
@@ -259,15 +302,30 @@ function IndexContent() {
         ) : !profile ? (
           <GuestHome onOpenAuth={() => setAuthModalVisible(true)} />
         ) : profile.role === 'client' ? (
-          <ClientDashboard firstName={profile.firstName} lastName={(profile as any).lastName} userGender={(profile as any).gender} onLogout={logout} />
+          <ClientDashboard
+            firstName={profile.firstName}
+            lastName={(profile as any).lastName}
+            userGender={(profile as any).gender}
+            onLogout={handleLogout}
+          />
         ) : (
-          <AdminDashboard firstName={profile.firstName} lastName={(profile as any).lastName} onLogout={logout} />
+          <AdminDashboard
+            firstName={profile.firstName}
+            lastName={(profile as any).lastName}
+            onLogout={handleLogout}
+          />
         )}
       </View>
 
       <AuthModal
         visible={authModalVisible}
         onClose={() => setAuthModalVisible(false)}
+      />
+
+      <OnboardingModal
+        visible={onboardingVisible}
+        onDone={handleOnboardingDone}
+        onSkip={handleOnboardingSkip}
       />
     </SafeAreaView>
   );

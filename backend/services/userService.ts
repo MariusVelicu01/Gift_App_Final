@@ -2,6 +2,7 @@ import { db } from '../config/firebase';
 
 export type AppRole = 'client' | 'admin';
 export type UserGender = 'male' | 'female' | 'unknown';
+export type SubscriptionTier = 'free' | 'premium';
 
 export type UserProfile = {
   uid: string;
@@ -12,6 +13,8 @@ export type UserProfile = {
   email: string;
   role: AppRole;
   createdAt: string;
+  subscriptionTier: SubscriptionTier;
+  subscriptionExpiresAt?: string;
 };
 
 const USERS_COLLECTION = 'users';
@@ -34,6 +37,18 @@ export async function updateUserProfile(
   uid: string,
   updates: Partial<Pick<UserProfile, 'firstName' | 'lastName'>>
 ) {
+  await db.collection(USERS_COLLECTION).doc(uid).update(updates);
+  return getUserProfileByUid(uid);
+}
+
+export async function updateSubscription(
+  uid: string,
+  tier: SubscriptionTier,
+  expiresAt?: string
+) {
+  const updates: Record<string, any> = { subscriptionTier: tier };
+  if (expiresAt) updates.subscriptionExpiresAt = expiresAt;
+  else updates.subscriptionExpiresAt = null;
   await db.collection(USERS_COLLECTION).doc(uid).update(updates);
   return getUserProfileByUid(uid);
 }

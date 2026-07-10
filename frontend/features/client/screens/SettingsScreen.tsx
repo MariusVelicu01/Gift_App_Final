@@ -15,6 +15,7 @@ import {
 import { useAuth } from '../../../context/AuthContext';
 import { changePasswordRequest, updateProfileRequest } from '../../../services/authApi';
 import { C, R, S } from '../../../constants/theme';
+import UpgradeModal from '../../../components/UpgradeModal';
 
 type SettingsSection = 'personalData' | 'notifications';
 
@@ -103,6 +104,10 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
   const [settings, setSettings] = useState<ClientSettings>(DEFAULT_SETTINGS);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
+
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
+  const isPremium = profile?.subscriptionTier === 'premium';
 
   useEffect(() => {
     if (profile) {
@@ -298,6 +303,60 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
           </View>
         </View>
       </View>
+
+      {/* --- ABONAMENT --- */}
+      <View style={[styles.card, isPremium && styles.premiumCard]}>
+        <View style={styles.subscriptionRow}>
+          <View style={styles.subscriptionInfo}>
+            <Text style={styles.cardTitle}>
+              {isPremium ? '★ GiftApp Premium' : 'Plan gratuit'}
+            </Text>
+            {isPremium ? (
+              profile?.subscriptionExpiresAt ? (
+                <Text style={styles.subscriptionMeta}>
+                  Activ până la{' '}
+                  {new Date(profile.subscriptionExpiresAt).toLocaleDateString('ro-RO')}
+                </Text>
+              ) : (
+                <Text style={styles.subscriptionMeta}>Abonament activ</Text>
+              )
+            ) : (
+              <Text style={styles.subscriptionMeta}>
+                3 persoane · 10 alerte · GiftBot de bază
+              </Text>
+            )}
+          </View>
+          {!isPremium && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.upgradeChip,
+                pressed && { opacity: 0.8 },
+              ]}
+              onPress={() => setShowUpgradeModal(true)}
+            >
+              <Text style={styles.upgradeChipText}>Upgrade</Text>
+            </Pressable>
+          )}
+        </View>
+        {!isPremium && (
+          <Pressable
+            style={({ pressed }) => [
+              styles.upgradeFullButton,
+              pressed && { opacity: 0.85 },
+            ]}
+            onPress={() => setShowUpgradeModal(true)}
+          >
+            <Text style={styles.upgradeFullButtonText}>
+              ★  Descoperă Premium — de la 19 RON/lună
+            </Text>
+          </Pressable>
+        )}
+      </View>
+
+      <UpgradeModal
+        visible={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+      />
 
       {/* --- DATE PERSONALE --- */}
       <View style={styles.card}>
@@ -900,5 +959,48 @@ const styles = StyleSheet.create({
     color: C.textDim,
     fontWeight: '600',
     fontSize: 15,
+  },
+  premiumCard: {
+    borderColor: C.borderStrong,
+    borderWidth: 1,
+    backgroundColor: C.accentSoft,
+  },
+  subscriptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  subscriptionInfo: {
+    flex: 1,
+    gap: 3,
+  },
+  subscriptionMeta: {
+    fontSize: 12,
+    color: C.textFaint,
+  },
+  upgradeChip: {
+    backgroundColor: C.accent,
+    borderRadius: R.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  upgradeChipText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  upgradeFullButton: {
+    backgroundColor: C.accent,
+    borderRadius: R.lg,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  upgradeFullButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
 });

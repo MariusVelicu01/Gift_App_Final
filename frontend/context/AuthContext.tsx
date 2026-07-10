@@ -1,11 +1,16 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  secureMultiGet,
+  secureMultiSet,
+  secureMultiDelete,
+} from '../services/secureStorage';
 import {
   loginRequest,
   meRequest,
   registerRequest,
   forgotPasswordRequest,
+  refreshTokenRequest,
   RegisterPayload,
 } from '../services/authApi';
 import { UserProfile } from '../types/user';
@@ -30,6 +35,10 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const TOKEN_KEY = 'gift_app_token';
+const REFRESH_TOKEN_KEY = 'gift_app_refresh_token';
+const TOKEN_EXPIRES_AT_KEY = 'gift_app_token_expires_at';
+
+const REFRESH_BEFORE_MS = 5 * 60 * 1000;
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
@@ -38,6 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [sessionExpired, setSessionExpired] = useState(false);
   const [sessionEmail, setSessionEmail] = useState('');
   const hasActiveSessionRef = useRef(false);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     hasActiveSessionRef.current = !!token;
@@ -53,26 +63,80 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     bootstrap();
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
   }, []);
+
+  const scheduleRefresh = useCallback((expiresAt: number, rt: string) => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+
+    const delay = expiresAt - Date.now() - REFRESH_BEFORE_MS;
+
+    if (delay <= 0) {
+      doRefresh(rt);
+      return;
+    }
+
+    refreshTimerRef.current = setTimeout(() => doRefresh(rt), delay);
+  }, []);
+
+  const doRefresh = useCallback(async (rt: string) => {
+    try {
+      const result = await refreshTokenRequest(rt);
+      const expiresAt = Date.now() + parseInt(result.expiresIn, 10) * 1000;
+
+      await secureMultiSet([
+        [TOKEN_KEY, result.token],
+        [REFRESH_TOKEN_KEY, result.refreshToken],
+        [TOKEN_EXPIRES_AT_KEY, String(expiresAt)],
+      ]);
+
+      setToken(result.token);
+      scheduleRefresh(expiresAt, result.refreshToken);
+    } catch {
+      setSessionEmail(profile?.email || '');
+      setSessionExpired(true);
+    }
+  }, [profile?.email, scheduleRefresh]);
 
   const bootstrap = async () => {
     try {
-      const savedToken = await AsyncStorage.getItem(TOKEN_KEY);
+      const pairs = await secureMultiGet([TOKEN_KEY, REFRESH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
+      const savedToken = pairs.find(([k]) => k === TOKEN_KEY)?.[1] ?? null;
+      const savedRefreshToken = pairs.find(([k]) => k === REFRESH_TOKEN_KEY)?.[1] ?? null;
+      const savedExpiresAt = pairs.find(([k]) => k === TOKEN_EXPIRES_AT_KEY)?.[1] ?? null;
 
-      console.log('BOOTSTRAP TOKEN:', savedToken);
-
-      if (!savedToken) {
+      if (!savedToken || !savedRefreshToken) {
         setLoading(false);
         return;
       }
 
-      setToken(savedToken);
+      const expiresAt = savedExpiresAt ? parseInt(savedExpiresAt, 10) : 0;
+      const isExpired = Date.now() >= expiresAt - REFRESH_BEFORE_MS;
 
-      const myProfile = await meRequest(savedToken);
-      setProfile(myProfile);
-    } catch (error) {
-      console.log('BOOTSTRAP ERROR:', error);
-      await AsyncStorage.removeItem(TOKEN_KEY);
+      if (isExpired) {
+        const result = await refreshTokenRequest(savedRefreshToken);
+        const newExpiresAt = Date.now() + parseInt(result.expiresIn, 10) * 1000;
+
+        await secureMultiSet([
+          [TOKEN_KEY, result.token],
+          [REFRESH_TOKEN_KEY, result.refreshToken],
+          [TOKEN_EXPIRES_AT_KEY, String(newExpiresAt)],
+        ]);
+
+        setToken(result.token);
+        const myProfile = await meRequest(result.token);
+        setProfile(myProfile);
+        scheduleRefresh(newExpiresAt, result.refreshToken);
+      } else {
+        setToken(savedToken);
+        const myProfile = await meRequest(savedToken);
+        setProfile(myProfile);
+        scheduleRefresh(expiresAt, savedRefreshToken);
+      }
+    } catch {
+      await secureMultiDelete([TOKEN_KEY, REFRESH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
       setToken(null);
       setProfile(null);
     } finally {
@@ -80,22 +144,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const persistSession = async (idToken: string, rt: string, expiresIn: string) => {
+    const expiresAt = Date.now() + parseInt(expiresIn, 10) * 1000;
+    await secureMultiSet([
+      [TOKEN_KEY, idToken],
+      [REFRESH_TOKEN_KEY, rt],
+      [TOKEN_EXPIRES_AT_KEY, String(expiresAt)],
+    ]);
+    setToken(idToken);
+    scheduleRefresh(expiresAt, rt);
+  };
+
   const login = async (email: string, password: string) => {
     const result = await loginRequest(email, password);
-    const receivedToken = result.token as string;
-
-    await AsyncStorage.setItem(TOKEN_KEY, receivedToken);
-    setToken(receivedToken);
+    await persistSession(result.token, result.refreshToken, result.expiresIn);
     setSessionExpired(false);
     setSessionEmail('');
-
-    const myProfile = await meRequest(receivedToken);
+    const myProfile = await meRequest(result.token);
     setProfile(myProfile);
   };
 
   const register = async (payload: RegisterPayload): Promise<RegisterResult> => {
     await registerRequest(payload);
-
     try {
       await login(payload.email, payload.password);
       return { autoLoginSuccess: true };
@@ -109,7 +179,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    await AsyncStorage.removeItem(TOKEN_KEY);
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    await secureMultiDelete([TOKEN_KEY, REFRESH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
     setToken(null);
     setProfile(null);
     setSessionExpired(false);
