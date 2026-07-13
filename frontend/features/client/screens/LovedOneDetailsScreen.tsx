@@ -9,8 +9,8 @@ import {
   ActivityIndicator,
   Modal,
   TextInput,
-  Linking,
 } from 'react-native';
+import { openUrl } from '../../../utils/openUrl';
 import type { GestureResponderEvent } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Dropdown } from 'react-native-element-dropdown';
@@ -696,7 +696,7 @@ function isSafeUrl(url?: string): boolean {
 function openProductLink(affiliateUrl?: string, productUrl?: string) {
   const targetUrl = affiliateUrl || productUrl;
   if (!isSafeUrl(targetUrl)) return;
-  Linking.openURL(targetUrl!).catch(() => {});
+  openUrl(targetUrl!);
 }
 
 function getZodiac(day: number, month: number) {
@@ -2684,8 +2684,8 @@ export default function LovedOneDetailsScreen({
       0
     );
 
-    if (!Number.isFinite(productCountValue) || productCountValue < 1) {
-      setAiHelpError('Alege cel putin un produs pentru cautarea AI.');
+    if (!Number.isFinite(productCountValue) || productCountValue < 1 || productCountValue > 10) {
+      setAiHelpError('Alege între 1 și 10 produse pentru căutarea AI.');
       setAiPromptInput('');
       return;
     }
@@ -5703,18 +5703,35 @@ export default function LovedOneDetailsScreen({
                 />
 
                 <Text style={styles.modalLabel}>Numarul de produse dorite</Text>
-                <TextInput
-                  placeholder="Minim 1"
-                  style={styles.modalInput}
-                  keyboardType="numeric"
-                  value={aiProductCount}
-                  onChangeText={(value) => {
-                    setAiProductCount(value.replace(/[^0-9]/g, ''));
-                    setAiHelpError('');
-                    setAiPromptInput('');
-                    setAiConfirmVisible(false);
-                  }}
-                />
+                <View style={styles.stepperRow}>
+                  <Pressable
+                    style={[styles.stepperBtn, Number(aiProductCount) <= 0 && styles.stepperBtnDisabled]}
+                    onPress={() => {
+                      const next = Math.max(0, Number(aiProductCount) - 1);
+                      setAiProductCount(String(next));
+                      setAiHelpError('');
+                      setAiPromptInput('');
+                      setAiConfirmVisible(false);
+                    }}
+                    disabled={Number(aiProductCount) <= 0}
+                  >
+                    <Text style={styles.stepperBtnText}>−</Text>
+                  </Pressable>
+                  <Text style={styles.stepperValue}>{aiProductCount}</Text>
+                  <Pressable
+                    style={[styles.stepperBtn, Number(aiProductCount) >= 10 && styles.stepperBtnDisabled]}
+                    onPress={() => {
+                      const next = Math.min(10, Number(aiProductCount) + 1);
+                      setAiProductCount(String(next));
+                      setAiHelpError('');
+                      setAiPromptInput('');
+                      setAiConfirmVisible(false);
+                    }}
+                    disabled={Number(aiProductCount) >= 10}
+                  >
+                    <Text style={styles.stepperBtnText}>+</Text>
+                  </Pressable>
+                </View>
 
                 <Pressable
                   style={styles.saveGiftButton}
@@ -8422,6 +8439,37 @@ const styles = StyleSheet.create({
     backgroundColor: C.surface,
     color: C.text,
     fontSize: 14,
+  },
+  stepperRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    marginBottom: 14,
+    gap: 16,
+  },
+  stepperBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: R.lg,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    backgroundColor: C.surface,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  stepperBtnDisabled: {
+    opacity: 0.35,
+  },
+  stepperBtnText: {
+    fontSize: 22,
+    color: C.text,
+    lineHeight: 26,
+  },
+  stepperValue: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: C.text,
+    minWidth: 28,
+    textAlign: 'center' as const,
   },
   imageButton: {
     backgroundColor: C.surface2,

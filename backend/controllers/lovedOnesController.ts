@@ -24,7 +24,7 @@ function sanitizeUrl(raw?: string): string {
   if (!url) return '';
   try {
     const parsed = new URL(url);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? url : '';
+    return parsed.protocol === 'https:' ? url : '';
   } catch {
     return '';
   }
@@ -78,14 +78,23 @@ function buildLovedOnePayload(body: any) {
     }
   }
 
+  const trimmedName = String(name).trim();
+  if (trimmedName.length > 100) {
+    return { error: 'Numele nu poate depăși 100 de caractere.' };
+  }
+
+  if (notes !== undefined && notes !== null && String(notes).trim().length > 1000) {
+    return { error: 'Notele nu pot depăși 1000 de caractere.' };
+  }
+
   const payload: any = {
-    name: String(name).trim(),
+    name: trimmedName,
     day: parsedDay,
     month: parsedMonth,
     gender: gender || "unknown",
   };
 
-  if (notes !== undefined && notes !== null && String(notes).trim() !== "") {
+  if (notes !== undefined && notes !== null && String(notes).trim() !== '') {
     payload.notes = String(notes).trim();
   }
 

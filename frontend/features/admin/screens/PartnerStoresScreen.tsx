@@ -12,6 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { openUrl } from '../../../utils/openUrl';
 import * as ImagePicker from 'expo-image-picker';
 import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
@@ -76,12 +77,8 @@ const YEAR_OPTIONS = Array.from({ length: 21 }, (_, i) => {
 
 function openProductLink(affiliateUrl?: string, productUrl?: string) {
   const targetUrl = affiliateUrl || productUrl;
-
   if (!targetUrl) return;
-
-  Linking.openURL(targetUrl).catch((error) => {
-    console.error('OPEN PRODUCT LINK ERROR:', error);
-  });
+  openUrl(targetUrl);
 }
 
 function formatMoney(value?: number, currency = 'RON') {

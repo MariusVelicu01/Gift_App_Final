@@ -11,8 +11,16 @@ import {
   registerRequest,
   forgotPasswordRequest,
   refreshTokenRequest,
+  googleCompleteProfileRequest,
+  updateConsentRequest,
+  ConsentPayload,
   RegisterPayload,
 } from '../services/authApi';
+import { UserGender } from '../types/user';
+
+export type GoogleLoginResult =
+  | { needsProfile: false }
+  | { needsProfile: true; googleEmail: string; googleFirstName: string; googleLastName: string; tempToken: string };
 import { UserProfile } from '../types/user';
 import { onSessionExpired } from '../services/authEventBus';
 import SessionExpiredModal from '../components/SessionExpiredModal';
@@ -30,6 +38,16 @@ type AuthContextType = {
   forgotPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  loginFromTokens: (idToken: string, refreshToken: string, expiresIn: string) => Promise<void>;
+  completeGoogleProfile: (
+    tempToken: string,
+    firstName: string,
+    lastName: string,
+    birthDate: string,
+    gender: UserGender,
+    consent: ConsentPayload
+  ) => Promise<void>;
+  updateConsent: (consent: Pick<ConsentPayload, 'giftBot' | 'marketing'>) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -48,18 +66,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [sessionEmail, setSessionEmail] = useState('');
   const hasActiveSessionRef = useRef(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // R-1: ref so long-lived timers always read the current email, not a stale closure value
+  const profileRef = useRef<UserProfile | null>(null);
+  // R-2: prevents bootstrap and doRefresh from running concurrently on startup
+  const isBootstrappingRef = useRef(false);
 
   useEffect(() => {
     hasActiveSessionRef.current = !!token;
   }, [token]);
 
   useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+
+  useEffect(() => {
     return onSessionExpired(() => {
       if (!hasActiveSessionRef.current) return;
-      setSessionEmail(profile?.email || sessionEmail);
+      setSessionEmail(profileRef.current?.email || sessionEmail);
       setSessionExpired(true);
     });
-  }, [profile?.email, sessionEmail]);
+  }, [sessionEmail]);
 
   useEffect(() => {
     bootstrap();
@@ -82,6 +108,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const doRefresh = useCallback(async (rt: string) => {
+    // R-2: skip if bootstrap is still in progress to avoid concurrent token exchanges
+    if (isBootstrappingRef.current) return;
     try {
       const result = await refreshTokenRequest(rt);
       const expiresAt = Date.now() + parseInt(result.expiresIn, 10) * 1000;
@@ -95,12 +123,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setToken(result.token);
       scheduleRefresh(expiresAt, result.refreshToken);
     } catch {
-      setSessionEmail(profile?.email || '');
+      // R-1: read from ref so the timer always gets the current email
+      setSessionEmail(profileRef.current?.email || '');
       setSessionExpired(true);
     }
-  }, [profile?.email, scheduleRefresh]);
+  }, [scheduleRefresh]);
 
   const bootstrap = async () => {
+    if (isBootstrappingRef.current) return;
+    isBootstrappingRef.current = true;
     try {
       const pairs = await secureMultiGet([TOKEN_KEY, REFRESH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY]);
       const savedToken = pairs.find(([k]) => k === TOKEN_KEY)?.[1] ?? null;
@@ -140,6 +171,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setToken(null);
       setProfile(null);
     } finally {
+      isBootstrappingRef.current = false;
       setLoading(false);
     }
   };
@@ -192,6 +224,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(myProfile);
   };
 
+  const loginFromTokens = async (idToken: string, rt: string, expiresIn: string) => {
+    await persistSession(idToken, rt, expiresIn);
+    setSessionExpired(false);
+    setSessionEmail('');
+    const myProfile = await meRequest(idToken);
+    setProfile(myProfile);
+  };
+
+  const completeGoogleProfile = async (
+    tempToken: string,
+    firstName: string,
+    lastName: string,
+    birthDate: string,
+    gender: UserGender,
+    consent: ConsentPayload
+  ) => {
+    const result = await googleCompleteProfileRequest(tempToken, firstName, lastName, birthDate, gender, consent);
+    await persistSession(result.token, result.refreshToken, result.expiresIn);
+    setSessionExpired(false);
+    setSessionEmail('');
+    const myProfile = await meRequest(result.token);
+    setProfile(myProfile);
+  };
+
+  const updateConsent = async (consent: Pick<ConsentPayload, 'giftBot' | 'marketing'>) => {
+    if (!token) return;
+    const updatedProfile = await updateConsentRequest(token, consent);
+    setProfile(updatedProfile);
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -203,6 +265,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         forgotPassword,
         logout,
         refreshProfile,
+        loginFromTokens,
+        completeGoogleProfile,
+        updateConsent,
       }}
     >
       {children}

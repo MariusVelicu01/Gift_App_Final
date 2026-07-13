@@ -75,22 +75,24 @@ function getCreatedDateKey(giftPlan: any) {
 
 export async function getUserStatistics(req: Request, res: Response) {
   try {
-    const snapshot = await db.collectionGroup('giftPlans').get();
+    const snapshot = await db.collectionGroup('giftPlans').limit(2000).get();
     const userIds = Array.from(
       new Set(snapshot.docs.map((doc) => getUidFromGiftPlanPath(doc.ref.path)).filter(Boolean))
     );
     const userGenderById = new Map<string, UserGender>();
 
-    await Promise.all(
-      userIds.map(async (uid) => {
-        const userDoc = await db.collection('users').doc(uid).get();
-        const gender = String(userDoc.data()?.gender || 'unknown') as UserGender;
+    // Batch-fetch all user docs in a single RPC instead of N individual gets
+    if (userIds.length > 0) {
+      const userRefs = userIds.map((uid) => db.collection('users').doc(uid));
+      const userDocs = await db.getAll(...userRefs);
+      userDocs.forEach((doc) => {
+        const gender = String(doc.data()?.gender || 'unknown') as UserGender;
         userGenderById.set(
-          uid,
+          doc.id,
           ['male', 'female', 'unknown'].includes(gender) ? gender : 'unknown'
         );
-      })
-    );
+      });
+    }
 
     const giftPlans = snapshot.docs.map((doc) => {
       const data = doc.data();

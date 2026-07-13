@@ -6,26 +6,33 @@ service cloud.firestore {
     // ─── Profil utilizator ───────────────────────────────────────────────
     match /users/{userId} {
       allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if false;
+      allow write: if false; // toate scrierile merg prin Admin SDK (backend)
 
       // ─── Persoane dragi ──────────────────────────────────────────────
       match /lovedOnes/{lovedOneId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if false; // scris doar prin backend (aplică limite abonament)
 
         // ─── Planuri cadou ─────────────────────────────────────────────
         match /giftPlans/{giftPlanId} {
-          allow read, write: if request.auth != null && request.auth.uid == userId;
+          allow read: if request.auth != null && request.auth.uid == userId;
+          allow write: if false;
         }
       }
 
       // ─── Alerte preț ─────────────────────────────────────────────────
       match /priceAlerts/{alertId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+
+      // ─── Push tokens ─────────────────────────────────────────────────
+      match /pushTokens/{tokenId} {
+        allow read, write: if false;
       }
     }
 
     // ─── Magazine partenere ───────────────────────────────────────────────
-    // Catalog public pentru utilizatorii autentificați; scrierile doar via Admin SDK
     match /partnerStores/{storeId} {
       allow read: if request.auth != null;
       allow write: if false;

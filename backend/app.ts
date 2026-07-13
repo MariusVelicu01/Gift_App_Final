@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import healthRoutes from './routes/healthRoutes';
 import authRoutes from './routes/authRoutes';
@@ -15,12 +16,16 @@ import pushTokenRoutes from './routes/pushTokenRoutes';
 const app = express();
 
 app.use(helmet());
+app.use(compression());
 
-app.use(
-  cors({
-    origin: process.env.FRONTEND_ORIGIN || '*',
-  })
-);
+function buildCorsOrigin(): boolean | string | string[] {
+  if (process.env.NODE_ENV !== 'production') return true;
+  const raw = process.env.FRONTEND_ORIGIN ?? '';
+  const origins = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  return origins.length > 0 ? origins : false;
+}
+
+app.use(cors({ origin: buildCorsOrigin() }));
 
 app.use(express.json({ limit: '100kb' }));
 
@@ -32,9 +37,28 @@ const authLimiter = rateLimit({
   message: { message: 'Prea multe încercări. Încearcă din nou peste 15 minute.' },
 });
 
+function tokenKey(req: any): string {
+  const auth = req.headers?.authorization as string | undefined;
+  if (auth?.startsWith('Bearer ')) {
+    // Decode (without verifying) to use stable UID as rate-limit key.
+    // Formal signature verification still happens in requireAuth middleware.
+    try {
+      const parts = auth.slice(7).split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        const uid = payload.user_id || payload.sub;
+        if (typeof uid === 'string' && uid.length > 0) return uid;
+      }
+    } catch { /* fall through */ }
+    return auth.slice(7, 67);
+  }
+  return req.ip || 'unknown';
+}
+
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 120,
+  keyGenerator: tokenKey,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Prea multe cereri. Încearcă din nou peste un minut.' },
@@ -42,7 +66,8 @@ const generalLimiter = rateLimit({
 
 const giftBotLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 10,
+  max: 8,
+  keyGenerator: tokenKey,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Limita de recomandări GiftBot atinsă. Încearcă din nou peste un minut.' },

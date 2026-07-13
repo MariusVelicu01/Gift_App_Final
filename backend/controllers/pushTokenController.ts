@@ -6,7 +6,8 @@ export async function registerToken(req: Request, res: Response) {
   if (!uid) return res.status(401).json({ message: 'Unauthorized.' });
 
   const { token } = req.body;
-  if (!token || typeof token !== 'string' || !token.startsWith('ExponentPushToken[')) {
+  const EXPO_TOKEN_RE = /^ExponentPushToken\[[\w\-]{10,200}\]$/;
+  if (!token || typeof token !== 'string' || !EXPO_TOKEN_RE.test(token)) {
     return res.status(400).json({ message: 'Token invalid.' });
   }
 

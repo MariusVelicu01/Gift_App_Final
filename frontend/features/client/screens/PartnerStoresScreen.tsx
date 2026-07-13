@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { openUrl } from '../../../utils/openUrl';
 import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
 import { getPartnerStoresCache, subscribePartnerStoresCache } from '../../../services/partnerStoresCache';
@@ -43,13 +43,13 @@ function isSafeUrl(url?: string): boolean {
 function openProductLink(affiliateUrl?: string, productUrl?: string) {
   const targetUrl = affiliateUrl || productUrl;
   if (!isSafeUrl(targetUrl)) return;
-  Linking.openURL(targetUrl!).catch(() => {});
+  openUrl(targetUrl!);
 }
 
 function openStoreLink(domain?: string) {
   const targetUrl = buildStoreUrl(domain);
   if (!isSafeUrl(targetUrl)) return;
-  Linking.openURL(targetUrl).catch(() => {});
+  openUrl(targetUrl);
 }
 
 function shuffleProducts<T>(items: T[]) {
@@ -112,8 +112,18 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
   const [selectedStore, setSelectedStore] = useState<PartnerStore | null>(null);
   const [featuredProducts, setFeaturedProducts] = useState<PartnerStore['products']>([]);
   const [searchText, setSearchText] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const selectedStoreBackRef = useRef<ReturnType<typeof pushAppBackEntry> | null>(null);
+
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => setDebouncedSearch(searchText), 300);
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    };
+  }, [searchText]);
 
   useEffect(() => {
     if (!selectedStore) return;
@@ -145,6 +155,7 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
       setSelectedStore(null);
       setFeaturedProducts([]);
       setSearchText('');
+      setDebouncedSearch('');
       setSelectedCategory('all');
     };
 
@@ -201,7 +212,7 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
   }, [stores]);
 
   const filteredStores = useMemo(() => {
-    const normalizedSearch = searchText.trim().toLowerCase();
+    const normalizedSearch = debouncedSearch.trim().toLowerCase();
 
     return stores.filter((store) => {
       const matchesCategory =
@@ -228,7 +239,7 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
 
       return searchableText.includes(normalizedSearch);
     });
-  }, [searchText, selectedCategory, stores]);
+  }, [debouncedSearch, selectedCategory, stores]);
 
   const getCategoryProductCount = (store: PartnerStore) => {
     if (selectedCategory === 'all') {
@@ -257,7 +268,7 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
         <View style={styles.card}>
           <View style={styles.storeHero}>
             {selectedStore.brandImageUri ? (
-              <Image source={{ uri: selectedStore.brandImageUri }} style={styles.brandImageLarge} />
+              <Image source={{ uri: selectedStore.brandImageUri }} style={styles.brandImageLarge} fadeDuration={0} />
             ) : (
               <View style={styles.brandPlaceholderLarge}>
                 <Text style={styles.brandPlaceholderText}>
@@ -326,7 +337,7 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
                 disabled={!product.affiliateUrl && !product.productUrl}
               >
                 {product.imageUrl ? (
-                  <Image source={{ uri: product.imageUrl }} style={styles.productImage} />
+                  <Image source={{ uri: product.imageUrl }} style={styles.productImage} fadeDuration={0} />
                 ) : (
                   <View style={styles.productImagePlaceholder}>
                     <Text style={styles.productImagePlaceholderText}>
@@ -447,6 +458,7 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
             style={styles.clearFiltersButton}
             onPress={() => {
               setSearchText('');
+              setDebouncedSearch('');
               setSelectedCategory('all');
             }}
           >
@@ -487,7 +499,7 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
             onPress={() => openStoreDetails(store)}
           >
             {store.brandImageUri ? (
-              <Image source={{ uri: store.brandImageUri }} style={styles.brandImage} />
+              <Image source={{ uri: store.brandImageUri }} style={styles.brandImage} fadeDuration={0} />
             ) : (
               <View style={styles.brandPlaceholder}>
                 <Text style={styles.brandPlaceholderText}>

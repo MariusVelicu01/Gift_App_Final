@@ -81,7 +81,7 @@ function formatBirthDate(birthDate: string) {
 
 
 export default function SettingsScreen({ onLogout, personalDataOpen, notificationsOpen, onToggleSection }: Props) {
-  const { profile, token, refreshProfile } = useAuth();
+  const { profile, token, refreshProfile, updateConsent } = useAuth();
 
   const [photoUri, setPhotoUri] = useState<string | null>(null);
 
@@ -107,12 +107,19 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
 
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
+  const [consentGiftBot, setConsentGiftBot] = useState(false);
+  const [consentMarketing, setConsentMarketing] = useState(false);
+  const [savingConsent, setSavingConsent] = useState(false);
+  const [consentMessage, setConsentMessage] = useState('');
+
   const isPremium = profile?.subscriptionTier === 'premium';
 
   useEffect(() => {
     if (profile) {
       setFirstName(profile.firstName);
       setLastName(profile.lastName);
+      setConsentGiftBot(profile.consent?.giftBot ?? false);
+      setConsentMarketing(profile.consent?.marketing ?? false);
     }
   }, [profile]);
 
@@ -242,6 +249,20 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
       setSettingsMessage('Nu am putut salva setarile.');
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const saveConsent = async () => {
+    setSavingConsent(true);
+    setConsentMessage('');
+    try {
+      await updateConsent({ giftBot: consentGiftBot, marketing: consentMarketing });
+      await refreshProfile();
+      setConsentMessage('Preferințele au fost salvate.');
+    } catch {
+      setConsentMessage('Nu am putut salva preferințele.');
+    } finally {
+      setSavingConsent(false);
     }
   };
 
@@ -644,6 +665,63 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
         )}
       </View>
 
+      {/* --- GDPR / CONSIMȚĂMINTE --- */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Datele mele & Confidențialitate</Text>
+
+        <Text style={styles.consentNote}>
+          Politica de confidențialitate și Termenii și condițiile sunt acceptate la crearea contului și nu pot fi revocate fără ștergerea acestuia.
+        </Text>
+
+        <View style={styles.divider} />
+
+        <View style={styles.switchRow}>
+          <View style={styles.consentLabelWrap}>
+            <Text style={styles.switchLabel}>GiftBot — recomandări AI</Text>
+            <Text style={styles.consentSubLabel}>
+              Permite procesarea datelor persoanelor salvate pentru recomandări personalizate
+            </Text>
+          </View>
+          <Switch
+            value={consentGiftBot}
+            onValueChange={(v) => { setConsentGiftBot(v); setConsentMessage(''); }}
+            trackColor={{ true: C.accent }}
+          />
+        </View>
+
+        <View style={styles.switchRow}>
+          <View style={styles.consentLabelWrap}>
+            <Text style={styles.switchLabel}>Email marketing</Text>
+            <Text style={styles.consentSubLabel}>
+              Oferte, noutăți și recomandări de cadouri prin email
+            </Text>
+          </View>
+          <Switch
+            value={consentMarketing}
+            onValueChange={(v) => { setConsentMarketing(v); setConsentMessage(''); }}
+            trackColor={{ true: C.accent }}
+          />
+        </View>
+
+        {!!consentMessage && (
+          <Text style={consentMessage.includes('Nu') ? styles.errorText : styles.successText}>
+            {consentMessage}
+          </Text>
+        )}
+
+        <Pressable
+          style={[styles.saveSmallButton, savingConsent && styles.disabledButton]}
+          onPress={saveConsent}
+          disabled={savingConsent}
+        >
+          {savingConsent ? (
+            <ActivityIndicator color="#ffffff" size="small" />
+          ) : (
+            <Text style={styles.saveSmallButtonText}>Salvează preferințele</Text>
+          )}
+        </Pressable>
+      </View>
+
       <Pressable style={styles.logoutButton} onPress={onLogout}>
         <Text style={styles.logoutButtonText}>Deconecteaza-te</Text>
       </Pressable>
@@ -1002,5 +1080,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     letterSpacing: 0.2,
+  },
+  consentNote: {
+    fontSize: 13,
+    color: C.textFaint,
+    lineHeight: 18,
+  },
+  consentLabelWrap: {
+    flex: 1,
+    gap: 2,
+    paddingRight: 8,
+  },
+  consentSubLabel: {
+    fontSize: 12,
+    color: C.textFaint,
+    lineHeight: 16,
   },
 });

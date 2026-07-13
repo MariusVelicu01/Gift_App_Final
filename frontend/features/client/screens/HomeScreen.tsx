@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,6 +9,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { openUrl } from '../../../utils/openUrl';
 import { useAuth } from '../../../context/AuthContext';
 import { getCalendarCache, subscribeCalendarCache } from '../../../services/calendarCache';
 import { getPartnerStoresCache, subscribePartnerStoresCache } from '../../../services/partnerStoresCache';
@@ -99,9 +99,7 @@ function formatMoney(value: number, currency = 'RON') {
 function openProductLink(affiliateUrl?: string, productUrl?: string) {
   const targetUrl = affiliateUrl || productUrl;
   if (!targetUrl) return;
-  Linking.openURL(targetUrl).catch((error) => {
-    console.error('OPEN PROMOTION LINK ERROR:', error);
-  });
+  openUrl(targetUrl);
 }
 
 export default function HomeScreen({ firstName, lastName, userGender, onOpenGift }: Props) {

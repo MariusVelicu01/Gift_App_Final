@@ -5,6 +5,7 @@ import {
   updateUserProfile,
   AppRole,
   UserGender,
+  UserConsent,
 } from './userService';
 
 type RegisterInput = {
@@ -15,6 +16,7 @@ type RegisterInput = {
   email: string;
   password: string;
   role: AppRole;
+  consent: UserConsent;
 };
 
 type FirebaseLoginResponse = {
@@ -25,8 +27,115 @@ type FirebaseLoginResponse = {
   email: string;
 };
 
+async function getGoogleUserInfo(accessToken: string) {
+  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error('Token Google invalid sau expirat.');
+  const data = (await res.json()) as any;
+  if (!data.email) throw new Error('Google nu a returnat un email valid.');
+  return {
+    email: data.email as string,
+    firstName: (data.given_name as string) || '',
+    lastName: (data.family_name as string) || '',
+  };
+}
+
+async function signInWithCustomToken(customToken: string) {
+  const apiKey = process.env.FIREBASE_WEB_API_KEY;
+  if (!apiKey) throw new Error('Missing FIREBASE_WEB_API_KEY.');
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: customToken, returnSecureToken: true }),
+    }
+  );
+  const data = (await res.json()) as any;
+  if (!res.ok) throw new Error('Nu am putut genera sesiunea Google.');
+  return { idToken: data.idToken as string, refreshToken: data.refreshToken as string, expiresIn: data.expiresIn as string };
+}
+
+export type GoogleInitResult =
+  | { isNewUser: false; idToken: string; refreshToken: string; expiresIn: string }
+  | { isNewUser: true; googleEmail: string; googleFirstName: string; googleLastName: string };
+
+export async function loginOrInitGoogleUser(googleAccessToken: string): Promise<GoogleInitResult> {
+  const googleUser = await getGoogleUserInfo(googleAccessToken);
+
+  try {
+    const existing = await adminAuth.getUserByEmail(googleUser.email);
+    const hasPassword = !!existing.passwordHash;
+    const hasGoogle = existing.providerData?.some((p) => p.providerId === 'google.com');
+
+    if (hasPassword && !hasGoogle) {
+      throw new Error(
+        'Există deja un cont cu acest email creat cu parolă. Autentifică-te cu email și parolă.'
+      );
+    }
+
+    const customToken = await adminAuth.createCustomToken(existing.uid, {
+      role: (existing.customClaims as any)?.role || 'client',
+    });
+    const tokens = await signInWithCustomToken(customToken);
+    return { isNewUser: false, ...tokens };
+  } catch (err: any) {
+    if (err.code === 'auth/user-not-found') {
+      return {
+        isNewUser: true,
+        googleEmail: googleUser.email,
+        googleFirstName: googleUser.firstName,
+        googleLastName: googleUser.lastName,
+      };
+    }
+    throw err;
+  }
+}
+
+export async function completeGoogleRegistration(
+  googleAccessToken: string,
+  firstName: string,
+  lastName: string,
+  birthDate: string,
+  gender: UserGender,
+  consent: UserConsent
+) {
+  const googleUser = await getGoogleUserInfo(googleAccessToken);
+
+  const userRecord = await adminAuth.createUser({
+    email: googleUser.email,
+    displayName: `${firstName} ${lastName}`,
+    emailVerified: true,
+  });
+
+  try {
+    await Promise.all([
+      createUserProfile({
+        uid: userRecord.uid,
+        firstName,
+        lastName,
+        birthDate,
+        gender,
+        email: googleUser.email,
+        role: 'client',
+        createdAt: new Date().toISOString(),
+        subscriptionTier: 'free',
+        consent,
+      }),
+      adminAuth.setCustomUserClaims(userRecord.uid, { role: 'client' }),
+    ]);
+
+    const customToken = await adminAuth.createCustomToken(userRecord.uid, { role: 'client' });
+    return signInWithCustomToken(customToken);
+  } catch (err) {
+    await adminAuth.deleteUser(userRecord.uid);
+    throw err;
+  }
+}
+
 export async function registerUser(input: RegisterInput) {
-  const { firstName, lastName, birthDate, gender, email, password, role } = input;
+  const { firstName, lastName, birthDate, gender, email, password, role, consent } = input;
 
   const userRecord = await adminAuth.createUser({
     email,
@@ -46,6 +155,7 @@ export async function registerUser(input: RegisterInput) {
         role,
         createdAt: new Date().toISOString(),
         subscriptionTier: 'free',
+        consent,
       }),
       adminAuth.setCustomUserClaims(userRecord.uid, { role }),
     ]);

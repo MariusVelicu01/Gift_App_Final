@@ -1,5 +1,11 @@
 import { apiFetch } from './api';
-import { UserGender, UserProfile } from '../types/user';
+import { UserConsent, UserGender, UserProfile } from '../types/user';
+
+export type ConsentPayload = {
+  privacyAndTerms: true;
+  giftBot: boolean;
+  marketing: boolean;
+};
 
 export type RegisterPayload = {
   firstName: string;
@@ -9,6 +15,7 @@ export type RegisterPayload = {
   email: string;
   password: string;
   role: 'client' | 'admin';
+  consent: ConsentPayload;
 };
 
 export async function checkServerHealth() {
@@ -71,6 +78,63 @@ export async function changePasswordRequest(
   return apiFetch(
     '/auth/change-password',
     { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) },
+    token
+  );
+}
+
+export type GoogleAuthResult =
+  | { isNewUser: false; token: string; refreshToken: string; expiresIn: string }
+  | { isNewUser: true; googleEmail: string; googleFirstName: string; googleLastName: string };
+
+export async function googleAuthRequest(googleAccessToken: string): Promise<GoogleAuthResult> {
+  return apiFetch('/auth/google', {
+    method: 'POST',
+    body: JSON.stringify({ googleAccessToken }),
+  });
+}
+
+export async function googleCompleteRequest(
+  googleAccessToken: string,
+  firstName: string,
+  lastName: string,
+  birthDate: string,
+  gender: UserGender
+): Promise<{ token: string; refreshToken: string; expiresIn: string }> {
+  return apiFetch('/auth/google/complete', {
+    method: 'POST',
+    body: JSON.stringify({ googleAccessToken, firstName, lastName, birthDate, gender }),
+  });
+}
+
+export async function googleProfileHintRequest(tempToken: string): Promise<{
+  googleEmail: string;
+  googleFirstName: string;
+  googleLastName: string;
+}> {
+  return apiFetch(`/auth/google/profile-hint?tempToken=${encodeURIComponent(tempToken)}`, { method: 'GET' });
+}
+
+export async function googleCompleteProfileRequest(
+  tempToken: string,
+  firstName: string,
+  lastName: string,
+  birthDate: string,
+  gender: UserGender,
+  consent: ConsentPayload
+): Promise<{ token: string; refreshToken: string; expiresIn: string }> {
+  return apiFetch('/auth/google/complete-profile', {
+    method: 'POST',
+    body: JSON.stringify({ tempToken, firstName, lastName, birthDate, gender, consent }),
+  });
+}
+
+export async function updateConsentRequest(
+  token: string,
+  consent: Pick<UserConsent, 'giftBot' | 'marketing'>
+): Promise<UserProfile> {
+  return apiFetch(
+    '/auth/consent',
+    { method: 'PATCH', body: JSON.stringify(consent) },
     token
   );
 }

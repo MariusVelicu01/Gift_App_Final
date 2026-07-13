@@ -82,6 +82,7 @@ export async function createGiftPlan(
 export async function getGiftPlans(uid: string, lovedOneId: string) {
   const snapshot = await giftPlansCollection(uid, lovedOneId)
     .orderBy('createdAt', 'desc')
+    .limit(100)
     .get();
 
   return snapshot.docs

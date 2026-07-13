@@ -2,11 +2,18 @@ import { Router } from 'express';
 import {
   changePassword,
   forgotPassword,
+  googleAuth,
+  googleComplete,
+  googleOAuthStart,
+  googleOAuthCallback,
+  googleCompleteWithTempToken,
+  googleProfileHint,
   login,
   me,
   patchSubscription,
   refreshToken,
   register,
+  updateConsent,
   updateProfile,
 } from '../controllers/authController';
 import { requireAuth } from '../middleware/requireAuth';
@@ -16,11 +23,18 @@ const router = Router();
 
 router.post('/register', register);
 router.post('/login', login);
+router.post('/google', googleAuth);
+router.post('/google/complete', googleComplete);
+router.get('/google/oauth-start', googleOAuthStart);
+router.get('/google/oauth-callback', googleOAuthCallback);
+router.get('/google/profile-hint', googleProfileHint);
+router.post('/google/complete-profile', googleCompleteWithTempToken);
 router.post('/refresh', refreshToken);
 router.post('/forgot-password', forgotPassword);
 router.get('/me', requireAuth, me);
 router.patch('/profile', requireAuth, updateProfile);
 router.post('/change-password', requireAuth, changePassword);
 router.patch('/subscription/:uid', requireAuth, requireRole('admin'), patchSubscription);
+router.patch('/consent', requireAuth, updateConsent);
 
 export default router;

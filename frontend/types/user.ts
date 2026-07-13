@@ -2,6 +2,14 @@ export type AppRole = 'client' | 'admin';
 export type UserGender = 'male' | 'female' | 'unknown';
 export type SubscriptionTier = 'free' | 'premium';
 
+export type UserConsent = {
+  privacyAndTerms: true;
+  giftBot: boolean;
+  marketing: boolean;
+  consentVersion: string;
+  consentTimestamp: string;
+};
+
 export type UserProfile = {
   uid: string;
   firstName: string;
@@ -13,4 +21,5 @@ export type UserProfile = {
   createdAt: string;
   subscriptionTier?: SubscriptionTier;
   subscriptionExpiresAt?: string;
+  consent?: UserConsent;
 };

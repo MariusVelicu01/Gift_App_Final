@@ -11,17 +11,23 @@ import {
   View,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
+import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import { useAuth } from '../context/AuthContext';
+import { googleProfileHintRequest } from '../services/authApi';
 import type { UserGender } from '../types/user';
 import { getModalBackdropResponder } from '../utils/modalBackdrop';
+import { calculateAge, getDaysInMonth } from '../utils/dateUtils';
 import { C, R, S } from '../constants/theme';
+
+WebBrowser.maybeCompleteAuthSession();
 
 type Props = {
   visible: boolean;
   onClose: () => void;
 };
 
-type AuthTab = 'login' | 'register' | 'forgot';
+type AuthTab = 'login' | 'register' | 'forgot' | 'google-complete';
 
 function pad(value: number) {
   return value.toString().padStart(2, '0');
@@ -40,30 +46,9 @@ function buildBirthDate(year: number, month: number, day: number) {
   return `${year}-${pad(month)}-${pad(day)}`;
 }
 
-function calculateAge(dateString: string) {
-  const birth = new Date(dateString);
-  if (Number.isNaN(birth.getTime())) return null;
-
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const monthDiff = today.getMonth() - birth.getMonth();
-
-  if (
-    monthDiff < 0 ||
-    (monthDiff === 0 && today.getDate() < birth.getDate())
-  ) {
-    age--;
-  }
-
-  return age;
-}
-
-function getDaysInMonth(year: number, month: number) {
-  return new Date(year, month, 0).getDate();
-}
 
 export default function AuthModal({ visible, onClose }: Props) {
-  const { login, register, forgotPassword } = useAuth();
+  const { login, register, forgotPassword, loginFromTokens, completeGoogleProfile } = useAuth();
 
   const defaultBirth = getDefaultBirthDateParts();
 
@@ -91,6 +76,13 @@ export default function AuthModal({ visible, onClose }: Props) {
 
   const [forgotEmail, setForgotEmail] = useState('');
 
+  const [googleTempToken, setGoogleTempToken] = useState('');
+  const [googleEmail, setGoogleEmail] = useState('');
+
+  const [consentPrivacy, setConsentPrivacy] = useState(false);
+  const [consentGiftBot, setConsentGiftBot] = useState(false);
+  const [consentMarketing, setConsentMarketing] = useState(false);
+
   const clearMessages = () => {
     setErrorMessage('');
     setSuccessMessage('');
@@ -114,7 +106,81 @@ export default function AuthModal({ visible, onClose }: Props) {
     setBirthMonth(freshDefault.month);
     setBirthDay(freshDefault.day);
     setForgotEmail('');
+    setGoogleTempToken('');
+    setGoogleEmail('');
+    setConsentPrivacy(false);
+    setConsentGiftBot(false);
+    setConsentMarketing(false);
     clearMessages();
+  };
+
+  const handleGooglePress = async () => {
+    try {
+      clearMessages();
+      setSubmitting(true);
+      const apiBase = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+      const redirectUri = Linking.createURL('google-auth');
+      const startUrl = `${apiBase}/auth/google/oauth-start?redirectUri=${encodeURIComponent(redirectUri)}`;
+      const result = await WebBrowser.openAuthSessionAsync(startUrl, redirectUri);
+      if (result.type !== 'success' || !result.url) return;
+      const { queryParams } = Linking.parse(result.url);
+      if (!queryParams) return;
+      if (queryParams.error) {
+        const err = String(queryParams.error);
+        if (err !== 'cancelled') setErrorMessage('Autentificarea Google a eșuat.');
+        return;
+      }
+      if (queryParams.token) {
+        await loginFromTokens(
+          String(queryParams.token),
+          String(queryParams.refreshToken ?? ''),
+          String(queryParams.expiresIn ?? '3600')
+        );
+        handleClose();
+        return;
+      }
+      if (queryParams.needsProfile === 'true' && queryParams.tempToken) {
+        const token = String(queryParams.tempToken);
+        setGoogleTempToken(token);
+        try {
+          const hint = await googleProfileHintRequest(token);
+          setGoogleEmail(hint.googleEmail);
+          setFirstName(hint.googleFirstName);
+          setLastName(hint.googleLastName);
+        } catch {
+          // hints are optional — form stays empty but still functional
+        }
+        switchTab('google-complete');
+      }
+    } catch {
+      setErrorMessage('Autentificarea Google a eșuat.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleGoogleComplete = async () => {
+    if (!consentPrivacy) {
+      setErrorMessage('Trebuie să accepți Politica de confidențialitate și Termenii și condițiile.');
+      return;
+    }
+    try {
+      clearMessages();
+      setSubmitting(true);
+      await completeGoogleProfile(
+        googleTempToken,
+        firstName.trim(),
+        lastName.trim(),
+        birthDate,
+        gender,
+        { privacyAndTerms: true, giftBot: consentGiftBot, marketing: consentMarketing }
+      );
+      handleClose();
+    } catch (e: any) {
+      setErrorMessage(e?.message || 'Nu am putut crea contul.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const translateY = useRef(new Animated.Value(0)).current;
@@ -204,6 +270,7 @@ export default function AuthModal({ visible, onClose }: Props) {
     isPasswordValid &&
     doPasswordsMatch &&
     isAgeValid &&
+    consentPrivacy &&
     !submitting;
 
   const years = useMemo(() => {
@@ -254,6 +321,7 @@ export default function AuthModal({ visible, onClose }: Props) {
         email: registerEmail.trim(),
         password: registerPassword,
         role: 'client',
+        consent: { privacyAndTerms: true, giftBot: consentGiftBot, marketing: consentMarketing },
       });
 
       handleClose();
@@ -390,6 +458,21 @@ export default function AuthModal({ visible, onClose }: Props) {
                   <Text style={styles.actionButtonText}>
                     {submitting ? 'Se procesează...' : 'Autentificare'}
                   </Text>
+                </Pressable>
+
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>sau</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                <Pressable
+                  style={[styles.googleButton, submitting && styles.disabledButton]}
+                  onPress={handleGooglePress}
+                  disabled={submitting}
+                >
+                  <Text style={styles.googleButtonG}>G</Text>
+                  <Text style={styles.googleButtonText}>Continuă cu Google</Text>
                 </Pressable>
               </>
             )}
@@ -592,6 +675,37 @@ export default function AuthModal({ visible, onClose }: Props) {
                   </Text>
                 )}
 
+                <View style={styles.consentSection}>
+                  <Pressable style={styles.consentRow} onPress={() => setConsentPrivacy((v) => !v)}>
+                    <View style={[styles.checkbox, consentPrivacy && styles.checkboxChecked]}>
+                      {consentPrivacy && <Text style={styles.checkboxTick}>✓</Text>}
+                    </View>
+                    <Text style={styles.consentText}>
+                      <Text style={styles.consentRequired}>* </Text>
+                      Accept{' '}
+                      <Text style={styles.consentLink}>Politica de confidențialitate</Text>
+                      {' '}și{' '}
+                      <Text style={styles.consentLink}>Termenii și condițiile</Text>
+                    </Text>
+                  </Pressable>
+                  <Pressable style={styles.consentRow} onPress={() => setConsentGiftBot((v) => !v)}>
+                    <View style={[styles.checkbox, consentGiftBot && styles.checkboxChecked]}>
+                      {consentGiftBot && <Text style={styles.checkboxTick}>✓</Text>}
+                    </View>
+                    <Text style={styles.consentText}>
+                      Sunt de acord cu procesarea datelor pentru GiftBot (recomandări AI personalizate)
+                    </Text>
+                  </Pressable>
+                  <Pressable style={styles.consentRow} onPress={() => setConsentMarketing((v) => !v)}>
+                    <View style={[styles.checkbox, consentMarketing && styles.checkboxChecked]}>
+                      {consentMarketing && <Text style={styles.checkboxTick}>✓</Text>}
+                    </View>
+                    <Text style={styles.consentText}>
+                      Doresc să primesc oferte și noutăți prin email
+                    </Text>
+                  </Pressable>
+                </View>
+
                 <Pressable
                   style={[
                     styles.actionButton,
@@ -603,6 +717,113 @@ export default function AuthModal({ visible, onClose }: Props) {
                   <Text style={styles.actionButtonText}>
                     {submitting ? 'Se procesează...' : 'Inregistrare'}
                   </Text>
+                </Pressable>
+
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>sau</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                <Pressable
+                  style={[styles.googleButton, submitting && styles.disabledButton]}
+                  onPress={handleGooglePress}
+                  disabled={submitting}
+                >
+                  <Text style={styles.googleButtonG}>G</Text>
+                  <Text style={styles.googleButtonText}>Continuă cu Google</Text>
+                </Pressable>
+              </>
+            )}
+
+            {tab === 'google-complete' && (
+              <>
+                <Text style={styles.title}>Completează profilul</Text>
+                <Text style={styles.googleEmailLabel}>{googleEmail}</Text>
+
+                {!!errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
+
+                <TextInput
+                  style={styles.input}
+                  placeholder="Nume"
+                  value={lastName}
+                  onChangeText={(v) => { setLastName(v); clearMessages(); }}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Prenume"
+                  value={firstName}
+                  onChangeText={(v) => { setFirstName(v); clearMessages(); }}
+                />
+
+                <Text style={styles.label}>Data nașterii</Text>
+                <View style={styles.dateRow}>
+                  <View style={styles.datePickerWrapper}>
+                    <Picker selectedValue={birthDay} onValueChange={(v) => setBirthDay(Number(v))}>
+                      {days.map((d) => <Picker.Item key={d} label={String(d)} value={d} />)}
+                    </Picker>
+                  </View>
+                  <View style={styles.datePickerWrapper}>
+                    <Picker selectedValue={birthMonth} onValueChange={(v) => { const m = Number(v); setBirthMonth(m); if (birthDay > getDaysInMonth(birthYear, m)) setBirthDay(getDaysInMonth(birthYear, m)); }}>
+                      {months.map((m) => <Picker.Item key={m} label={pad(m)} value={m} />)}
+                    </Picker>
+                  </View>
+                  <View style={styles.datePickerWrapper}>
+                    <Picker selectedValue={birthYear} onValueChange={(v) => { const y = Number(v); setBirthYear(y); if (birthDay > getDaysInMonth(y, birthMonth)) setBirthDay(getDaysInMonth(y, birthMonth)); }}>
+                      {years.map((y) => <Picker.Item key={y} label={String(y)} value={y} />)}
+                    </Picker>
+                  </View>
+                </View>
+                <Text style={[styles.helperText, !isAgeValid && styles.errorTextInline]}>
+                  {isAgeValid ? `✔ Vârsta este validă (${age} ani)` : 'Trebuie să ai cel puțin 16 ani.'}
+                </Text>
+
+                <Text style={styles.label}>Gen</Text>
+                <View style={styles.genderRow}>
+                  {([{ value: 'male', label: 'Masculin' }, { value: 'female', label: 'Feminin' }, { value: 'unknown', label: 'Nespecificat' }] as const).map((o) => (
+                    <Pressable key={o.value} style={[styles.genderButton, gender === o.value && styles.genderButtonActive]} onPress={() => setGender(o.value)}>
+                      <Text style={[styles.genderButtonText, gender === o.value && styles.genderButtonTextActive]}>{o.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <View style={styles.consentSection}>
+                  <Pressable style={styles.consentRow} onPress={() => setConsentPrivacy((v) => !v)}>
+                    <View style={[styles.checkbox, consentPrivacy && styles.checkboxChecked]}>
+                      {consentPrivacy && <Text style={styles.checkboxTick}>✓</Text>}
+                    </View>
+                    <Text style={styles.consentText}>
+                      <Text style={styles.consentRequired}>* </Text>
+                      Accept{' '}
+                      <Text style={styles.consentLink}>Politica de confidențialitate</Text>
+                      {' '}și{' '}
+                      <Text style={styles.consentLink}>Termenii și condițiile</Text>
+                    </Text>
+                  </Pressable>
+                  <Pressable style={styles.consentRow} onPress={() => setConsentGiftBot((v) => !v)}>
+                    <View style={[styles.checkbox, consentGiftBot && styles.checkboxChecked]}>
+                      {consentGiftBot && <Text style={styles.checkboxTick}>✓</Text>}
+                    </View>
+                    <Text style={styles.consentText}>
+                      Sunt de acord cu procesarea datelor pentru GiftBot (recomandări AI personalizate)
+                    </Text>
+                  </Pressable>
+                  <Pressable style={styles.consentRow} onPress={() => setConsentMarketing((v) => !v)}>
+                    <View style={[styles.checkbox, consentMarketing && styles.checkboxChecked]}>
+                      {consentMarketing && <Text style={styles.checkboxTick}>✓</Text>}
+                    </View>
+                    <Text style={styles.consentText}>
+                      Doresc să primesc oferte și noutăți prin email
+                    </Text>
+                  </Pressable>
+                </View>
+
+                <Pressable
+                  style={[styles.actionButton, (submitting || !firstName.trim() || !lastName.trim() || !isAgeValid || !consentPrivacy) && styles.disabledButton]}
+                  onPress={handleGoogleComplete}
+                  disabled={submitting || !firstName.trim() || !lastName.trim() || !isAgeValid || !consentPrivacy}
+                >
+                  <Text style={styles.actionButtonText}>{submitting ? 'Se procesează...' : 'Creează contul'}</Text>
                 </Pressable>
               </>
             )}
@@ -925,5 +1146,93 @@ const styles = StyleSheet.create({
     padding: 10,
     borderWidth: 0.5,
     borderColor: C.borderStrong,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 16,
+    gap: 10,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 0.5,
+    backgroundColor: C.border,
+  },
+  dividerText: {
+    color: C.textFaint,
+    fontSize: 13,
+  },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    borderRadius: R.pill,
+    paddingVertical: 13,
+    backgroundColor: C.surface2,
+  },
+  googleButtonG: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#4285F4',
+  },
+  googleButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: C.text,
+  },
+  googleEmailLabel: {
+    fontSize: 14,
+    color: C.textDim,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  consentSection: {
+    marginTop: 4,
+    marginBottom: 12,
+    gap: 10,
+  },
+  consentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: C.border,
+    backgroundColor: C.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+    flexShrink: 0,
+  },
+  checkboxChecked: {
+    backgroundColor: C.accent,
+    borderColor: C.accent,
+  },
+  checkboxTick: {
+    color: C.accentInk,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 14,
+  },
+  consentText: {
+    flex: 1,
+    fontSize: 13,
+    color: C.textDim,
+    lineHeight: 18,
+  },
+  consentRequired: {
+    color: C.danger,
+    fontWeight: '700',
+  },
+  consentLink: {
+    color: C.accent,
+    fontWeight: '600',
   },
 });

@@ -309,9 +309,22 @@ function normalizeImportMetadata(body: any) {
   };
 }
 
+let _storesCache: { data: any[]; expiresAt: number } | null = null;
+const STORES_CACHE_TTL = 5 * 60 * 1000;
+
+export function invalidatePartnerStoresCache() {
+  _storesCache = null;
+}
+
 export async function getAll(req: Request, res: Response) {
   try {
+    if (_storesCache && _storesCache.expiresAt > Date.now()) {
+      res.set('Cache-Control', 'private, max-age=300');
+      return res.status(200).json(_storesCache.data);
+    }
     const data = await getPartnerStores();
+    _storesCache = { data, expiresAt: Date.now() + STORES_CACHE_TTL };
+    res.set('Cache-Control', 'private, max-age=300');
     return res.status(200).json(data);
   } catch (error) {
     console.error('GET PARTNER STORES ERROR:', error);
@@ -332,6 +345,7 @@ export async function create(req: Request, res: Response) {
       createdAt: new Date().toISOString(),
     });
 
+    invalidatePartnerStoresCache();
     return res.status(201).json(store);
   } catch (error) {
     console.error('CREATE PARTNER STORE ERROR:', error);
@@ -356,6 +370,7 @@ export async function update(req: Request, res: Response) {
 
     const store = await updatePartnerStore(storeId, result.payload);
 
+    invalidatePartnerStoresCache();
     return res.status(200).json(store);
   } catch (error) {
     console.error('UPDATE PARTNER STORE ERROR:', error);
@@ -415,6 +430,7 @@ export async function importProducts(req: Request, res: Response) {
       console.error('CREATE PRICE ALERTS ERROR:', alertError);
     }
 
+    invalidatePartnerStoresCache();
     return res.status(200).json(store);
   } catch (error) {
     console.error('IMPORT PRODUCTS ERROR:', error);

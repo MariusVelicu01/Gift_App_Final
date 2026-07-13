@@ -80,7 +80,7 @@ function sanitizeUrl(raw?: string): string {
   if (!url) return '';
   try {
     const parsed = new URL(url);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? url : '';
+    return parsed.protocol === 'https:' ? url : '';
   } catch {
     return '';
   }
@@ -961,7 +961,7 @@ export async function updateProducts(req: Request, res: Response) {
       payload.budgetHistory = appendBudgetHistory(
         existing,
         budget,
-        String(req.body.budgetChangeReason || 'manual'),
+        String(req.body.budgetChangeReason || 'manual').slice(0, 200),
         updatedAt
       );
     }
