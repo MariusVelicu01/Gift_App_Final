@@ -16,6 +16,9 @@ import * as Linking from 'expo-linking';
 import { useAuth } from '../context/AuthContext';
 import { googleProfileHintRequest } from '../services/authApi';
 import LegalDocumentModal from './LegalDocumentModal';
+import MagneticButton from './landing/MagneticButton';
+import GiftMascot from './landing/GiftMascot';
+import ConfusedGiver from './landing/ConfusedGiver';
 import type { UserGender } from '../types/user';
 import { getModalBackdropResponder } from '../utils/modalBackdrop';
 import { calculateAge, getDaysInMonth } from '../utils/dateUtils';
@@ -58,6 +61,7 @@ export default function AuthModal({ visible, onClose }: Props) {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [legalDoc, setLegalDoc] = useState<'privacy' | 'terms' | null>(null);
+  const [loginJustSucceeded, setLoginJustSucceeded] = useState(false);
 
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -113,6 +117,7 @@ export default function AuthModal({ visible, onClose }: Props) {
     setConsentPrivacy(false);
     setConsentGiftBot(false);
     setConsentMarketing(false);
+    setLoginJustSucceeded(false);
     clearMessages();
   };
 
@@ -296,6 +301,9 @@ export default function AuthModal({ visible, onClose }: Props) {
       clearMessages();
       setSubmitting(true);
       await login(loginEmail.trim(), loginPassword);
+      setLoginJustSucceeded(true);
+      // Let the gift-opening animation play before the modal disappears.
+      await new Promise((resolve) => setTimeout(resolve, 1100));
       handleClose();
     } catch {
       setErrorMessage('Emailul sau parola sunt greșite.');
@@ -396,6 +404,25 @@ export default function AuthModal({ visible, onClose }: Props) {
             </Pressable>
           </View>
 
+          <View style={styles.mascotArea}>
+            {tab === 'forgot' ? (
+              <ConfusedGiver size={100} />
+            ) : (
+              <GiftMascot
+                size={100}
+                mood={
+                  tab === 'login'
+                    ? loginJustSucceeded
+                      ? 'success'
+                      : errorMessage
+                      ? 'fail'
+                      : 'idle'
+                    : 'building'
+                }
+              />
+            )}
+          </View>
+
           <ScrollView contentContainerStyle={styles.body}>
             {tab === 'login' && (
               <>
@@ -452,15 +479,11 @@ export default function AuthModal({ visible, onClose }: Props) {
                   <Text style={styles.forgotPasswordLinkText}>Ai uitat parola?</Text>
                 </Pressable>
 
-                <Pressable
-                  style={[styles.actionButton, submitting && styles.disabledButton]}
-                  onPress={handleLogin}
-                  disabled={submitting}
-                >
+                <MagneticButton style={styles.actionButton} onPress={handleLogin} disabled={submitting}>
                   <Text style={styles.actionButtonText}>
                     {submitting ? 'Se procesează...' : 'Autentificare'}
                   </Text>
-                </Pressable>
+                </MagneticButton>
 
                 <View style={styles.dividerRow}>
                   <View style={styles.dividerLine} />
@@ -468,14 +491,10 @@ export default function AuthModal({ visible, onClose }: Props) {
                   <View style={styles.dividerLine} />
                 </View>
 
-                <Pressable
-                  style={[styles.googleButton, submitting && styles.disabledButton]}
-                  onPress={handleGooglePress}
-                  disabled={submitting}
-                >
+                <MagneticButton style={styles.googleButton} onPress={handleGooglePress} disabled={submitting}>
                   <Text style={styles.googleButtonG}>G</Text>
                   <Text style={styles.googleButtonText}>Continuă cu Google</Text>
-                </Pressable>
+                </MagneticButton>
               </>
             )}
 
@@ -485,25 +504,29 @@ export default function AuthModal({ visible, onClose }: Props) {
 
                 {!!errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
 
-                <TextInput
-                  style={styles.input}
-                  placeholder="Nume"
-                  value={lastName}
-                  onChangeText={(value) => {
-                    setLastName(value);
-                    if (errorMessage) setErrorMessage('');
-                  }}
-                />
+                <Text style={styles.sectionLabel}>Date personale</Text>
 
-                <TextInput
-                  style={styles.input}
-                  placeholder="Prenume"
-                  value={firstName}
-                  onChangeText={(value) => {
-                    setFirstName(value);
-                    if (errorMessage) setErrorMessage('');
-                  }}
-                />
+                <View style={styles.nameRow}>
+                  <TextInput
+                    style={[styles.input, styles.nameInput]}
+                    placeholder="Prenume"
+                    value={firstName}
+                    onChangeText={(value) => {
+                      setFirstName(value);
+                      if (errorMessage) setErrorMessage('');
+                    }}
+                  />
+
+                  <TextInput
+                    style={[styles.input, styles.nameInput]}
+                    placeholder="Nume"
+                    value={lastName}
+                    onChangeText={(value) => {
+                      setLastName(value);
+                      if (errorMessage) setErrorMessage('');
+                    }}
+                  />
+                </View>
 
                 <Text style={styles.label}>Data nașterii</Text>
 
@@ -592,6 +615,8 @@ export default function AuthModal({ visible, onClose }: Props) {
                   ))}
                 </View>
 
+                <Text style={styles.sectionLabel}>Detalii cont</Text>
+
                 <TextInput
                   style={styles.input}
                   placeholder="Email"
@@ -605,17 +630,17 @@ export default function AuthModal({ visible, onClose }: Props) {
                 />
 
                 <View style={styles.passwordInputWrapper}>
-                <TextInput
-                  style={[styles.input, styles.passwordInput]}
-                  placeholder="Parolă"
-                  value={registerPassword}
-                  onChangeText={(value) => {
-                    setRegisterPassword(value);
-                    if (errorMessage) setErrorMessage('');
-                  }}
-                  secureTextEntry={!showRegisterPassword}
-                  autoCapitalize="none"
-                />
+                  <TextInput
+                    style={[styles.input, styles.passwordInput]}
+                    placeholder="Parolă"
+                    value={registerPassword}
+                    onChangeText={(value) => {
+                      setRegisterPassword(value);
+                      if (errorMessage) setErrorMessage('');
+                    }}
+                    secureTextEntry={!showRegisterPassword}
+                    autoCapitalize="none"
+                  />
                   <Pressable
                     style={({ hovered, pressed }) => [
                       styles.passwordRevealButton,
@@ -640,20 +665,21 @@ export default function AuthModal({ visible, onClose }: Props) {
                   <Rule ok={passwordChecks.special} text="Cel puțin un caracter special" />
                 </View>
 
-                <TextInput
-                  style={styles.input}
-                  placeholder="Confirmă parola"
-                  value={confirmPassword}
-                  onChangeText={(value) => {
-                    setConfirmPassword(value);
-                    if (errorMessage) setErrorMessage('');
-                  }}
-                  secureTextEntry={!showConfirmPassword}
-                  autoCapitalize="none"
-                />
+                <View style={styles.passwordInputWrapper}>
+                  <TextInput
+                    style={[styles.input, styles.passwordInput]}
+                    placeholder="Confirmă parola"
+                    value={confirmPassword}
+                    onChangeText={(value) => {
+                      setConfirmPassword(value);
+                      if (errorMessage) setErrorMessage('');
+                    }}
+                    secureTextEntry={!showConfirmPassword}
+                    autoCapitalize="none"
+                  />
                   <Pressable
                     style={({ hovered, pressed }) => [
-                      styles.passwordRevealInlineButton,
+                      styles.passwordRevealButton,
                       hovered && styles.passwordRevealButtonHover,
                       pressed && styles.passwordRevealButtonPressed,
                     ]}
@@ -663,6 +689,7 @@ export default function AuthModal({ visible, onClose }: Props) {
                       {showConfirmPassword ? 'Ascunde' : 'Arata'}
                     </Text>
                   </Pressable>
+                </View>
 
                 {confirmPassword.length > 0 && (
                   <Text
@@ -676,6 +703,8 @@ export default function AuthModal({ visible, onClose }: Props) {
                       : 'Parolele nu coincid'}
                   </Text>
                 )}
+
+                <Text style={styles.sectionLabel}>Consimțăminte</Text>
 
                 <View style={styles.consentSection}>
                   <Pressable style={styles.consentRow} onPress={() => setConsentPrivacy((v) => !v)}>
@@ -712,18 +741,15 @@ export default function AuthModal({ visible, onClose }: Props) {
                   </Pressable>
                 </View>
 
-                <Pressable
-                  style={[
-                    styles.actionButton,
-                    !isRegisterButtonEnabled && styles.disabledButton,
-                  ]}
+                <MagneticButton
+                  style={styles.actionButton}
                   onPress={handleRegister}
                   disabled={!isRegisterButtonEnabled}
                 >
                   <Text style={styles.actionButtonText}>
                     {submitting ? 'Se procesează...' : 'Inregistrare'}
                   </Text>
-                </Pressable>
+                </MagneticButton>
 
                 <View style={styles.dividerRow}>
                   <View style={styles.dividerLine} />
@@ -731,14 +757,10 @@ export default function AuthModal({ visible, onClose }: Props) {
                   <View style={styles.dividerLine} />
                 </View>
 
-                <Pressable
-                  style={[styles.googleButton, submitting && styles.disabledButton]}
-                  onPress={handleGooglePress}
-                  disabled={submitting}
-                >
+                <MagneticButton style={styles.googleButton} onPress={handleGooglePress} disabled={submitting}>
                   <Text style={styles.googleButtonG}>G</Text>
                   <Text style={styles.googleButtonText}>Continuă cu Google</Text>
-                </Pressable>
+                </MagneticButton>
               </>
             )}
 
@@ -828,13 +850,13 @@ export default function AuthModal({ visible, onClose }: Props) {
                   </Pressable>
                 </View>
 
-                <Pressable
-                  style={[styles.actionButton, (submitting || !firstName.trim() || !lastName.trim() || !isAgeValid || !consentPrivacy) && styles.disabledButton]}
+                <MagneticButton
+                  style={styles.actionButton}
                   onPress={handleGoogleComplete}
                   disabled={submitting || !firstName.trim() || !lastName.trim() || !isAgeValid || !consentPrivacy}
                 >
                   <Text style={styles.actionButtonText}>{submitting ? 'Se procesează...' : 'Creează contul'}</Text>
-                </Pressable>
+                </MagneticButton>
               </>
             )}
 
@@ -857,15 +879,11 @@ export default function AuthModal({ visible, onClose }: Props) {
                   keyboardType="email-address"
                 />
 
-                <Pressable
-                  style={[styles.actionButton, submitting && styles.disabledButton]}
-                  onPress={handleForgotPassword}
-                  disabled={submitting}
-                >
+                <MagneticButton style={styles.actionButton} onPress={handleForgotPassword} disabled={submitting}>
                   <Text style={styles.actionButtonText}>
                     {submitting ? 'Se procesează...' : 'Trimite email'}
                   </Text>
-                </Pressable>
+                </MagneticButton>
               </>
             )}
 
@@ -884,13 +902,13 @@ export default function AuthModal({ visible, onClose }: Props) {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(31,27,22,0.5)',
+    backgroundColor: 'rgba(11,5,8,0.6)',
     justifyContent: 'flex-end',
   },
   modalCard: {
     backgroundColor: C.surface,
-    borderTopLeftRadius: R.xxl,
-    borderTopRightRadius: R.xxl,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
     maxHeight: '90%',
     paddingBottom: 24,
     ...S.float,
@@ -903,16 +921,22 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: C.borderStrong,
+    backgroundColor: '#fecdd3',
   },
   tabsRow: {
     flexDirection: 'row',
     padding: 14,
     gap: 8,
   },
+  mascotArea: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 96,
+    marginBottom: 4,
+  },
   tabButton: {
     flex: 1,
-    paddingVertical: 11,
+    paddingVertical: 12,
     borderRadius: R.pill,
     backgroundColor: C.surface2,
     alignItems: 'center',
@@ -920,28 +944,27 @@ const styles = StyleSheet.create({
     borderColor: C.border,
   },
   tabButtonActive: {
-    backgroundColor: C.accent,
-    borderColor: C.accent,
+    backgroundColor: '#ff4d6d',
+    borderColor: '#ff4d6d',
   },
   tabText: {
     color: C.textDim,
-    fontWeight: '600',
-    fontSize: 14,
+    fontWeight: '700',
+    fontSize: 13,
   },
   tabTextActive: {
-    color: C.accentInk,
-    fontWeight: '600',
+    color: '#1c0a13',
+    fontWeight: '800',
   },
   body: {
-    padding: 16,
+    padding: 20,
   },
   title: {
-    fontFamily: 'serif',
-    fontSize: 22,
-    fontWeight: '400',
+    fontSize: 26,
+    fontWeight: '900',
     color: C.text,
-    marginBottom: 16,
-    letterSpacing: -0.3,
+    marginBottom: 18,
+    letterSpacing: -0.8,
   },
   input: {
     borderWidth: 0.5,
@@ -973,17 +996,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
-  passwordRevealInlineButton: {
-    alignSelf: 'flex-end',
-    borderRadius: R.sm,
-    backgroundColor: C.accentSoft,
-    borderWidth: 0.5,
-    borderColor: C.border,
-    marginTop: -6,
-    marginBottom: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
   passwordRevealButtonHover: {
     backgroundColor: C.surface2,
   },
@@ -1009,7 +1021,7 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.98 }],
   },
   forgotPasswordLinkText: {
-    color: C.accent,
+    color: '#ff4d6d',
     fontSize: 13,
     fontWeight: '700',
   },
@@ -1019,6 +1031,22 @@ const styles = StyleSheet.create({
     color: C.textDim,
     marginBottom: 8,
     marginTop: 4,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: C.accent,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+    marginTop: 6,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  nameInput: {
+    flex: 1,
   },
   helperText: {
     fontSize: 13,
@@ -1113,19 +1141,22 @@ const styles = StyleSheet.create({
     color: C.accentInk,
   },
   actionButton: {
-    backgroundColor: C.accent,
+    backgroundColor: '#ff4d6d',
     borderRadius: R.pill,
-    paddingVertical: 15,
+    paddingVertical: 16,
     alignItems: 'center',
     marginTop: 8,
-  },
-  disabledButton: {
-    opacity: 0.5,
+    shadowColor: '#ff4d6d',
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
   },
   actionButtonText: {
-    color: C.accentInk,
-    fontWeight: '600',
+    color: '#1c0a13',
+    fontWeight: '800',
     fontSize: 15,
+    letterSpacing: 0.2,
   },
   closeButton: {
     marginTop: 12,
@@ -1224,11 +1255,11 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   checkboxChecked: {
-    backgroundColor: C.accent,
-    borderColor: C.accent,
+    backgroundColor: '#ff4d6d',
+    borderColor: '#ff4d6d',
   },
   checkboxTick: {
-    color: C.accentInk,
+    color: '#1c0a13',
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 14,
@@ -1244,8 +1275,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   consentLink: {
-    color: C.accent,
-    fontWeight: '600',
+    color: '#ff4d6d',
+    fontWeight: '700',
     textDecorationLine: 'underline',
   },
 });
