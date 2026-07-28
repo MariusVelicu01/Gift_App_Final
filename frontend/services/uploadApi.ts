@@ -1,13 +1,23 @@
 import { Platform } from 'react-native';
 import { API_BASE_URL } from './config';
 
+export type UploadPurpose = 'loved-one' | 'purchase-proof';
+
+export type UploadImageResult = {
+  imageUrl: string;
+  // Only present for purpose: 'loved-one' — the private storage key to persist instead
+  // of imageUrl (which is a short-lived signed URL, resolved fresh on every read).
+  imagePath?: string;
+};
+
 export async function uploadImageApi(
   params: {
     uri: string;
     file?: File | null;
   },
-  token: string
-) {
+  token: string,
+  purpose: UploadPurpose
+): Promise<UploadImageResult> {
   const formData = new FormData();
 
   if (Platform.OS === 'web') {
@@ -24,6 +34,8 @@ export async function uploadImageApi(
     } as any);
   }
 
+  formData.append('purpose', purpose);
+
   const response = await fetch(`${API_BASE_URL}/upload`, {
     method: 'POST',
     headers: {
@@ -38,5 +50,5 @@ export async function uploadImageApi(
     throw new Error(data?.message || 'Upload failed');
   }
 
-  return data.imageUrl;
+  return data;
 }

@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
-import { uploadImageToStorage } from '../services/uploadService';
+import { UploadPurpose, uploadImageToStorage } from '../services/uploadService';
+
+const ALLOWED_PURPOSES: UploadPurpose[] = ['loved-one', 'purchase-proof'];
 
 type MagicCheck = (b: Buffer) => boolean;
 const MAGIC_CHECKS: Record<string, MagicCheck> = {
@@ -35,9 +37,13 @@ export async function uploadImage(req: Request, res: Response) {
       return res.status(400).json({ message: 'Fișierul nu este o imagine validă.' });
     }
 
-    const imageUrl = await uploadImageToStorage(file, uid);
+    const purpose = ALLOWED_PURPOSES.includes(req.body?.purpose)
+      ? (req.body.purpose as UploadPurpose)
+      : 'purchase-proof';
 
-    return res.status(200).json({ imageUrl });
+    const result = await uploadImageToStorage(file, uid, purpose);
+
+    return res.status(200).json(result);
   } catch (error: any) {
     if (error?.message?.includes('neacceptat')) {
       return res.status(400).json({ message: error.message });

@@ -10,6 +10,14 @@ service firebase.storage {
       allow write: if false;
     }
 
+    // ─── Dovezi de cumpărare (chitanțe/poze produs) ───────────────────────
+    // Fișierele sunt publice la upload (vezi uploadService.ts) — regula rămâne
+    // ca linie de bază dacă acest comportament se schimbă vreodată.
+    match /purchase-proofs/{userId}/{fileName} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+    }
+
     // ─── Orice alt path: blocat ──────────────────────────────────────────
     match /{allPaths=**} {
       allow read, write: if false;

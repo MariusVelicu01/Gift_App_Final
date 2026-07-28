@@ -15,6 +15,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { useAuth } from '../context/AuthContext';
 import { googleProfileHintRequest } from '../services/authApi';
+import LegalDocumentModal from './LegalDocumentModal';
 import type { UserGender } from '../types/user';
 import { getModalBackdropResponder } from '../utils/modalBackdrop';
 import { calculateAge, getDaysInMonth } from '../utils/dateUtils';
@@ -56,6 +57,7 @@ export default function AuthModal({ visible, onClose }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [legalDoc, setLegalDoc] = useState<'privacy' | 'terms' | null>(null);
 
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -683,9 +685,13 @@ export default function AuthModal({ visible, onClose }: Props) {
                     <Text style={styles.consentText}>
                       <Text style={styles.consentRequired}>* </Text>
                       Accept{' '}
-                      <Text style={styles.consentLink}>Politica de confidențialitate</Text>
+                      <Text style={styles.consentLink} onPress={() => setLegalDoc('privacy')}>
+                        Politica de confidențialitate
+                      </Text>
                       {' '}și{' '}
-                      <Text style={styles.consentLink}>Termenii și condițiile</Text>
+                      <Text style={styles.consentLink} onPress={() => setLegalDoc('terms')}>
+                        Termenii și condițiile
+                      </Text>
                     </Text>
                   </Pressable>
                   <Pressable style={styles.consentRow} onPress={() => setConsentGiftBot((v) => !v)}>
@@ -795,9 +801,13 @@ export default function AuthModal({ visible, onClose }: Props) {
                     <Text style={styles.consentText}>
                       <Text style={styles.consentRequired}>* </Text>
                       Accept{' '}
-                      <Text style={styles.consentLink}>Politica de confidențialitate</Text>
+                      <Text style={styles.consentLink} onPress={() => setLegalDoc('privacy')}>
+                        Politica de confidențialitate
+                      </Text>
                       {' '}și{' '}
-                      <Text style={styles.consentLink}>Termenii și condițiile</Text>
+                      <Text style={styles.consentLink} onPress={() => setLegalDoc('terms')}>
+                        Termenii și condițiile
+                      </Text>
                     </Text>
                   </Pressable>
                   <Pressable style={styles.consentRow} onPress={() => setConsentGiftBot((v) => !v)}>
@@ -865,6 +875,8 @@ export default function AuthModal({ visible, onClose }: Props) {
           </ScrollView>
         </Animated.View>
       </View>
+
+      <LegalDocumentModal type={legalDoc} onClose={() => setLegalDoc(null)} />
     </Modal>
   );
 }
@@ -1234,5 +1246,6 @@ const styles = StyleSheet.create({
   consentLink: {
     color: C.accent,
     fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });

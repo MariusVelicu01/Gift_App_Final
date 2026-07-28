@@ -75,11 +75,6 @@ function dateKeyFromIso(dateValue?: string) {
   return toDateKey(date.getFullYear(), date.getMonth() + 1, date.getDate());
 }
 
-function formatDateKey(dateKey: string) {
-  const [year, month, day] = dateKey.split('-');
-  return `${day}.${month}.${year}`;
-}
-
 function getMonthName(monthIndex: number) {
   return new Date(2026, monthIndex, 1).toLocaleString('ro-RO', {
     month: 'long',
@@ -554,21 +549,6 @@ export default function CalendarScreen({ resetRef }: Props) {
     () => getCalendarDays(year, monthIndex),
     [monthIndex, year]
   );
-  const monthAgendaDays = useMemo(() => {
-    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-
-    return Array.from({ length: daysInMonth }, (_, index) => {
-      const day = index + 1;
-      const dateKey = toDateKey(year, monthIndex + 1, day);
-
-      return {
-        day,
-        dateKey,
-        events: eventsByDate[dateKey] || [],
-      };
-    }).filter((item) => item.events.length > 0);
-  }, [eventsByDate, monthIndex, year]);
-
   const goToPreviousMonth = () => {
     if (monthIndex === 0) {
       setMonthIndex(11);

@@ -1,10 +1,16 @@
 import { Request, Response } from 'express';
+import { logger } from '../config/logger';
 import { db } from '../config/firebase';
 import {
   createPartnerStore,
+  getAllProductsAcrossStores,
+  getAllProductsForStore,
   getPartnerStoreById,
+  getPartnerStoreProducts,
   getPartnerStores,
+  getPartnerStoresWithEmbeddedProducts,
   ProductImportItem,
+  searchProductsAcrossStores,
   updatePartnerStore,
   updatePartnerStoreProducts,
 } from '../services/partnerStoresService';
@@ -316,19 +322,58 @@ export function invalidatePartnerStoresCache() {
   _storesCache = null;
 }
 
-export async function getAll(req: Request, res: Response) {
+export async function getAll(_req: Request, res: Response) {
   try {
     if (_storesCache && _storesCache.expiresAt > Date.now()) {
       res.set('Cache-Control', 'private, max-age=300');
       return res.status(200).json(_storesCache.data);
     }
-    const data = await getPartnerStores();
+    const data = await getPartnerStoresWithEmbeddedProducts();
     _storesCache = { data, expiresAt: Date.now() + STORES_CACHE_TTL };
     res.set('Cache-Control', 'private, max-age=300');
     return res.status(200).json(data);
   } catch (error) {
-    console.error('GET PARTNER STORES ERROR:', error);
+    logger.error({ err: error }, 'GET PARTNER STORES ERROR');
     return res.status(500).json({ message: 'Nu am putut prelua magazinele.' });
+  }
+}
+
+export async function getStoreProducts(req: Request, res: Response) {
+  try {
+    const storeId = getParam(req.params.storeId);
+    const existing = await getPartnerStoreById(storeId);
+
+    if (!existing) {
+      return res.status(404).json({ message: 'Magazinul nu a fost gasit.' });
+    }
+
+    const page = await getPartnerStoreProducts(storeId, {
+      cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined,
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+      category: typeof req.query.category === 'string' ? req.query.category : undefined,
+      search: typeof req.query.search === 'string' ? req.query.search : undefined,
+    });
+
+    return res.status(200).json(page);
+  } catch (error) {
+    logger.error({ err: error }, 'GET STORE PRODUCTS ERROR');
+    return res.status(500).json({ message: 'Nu am putut prelua produsele.' });
+  }
+}
+
+export async function searchStoreProducts(req: Request, res: Response) {
+  try {
+    const page = await searchProductsAcrossStores({
+      cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined,
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+      category: typeof req.query.category === 'string' ? req.query.category : undefined,
+      search: typeof req.query.search === 'string' ? req.query.search : undefined,
+    });
+
+    return res.status(200).json(page);
+  } catch (error) {
+    logger.error({ err: error }, 'SEARCH STORE PRODUCTS ERROR');
+    return res.status(500).json({ message: 'Nu am putut cauta produsele.' });
   }
 }
 
@@ -348,7 +393,7 @@ export async function create(req: Request, res: Response) {
     invalidatePartnerStoresCache();
     return res.status(201).json(store);
   } catch (error) {
-    console.error('CREATE PARTNER STORE ERROR:', error);
+    logger.error({ err: error }, 'CREATE PARTNER STORE ERROR');
     return res.status(500).json({ message: 'Nu am putut salva magazinul.' });
   }
 }
@@ -373,7 +418,7 @@ export async function update(req: Request, res: Response) {
     invalidatePartnerStoresCache();
     return res.status(200).json(store);
   } catch (error) {
-    console.error('UPDATE PARTNER STORE ERROR:', error);
+    logger.error({ err: error }, 'UPDATE PARTNER STORE ERROR');
     return res.status(500).json({ message: 'Nu am putut actualiza magazinul.' });
   }
 }
@@ -395,6 +440,10 @@ export async function importProducts(req: Request, res: Response) {
       return res.status(400).json({ message: 'Nu exista produse valide in fisier.' });
     }
 
+    // Snapshot the catalog as it stood right before this import, so price-drop alerts
+    // and retroactive gift-plan price refresh can diff against it.
+    const previousProducts = await getAllProductsForStore(storeId);
+
     const importedAt = new Date().toISOString();
     const store = await updatePartnerStoreProducts(
       storeId,
@@ -414,26 +463,26 @@ export async function importProducts(req: Request, res: Response) {
         importedAt,
       });
     } catch (refreshError) {
-      console.error('REFRESH GIFT PLAN PRICES ERROR:', refreshError);
+      logger.error({ err: refreshError }, 'REFRESH GIFT PLAN PRICES ERROR');
     }
 
     try {
       await createPriceDropAlertsForImport({
         storeId,
         storeName,
-        previousProducts: existing.products || [],
+        previousProducts: previousProducts as any,
         importedProducts: products,
         currency,
         importedAt,
       });
     } catch (alertError) {
-      console.error('CREATE PRICE ALERTS ERROR:', alertError);
+      logger.error({ err: alertError }, 'CREATE PRICE ALERTS ERROR');
     }
 
     invalidatePartnerStoresCache();
     return res.status(200).json(store);
   } catch (error) {
-    console.error('IMPORT PRODUCTS ERROR:', error);
+    logger.error({ err: error }, 'IMPORT PRODUCTS ERROR');
     return res.status(500).json({ message: 'Nu am putut importa produsele.' });
   }
 }
@@ -527,7 +576,7 @@ export async function getProductUsage(req: Request, res: Response) {
       occurrences,
     });
   } catch (error) {
-    console.error('GET PRODUCT USAGE ERROR:', error);
+    logger.error({ err: error }, 'GET PRODUCT USAGE ERROR');
     return res.status(500).json({ message: 'Nu am putut calcula statisticile produsului.' });
   }
 }
@@ -578,7 +627,7 @@ export async function getAffiliateStats(req: Request, res: Response) {
     const storeCommissionPct = Number((existing as any)?.affiliate?.commissionPercent || 0);
     const paymentTermDays = Number((existing as any)?.affiliate?.paymentTermDays || 30);
 
-    const storeProducts = Array.isArray((existing as any).products) ? (existing as any).products : [];
+    const storeProducts = await getAllProductsForStore(storeId);
     const catalogPctByExternalId = new Map<string, number>();
     const catalogPctByName = new Map<string, number>();
     storeProducts.forEach((p: any) => {
@@ -597,7 +646,6 @@ export async function getAffiliateStats(req: Request, res: Response) {
     let previousMonthsPending = 0; // luni anterioare, neprimite
     let totalReceived = 0;
     let commissionPercent = storeCommissionPct;
-    let earliestPendingPurchaseDate: string | null = null; // pentru calculul datei de plată
 
     const products: {
       name: string;
@@ -661,9 +709,6 @@ export async function getAffiliateStats(req: Request, res: Response) {
             currentMonthExpected = Math.round((currentMonthExpected + expected) * 100) / 100;
           } else {
             previousMonthsPending = Math.round((previousMonthsPending + expected) * 100) / 100;
-            if (purchasedAt && (!earliestPendingPurchaseDate || purchasedAt < earliestPendingPurchaseDate)) {
-              earliestPendingPurchaseDate = purchasedAt;
-            }
           }
         }
 
@@ -696,12 +741,12 @@ export async function getAffiliateStats(req: Request, res: Response) {
       products,
     });
   } catch (error) {
-    console.error('GET AFFILIATE STATS ERROR:', error);
+    logger.error({ err: error }, 'GET AFFILIATE STATS ERROR');
     return res.status(500).json({ message: 'Nu am putut calcula statisticile afiliate.' });
   }
 }
 
-export async function getAffiliateSummary(req: Request, res: Response) {
+export async function getAffiliateSummary(_req: Request, res: Response) {
   try {
     const allStores = await getPartnerStores();
 
@@ -710,21 +755,25 @@ export async function getAffiliateSummary(req: Request, res: Response) {
     const catalogPctByStoreAndName = new Map<string, Map<string, number>>();
 
     allStores.forEach((store: any) => {
-      const storeId = store.id;
       const storePct = Number(store?.affiliate?.commissionPercent || 0);
-      if (storePct > 0) storeCommissionMap.set(storeId, storePct);
+      if (storePct > 0) storeCommissionMap.set(store.id, storePct);
+    });
 
-      const byExternalId = new Map<string, number>();
-      const byName = new Map<string, number>();
-      (store.products || []).forEach((p: any) => {
-        const pct = Number(p?.affiliate?.commissionPercent || storePct || 0);
-        if (pct > 0) {
-          if (p.externalId) byExternalId.set(String(p.externalId), pct);
-          if (p.name) byName.set(String(p.name).toLowerCase().trim(), pct);
-        }
-      });
-      catalogPctByStoreAndExternalId.set(storeId, byExternalId);
-      catalogPctByStoreAndName.set(storeId, byName);
+    const allProducts = await getAllProductsAcrossStores();
+    allProducts.forEach((p: any) => {
+      const storeId = String(p?.storeId || '');
+      if (!storeId) return;
+
+      const storePct = storeCommissionMap.get(storeId) || 0;
+      const pct = Number(p?.affiliate?.commissionPercent || storePct || 0);
+      if (pct <= 0) return;
+
+      if (!catalogPctByStoreAndExternalId.has(storeId)) {
+        catalogPctByStoreAndExternalId.set(storeId, new Map());
+        catalogPctByStoreAndName.set(storeId, new Map());
+      }
+      if (p.externalId) catalogPctByStoreAndExternalId.get(storeId)!.set(String(p.externalId), pct);
+      if (p.name) catalogPctByStoreAndName.get(storeId)!.set(String(p.name).toLowerCase().trim(), pct);
     });
 
     const snapshot = await db.collectionGroup('giftPlans').get();
@@ -742,8 +791,6 @@ export async function getAffiliateSummary(req: Request, res: Response) {
     let globalCurrentMonth = 0;
     let globalPreviousPending = 0;
     let globalReceived = 0;
-    let globalEarliestPending: string | null = null;
-    let globalPaymentTermDays = 30;
 
     snapshot.docs.forEach((doc) => {
       const data = doc.data();
@@ -785,7 +832,6 @@ export async function getAffiliateSummary(req: Request, res: Response) {
 
         const purchasedAt = String(product.purchasedAt || data.completedAt || '');
         const purchaseMonthKey = getMonthKey(purchasedAt);
-        const storePaymentTermDays = Number((allStores as any[]).find((s: any) => s.id === storeId)?.affiliate?.paymentTermDays || 30);
 
         const existing = storeMap.get(storeId) || {
           storeId,
@@ -806,10 +852,6 @@ export async function getAffiliateSummary(req: Request, res: Response) {
             globalCurrentMonth = Math.round((globalCurrentMonth + expected) * 100) / 100;
           } else {
             globalPreviousPending = Math.round((globalPreviousPending + expected) * 100) / 100;
-            if (purchasedAt && (!globalEarliestPending || purchasedAt < globalEarliestPending)) {
-              globalEarliestPending = purchasedAt;
-              globalPaymentTermDays = storePaymentTermDays;
-            }
           }
         } else {
           globalReceived = Math.round((globalReceived + received) * 100) / 100;
@@ -830,7 +872,7 @@ export async function getAffiliateSummary(req: Request, res: Response) {
 
     return res.status(200).json({ totals, stores });
   } catch (error) {
-    console.error('GET AFFILIATE SUMMARY ERROR:', error);
+    logger.error({ err: error }, 'GET AFFILIATE SUMMARY ERROR');
     return res.status(500).json({ message: 'Nu am putut calcula sumarul afiliat.' });
   }
 }

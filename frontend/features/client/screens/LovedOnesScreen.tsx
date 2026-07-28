@@ -1,12 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ScrollView,
+  FlatList,
   StyleSheet,
   Text,
   View,
   Pressable,
-  Image,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useAuth } from '../../../context/AuthContext';
 import { getLovedOnesCache, subscribeLovedOnesCache, invalidateLovedOnesCache } from '../../../services/lovedOnesCache';
 import { invalidateCalendarCache } from '../../../services/calendarCache';
@@ -29,6 +29,45 @@ type Props = {
   onLovedOneTargetConsumed?: () => void;
   resetRef?: React.MutableRefObject<(() => void) | null>;
 };
+
+const LovedOneCard = React.memo(function LovedOneCard({
+  item,
+  isDeleting,
+  onPress,
+}: {
+  item: LovedOne;
+  isDeleting: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={({ hovered, pressed }) => [
+        styles.card,
+        hovered && !isDeleting && styles.cardHover,
+        pressed && !isDeleting && styles.cardPressed,
+        isDeleting && styles.cardDeleting,
+      ]}
+      onPress={onPress}
+      disabled={isDeleting}
+    >
+      {item.imageUrl ? (
+        <Image source={{ uri: item.imageUrl }} style={styles.image} />
+      ) : (
+        <View style={styles.imagePlaceholder}>
+          <Text style={styles.imagePlaceholderText}>
+            {item.name?.slice(0, 2)?.toUpperCase() || '?'}
+          </Text>
+        </View>
+      )}
+
+      <View style={styles.infoBlock}>
+        <Text style={styles.name}>{item.name}</Text>
+      </View>
+
+      <Text style={styles.chevron}>›</Text>
+    </Pressable>
+  );
+});
 
 export default function LovedOnesScreen({
   priceAlertTarget,
@@ -128,6 +167,17 @@ export default function LovedOnesScreen({
     loadLovedOnes().finally(() => setDeletingId(null));
   };
 
+  const renderItem = useCallback(
+    ({ item }: { item: LovedOne }) => (
+      <LovedOneCard
+        item={item}
+        isDeleting={deletingId === item.id}
+        onPress={() => setSelectedLovedOneId(item.id)}
+      />
+    ),
+    [deletingId]
+  );
+
   if (selectedLovedOneId) {
     const priceAlertMatches =
       priceAlertTarget?.alert.lovedOneId === selectedLovedOneId;
@@ -172,59 +222,32 @@ export default function LovedOnesScreen({
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Persoane dragi</Text>
-          <Text style={styles.subtitle}>{data.length} persoane urmarite</Text>
-        </View>
-        <Pressable style={styles.addButton} onPress={() => setModalVisible(true)}>
-          <Text style={styles.addButtonText}>+ Adaugă</Text>
-        </Pressable>
-      </View>
-
-      {data.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>Nu ai încă persoane salvate</Text>
-          <Text style={styles.emptyText}>
-            Adaugă prima persoană dragă pentru a începe.
-          </Text>
-        </View>
-      ) : (
-        data.map((item) => {
-          const isDeleting = deletingId === item.id;
-          return (
-          <Pressable
-            key={item.id}
-            style={({ hovered, pressed }) => [
-              styles.card,
-              hovered && !isDeleting && styles.cardHover,
-              pressed && !isDeleting && styles.cardPressed,
-              isDeleting && styles.cardDeleting,
-            ]}
-            onPress={() => !isDeleting && setSelectedLovedOneId(item.id)}
-            disabled={isDeleting}
-          >
-            {item.imageUrl ? (
-              <Image source={{ uri: item.imageUrl }} style={styles.image} />
-            ) : (
-              <View style={styles.imagePlaceholder}>
-                <Text style={styles.imagePlaceholderText}>
-                  {item.name?.slice(0, 2)?.toUpperCase() || '?'}
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.infoBlock}>
-              <Text style={styles.name}>{item.name}</Text>
+    <>
+      <FlatList
+        contentContainerStyle={styles.container}
+        data={data}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        ListHeaderComponent={
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.title}>Persoane dragi</Text>
+              <Text style={styles.subtitle}>{data.length} persoane urmarite</Text>
             </View>
-
-            <Text style={styles.chevron}>›</Text>
-          </Pressable>
-          );
-        })
-      )}
+            <Pressable style={styles.addButton} onPress={() => setModalVisible(true)}>
+              <Text style={styles.addButtonText}>+ Adaugă</Text>
+            </Pressable>
+          </View>
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>Nu ai încă persoane salvate</Text>
+            <Text style={styles.emptyText}>
+              Adaugă prima persoană dragă pentru a începe.
+            </Text>
+          </View>
+        }
+      />
 
       <AddLovedOneModal
         visible={modalVisible}
@@ -234,7 +257,7 @@ export default function LovedOnesScreen({
           invalidateLovedOnesCache();
         }}
       />
-    </ScrollView>
+    </>
   );
 }
 

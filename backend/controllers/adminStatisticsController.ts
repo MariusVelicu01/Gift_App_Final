@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { logger } from '../config/logger';
 import { db } from '../config/firebase';
 
 type UserGender = 'male' | 'female' | 'unknown';
@@ -73,7 +74,7 @@ function getCreatedDateKey(giftPlan: any) {
   ).padStart(2, '0')}`;
 }
 
-export async function getUserStatistics(req: Request, res: Response) {
+export async function getUserStatistics(_req: Request, res: Response) {
   try {
     const snapshot = await db.collectionGroup('giftPlans').limit(2000).get();
     const userIds = Array.from(
@@ -224,7 +225,7 @@ export async function getUserStatistics(req: Request, res: Response) {
       affiliateEarnings,
     });
   } catch (error) {
-    console.error('GET USER STATISTICS ERROR:', error);
+    logger.error({ err: error }, 'GET USER STATISTICS ERROR');
     return res.status(500).json({ message: 'Nu am putut calcula statisticile userilor.' });
   }
 }

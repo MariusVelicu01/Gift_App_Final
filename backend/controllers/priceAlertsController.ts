@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { logger } from '../config/logger';
 import {
   deletePriceAlerts,
   getPriceAlerts,
@@ -22,7 +23,7 @@ export async function getAll(req: Request, res: Response) {
     const alerts = await getPriceAlerts(uid);
     return res.status(200).json(alerts);
   } catch (error) {
-    console.error('GET PRICE ALERTS ERROR:', error);
+    logger.error({ err: error }, 'GET PRICE ALERTS ERROR');
     return res.status(500).json({ message: 'Nu am putut prelua notificarile.' });
   }
 }
@@ -38,7 +39,7 @@ export async function markAllRead(req: Request, res: Response) {
     const alerts = await markAllPriceAlertsRead(uid);
     return res.status(200).json(alerts);
   } catch (error) {
-    console.error('MARK ALL PRICE ALERTS READ ERROR:', error);
+    logger.error({ err: error }, 'MARK ALL PRICE ALERTS READ ERROR');
     return res.status(500).json({ message: 'Nu am putut marca notificarile.' });
   }
 }
@@ -55,7 +56,7 @@ export async function removeMany(req: Request, res: Response) {
     const alerts = await deletePriceAlerts(uid, mode);
     return res.status(200).json(alerts);
   } catch (error) {
-    console.error('DELETE PRICE ALERTS ERROR:', error);
+    logger.error({ err: error }, 'DELETE PRICE ALERTS ERROR');
     return res.status(500).json({ message: 'Nu am putut sterge notificarile.' });
   }
 }
@@ -76,7 +77,7 @@ export async function markRead(req: Request, res: Response) {
     const alert = await markPriceAlertRead(uid, notificationId);
     return res.status(200).json(alert);
   } catch (error) {
-    console.error('MARK PRICE ALERT READ ERROR:', error);
+    logger.error({ err: error }, 'MARK PRICE ALERT READ ERROR');
     return res.status(500).json({ message: 'Nu am putut actualiza notificarea.' });
   }
 }
@@ -97,7 +98,7 @@ export async function markHighlightSeen(req: Request, res: Response) {
     const alert = await markPriceAlertHighlightSeen(uid, notificationId);
     return res.status(200).json(alert);
   } catch (error) {
-    console.error('MARK PRICE ALERT HIGHLIGHT ERROR:', error);
+    logger.error({ err: error }, 'MARK PRICE ALERT HIGHLIGHT ERROR');
     return res.status(500).json({ message: 'Nu am putut actualiza notificarea.' });
   }
 }

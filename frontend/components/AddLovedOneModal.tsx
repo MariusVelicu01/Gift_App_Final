@@ -7,8 +7,8 @@ import {
   Pressable,
   StyleSheet,
   ScrollView,
-  Image,
 } from 'react-native';
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../context/AuthContext';
@@ -222,16 +222,18 @@ export default function AddLovedOneModal({
 
       setLoading(true);
 
-      let imageUrl = currentImageUrl || undefined;
+      let imagePath: string | undefined;
 
       if (imageUri && token) {
-        imageUrl = await uploadImageApi(
+        const uploaded = await uploadImageApi(
           {
             uri: imageUri,
             file: imageFile,
           },
-          token
+          token,
+          'loved-one'
         );
+        imagePath = uploaded.imagePath;
       }
 
       const payload: any = {
@@ -242,7 +244,7 @@ export default function AddLovedOneModal({
         notes: notes.trim(),
       };
 
-      if (imageUrl) payload.imageUrl = imageUrl;
+      if (imagePath) payload.imagePath = imagePath;
       if (year !== null) payload.year = year;
       if (estimatedAgeRange) payload.estimatedAgeRange = estimatedAgeRange;
 

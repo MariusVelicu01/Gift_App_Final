@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
+  FlatList,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { openUrl } from '../../../utils/openUrl';
 import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
@@ -98,6 +99,42 @@ function pickFeaturedProducts(store: PartnerStore, userProductGender: 'barbati' 
 
   return result.slice(0, 6);
 }
+
+const StoreCard = React.memo(function StoreCard({
+  store,
+  onPress,
+}: {
+  store: PartnerStore;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={({ hovered, pressed }) => [
+        styles.storeCard,
+        hovered && styles.storeCardHover,
+        pressed && styles.storeCardPressed,
+      ]}
+      onPress={onPress}
+    >
+      {store.brandImageUri ? (
+        <Image source={{ uri: store.brandImageUri }} style={styles.brandImage} contentFit="contain" transition={0} />
+      ) : (
+        <View style={styles.brandPlaceholder}>
+          <Text style={styles.brandPlaceholderText}>
+            {store.displayName.charAt(0).toUpperCase()}
+          </Text>
+        </View>
+      )}
+
+      <View style={styles.storeInfo}>
+        <Text style={styles.storeName}>{store.displayName}</Text>
+        {!!store.merchant?.domain && (
+          <Text style={styles.meta}>Website: {store.merchant.domain}</Text>
+        )}
+      </View>
+    </Pressable>
+  );
+});
 
 type Props = {
   resetRef?: React.MutableRefObject<(() => void) | null>;
@@ -241,22 +278,17 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
     });
   }, [debouncedSearch, selectedCategory, stores]);
 
-  const getCategoryProductCount = (store: PartnerStore) => {
-    if (selectedCategory === 'all') {
-      return store.products.length;
-    }
-
-    return store.products.filter(
-      (product) =>
-        String(product.category || '').trim().toLowerCase() ===
-        selectedCategory.toLowerCase()
-    ).length;
-  };
-
   const openStoreDetails = (store: PartnerStore) => {
     setSelectedStore(store);
     setFeaturedProducts(pickFeaturedProducts(store, userProductGender));
   };
+
+  const renderStoreItem = useCallback(
+    ({ item }: { item: PartnerStore }) => (
+      <StoreCard store={item} onPress={() => openStoreDetails(item)} />
+    ),
+    []
+  );
 
   if (selectedStore) {
     return (
@@ -268,7 +300,7 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
         <View style={styles.card}>
           <View style={styles.storeHero}>
             {selectedStore.brandImageUri ? (
-              <Image source={{ uri: selectedStore.brandImageUri }} style={styles.brandImageLarge} fadeDuration={0} />
+              <Image source={{ uri: selectedStore.brandImageUri }} style={styles.brandImageLarge} contentFit="contain" transition={0} />
             ) : (
               <View style={styles.brandPlaceholderLarge}>
                 <Text style={styles.brandPlaceholderText}>
@@ -337,7 +369,7 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
                 disabled={!product.affiliateUrl && !product.productUrl}
               >
                 {product.imageUrl ? (
-                  <Image source={{ uri: product.imageUrl }} style={styles.productImage} fadeDuration={0} />
+                  <Image source={{ uri: product.imageUrl }} style={styles.productImage} transition={0} />
                 ) : (
                   <View style={styles.productImagePlaceholder}>
                     <Text style={styles.productImagePlaceholderText}>
@@ -376,9 +408,6 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
                     const productPromo = product.promo?.code ? product.promo : null;
                     const storePromo = !excluded && pi?.hasPromotion && pi?.code ? pi : null;
                     const effectivePromo = productPromo || storePromo;
-                    const hasNoMinOrder = effectivePromo &&
-                      !effectivePromo.hasMinimumOrderValue &&
-                      !effectivePromo.minimumOrderValue;
 
                     if (effectivePromo?.discountPercent) {
                       const promoPrice = productPromo?.priceAfterPromo && productPromo.priceAfterPromo > 0
@@ -426,98 +455,82 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
     );
   }
 
+  if (loading) {
+    return (
+      <View style={[styles.listScreenWrapper, styles.center]}>
+        <ActivityIndicator size="large" />
+        <Text style={styles.cardText}>Se incarca magazinele...</Text>
+      </View>
+    );
+  }
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Magazine partenere</Text>
+    <View style={styles.listScreenWrapper}>
+      <View style={styles.fixedHeader}>
+        <Text style={styles.title}>Magazine partenere</Text>
 
-      <View style={styles.stickyFiltersWrapper}>
-      <View style={styles.filtersCard}>
-        <TextInput
-          placeholder="Cauta dupa numele magazinului"
-          style={styles.searchInput}
-          value={searchText}
-          onChangeText={setSearchText}
-        />
+        <View style={styles.filtersCard}>
+          <TextInput
+            placeholder="Cauta dupa numele magazinului"
+            style={styles.searchInput}
+            value={searchText}
+            onChangeText={setSearchText}
+          />
 
-        <Dropdown
-          style={styles.dropdown}
-          containerStyle={styles.dropdownContainer}
-          placeholderStyle={styles.dropdownPlaceholder}
-          selectedTextStyle={styles.dropdownSelectedText}
-          data={categoryOptions}
-          maxHeight={260}
-          labelField="label"
-          valueField="value"
-          placeholder="Filtreaza dupa categorie"
-          value={selectedCategory}
-          onChange={(item) => setSelectedCategory(item.value)}
-        />
+          <Dropdown
+            style={styles.dropdown}
+            containerStyle={styles.dropdownContainer}
+            placeholderStyle={styles.dropdownPlaceholder}
+            selectedTextStyle={styles.dropdownSelectedText}
+            data={categoryOptions}
+            maxHeight={260}
+            labelField="label"
+            valueField="value"
+            placeholder="Filtreaza dupa categorie"
+            value={selectedCategory}
+            onChange={(item) => setSelectedCategory(item.value)}
+          />
 
-        {(searchText.trim() || selectedCategory !== 'all') && (
-          <Pressable
-            style={styles.clearFiltersButton}
-            onPress={() => {
-              setSearchText('');
-              setDebouncedSearch('');
-              setSelectedCategory('all');
-            }}
-          >
-            <Text style={styles.clearFiltersText}>Curata filtrele</Text>
-          </Pressable>
-        )}
+          {(searchText.trim() || selectedCategory !== 'all') && (
+            <Pressable
+              style={styles.clearFiltersButton}
+              onPress={() => {
+                setSearchText('');
+                setDebouncedSearch('');
+                setSelectedCategory('all');
+              }}
+            >
+              <Text style={styles.clearFiltersText}>Curata filtrele</Text>
+            </Pressable>
+          )}
+        </View>
       </View>
-      </View>
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" />
-          <Text style={styles.cardText}>Se incarca magazinele...</Text>
-        </View>
-      ) : stores.length === 0 ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Magazine disponibile</Text>
-          <Text style={styles.cardText}>
-            Nu exista magazine partenere disponibile momentan.
-          </Text>
-        </View>
-      ) : filteredStores.length === 0 ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Niciun magazin gasit</Text>
-          <Text style={styles.cardText}>
-            Nu exista magazine care sa se potriveasca filtrelor selectate.
-          </Text>
-        </View>
-      ) : (
-        filteredStores.map((store) => (
-          <Pressable
-            key={store.id}
-            style={({ hovered, pressed }) => [
-              styles.storeCard,
-              hovered && styles.storeCardHover,
-              pressed && styles.storeCardPressed,
-            ]}
-            onPress={() => openStoreDetails(store)}
-          >
-            {store.brandImageUri ? (
-              <Image source={{ uri: store.brandImageUri }} style={styles.brandImage} fadeDuration={0} />
-            ) : (
-              <View style={styles.brandPlaceholder}>
-                <Text style={styles.brandPlaceholderText}>
-                  {store.displayName.charAt(0).toUpperCase()}
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.storeInfo}>
-              <Text style={styles.storeName}>{store.displayName}</Text>
-              {!!store.merchant?.domain && (
-                <Text style={styles.meta}>Website: {store.merchant.domain}</Text>
-              )}
+      <FlatList
+        style={styles.listBody}
+        contentContainerStyle={styles.container}
+        data={filteredStores}
+        keyExtractor={(store) => store.id}
+        renderItem={renderStoreItem}
+        ListEmptyComponent={
+          stores.length === 0 ? (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Magazine disponibile</Text>
+              <Text style={styles.cardText}>
+                Nu exista magazine partenere disponibile momentan.
+              </Text>
             </View>
-          </Pressable>
-        ))
-      )}
-    </ScrollView>
+          ) : (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Niciun magazin gasit</Text>
+              <Text style={styles.cardText}>
+                Nu exista magazine care sa se potriveasca filtrelor selectate.
+              </Text>
+            </View>
+          )
+        }
+      />
+    </View>
   );
 }
 
@@ -544,14 +557,18 @@ const styles = StyleSheet.create({
     borderColor: C.border,
     ...S.card,
   },
-  stickyFiltersWrapper: {
-    position: 'sticky' as any,
-    top: 0,
-    zIndex: 10,
+  listScreenWrapper: {
+    flex: 1,
     backgroundColor: C.bg,
-    paddingVertical: 4,
-    marginHorizontal: -16,
+  },
+  fixedHeader: {
     paddingHorizontal: 16,
+    paddingTop: 16,
+    gap: 10,
+    backgroundColor: C.bg,
+  },
+  listBody: {
+    flex: 1,
   },
   filtersCard: {
     padding: 14,
@@ -648,7 +665,6 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: R.md,
-    resizeMode: 'contain',
     backgroundColor: C.surface2,
   },
   storeHero: {
@@ -660,7 +676,6 @@ const styles = StyleSheet.create({
     width: 160,
     height: 160,
     borderRadius: R.lg,
-    resizeMode: 'contain',
     backgroundColor: C.surface2,
   },
   brandPlaceholder: {

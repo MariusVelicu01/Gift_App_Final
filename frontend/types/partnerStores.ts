@@ -1,3 +1,15 @@
+export type ProductPriceHistoryEntry = {
+  importedAt: string;
+  importName?: string;
+  currentPrice: number;
+  originalPrice?: number;
+  discountAmount?: number;
+  discountPercent?: number;
+  hasDiscount: boolean;
+  inStock?: boolean;
+  stockStatus?: string;
+};
+
 export type ProductImportItem = {
   id?: string;
   externalId?: string;
@@ -41,41 +53,35 @@ export type ProductImportItem = {
     estimatedCommissionRON?: number;
   };
   gender?: 'barbati' | 'femei' | 'unisex';
-};
-
-export type ProductPriceHistoryEntry = {
-  importedAt: string;
-  importName?: string;
-  currentPrice: number;
-  originalPrice?: number;
-  discountAmount?: number;
-  discountPercent?: number;
-  hasDiscount: boolean;
-  inStock?: boolean;
-  stockStatus?: string;
-};
-
-export type ProductPriceHistorySummary = {
-  productKey: string;
-  name: string;
-  brand?: string;
-  category?: string;
-  subcategory?: string;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  importsSeen: number;
-  latestPrice: number;
+  // Denormalized onto each product doc server-side (subcollection model) — present on
+  // read, irrelevant when submitting an import.
+  storeId?: string;
+  storeName?: string;
+  currency?: string;
+  hasDiscount?: boolean;
+  // Price-history summary, now stored directly on the product document instead of a
+  // separate parallel array keyed by productKey.
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+  importsSeen?: number;
+  latestPrice?: number;
   latestOriginalPrice?: number;
-  lowestPriceEver: number;
-  highestPriceEver: number;
-  averagePrice: number;
-  discountApplications: number;
-  biggestDiscountAmount: number;
-  biggestDiscountPercent: number;
-  lastPriceChangeAmount: number;
-  lastPriceChangeDirection: 'up' | 'down' | 'same' | 'new';
+  lowestPriceEver?: number;
+  highestPriceEver?: number;
+  averagePrice?: number;
+  discountApplications?: number;
+  biggestDiscountAmount?: number;
+  biggestDiscountPercent?: number;
+  lastPriceChangeAmount?: number;
+  lastPriceChangeDirection?: 'up' | 'down' | 'same' | 'new';
   lastImportName?: string;
-  history: ProductPriceHistoryEntry[];
+  history?: ProductPriceHistoryEntry[];
+};
+
+export type ProductPage = {
+  items: ProductImportItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
 };
 
 export type PartnerStore = {
@@ -88,7 +94,7 @@ export type PartnerStore = {
   contractEndDate: string;
   brandImageUri?: string;
   products: ProductImportItem[];
-  productPriceHistory?: ProductPriceHistorySummary[];
+  productCount?: number;
   source?: string;
   merchant?: {
     name?: string;

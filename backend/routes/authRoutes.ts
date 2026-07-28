@@ -2,8 +2,6 @@ import { Router } from 'express';
 import {
   changePassword,
   forgotPassword,
-  googleAuth,
-  googleComplete,
   googleOAuthStart,
   googleOAuthCallback,
   googleCompleteWithTempToken,
@@ -23,8 +21,6 @@ const router = Router();
 
 router.post('/register', register);
 router.post('/login', login);
-router.post('/google', googleAuth);
-router.post('/google/complete', googleComplete);
 router.get('/google/oauth-start', googleOAuthStart);
 router.get('/google/oauth-callback', googleOAuthCallback);
 router.get('/google/profile-hint', googleProfileHint);

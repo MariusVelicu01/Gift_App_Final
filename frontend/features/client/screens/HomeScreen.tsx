@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,6 +8,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { openUrl } from '../../../utils/openUrl';
 import { useAuth } from '../../../context/AuthContext';
 import { getCalendarCache, subscribeCalendarCache } from '../../../services/calendarCache';

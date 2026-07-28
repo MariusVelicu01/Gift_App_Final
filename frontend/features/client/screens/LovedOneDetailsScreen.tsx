@@ -4,12 +4,12 @@ import {
   StyleSheet,
   Text,
   View,
-  Image,
   Pressable,
   ActivityIndicator,
   Modal,
   TextInput,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { openUrl } from '../../../utils/openUrl';
 import type { GestureResponderEvent } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -105,11 +105,6 @@ function formatPromoEndDate(endDate?: string): string | null {
   }
   if (isNaN(d.getTime())) return null;
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
-}
-
-function getPromoEffectivePrice(basePrice: number, discountPercent?: number): number | null {
-  if (!discountPercent || discountPercent <= 0) return null;
-  return Math.round((basePrice * (1 - discountPercent / 100)) * 100) / 100;
 }
 
 type ProductReactionDraft = {
@@ -439,10 +434,6 @@ function getGiftTimingNotes(giftPlan: GiftPlan) {
   return Array.from(new Set(notes));
 }
 
-function getGiftTimingNote(giftPlan: GiftPlan) {
-  return getGiftTimingNotes(giftPlan).join(' ');
-}
-
 function formatMoney(value: number, currency = 'RON') {
   if (!Number.isFinite(value)) return `- ${currency}`;
   return `${Number(value.toFixed(2))} ${currency}`;
@@ -488,10 +479,6 @@ function getProductPriceDetails(product: ProductImportItem) {
         : 0,
     promoNote: promo?.note ? String(promo.note) : '',
   };
-}
-
-function getProductPrice(product: ProductImportItem) {
-  return getProductPriceDetails(product)?.effectivePrice ?? null;
 }
 
 function normalizeProductText(value?: string) {
@@ -1307,12 +1294,9 @@ export default function LovedOneDetailsScreen({
   }, [addedProductToast]);
 
   const computedFixedDeadline = useMemo((): { day: number; month: number; year: number } | null => {
-    console.log('[deadline] giftPurpose=', giftPurpose, 'canEdit=', canEditFixedGiftDate);
     if (canEditFixedGiftDate) return null;
     if (giftPurpose === 'Paste') {
-      const e = getNextEasterDateParts();
-      console.log('[deadline] Easter =', e);
-      return e;
+      return getNextEasterDateParts();
     }
     if (giftPurpose === 'Craciun') return getNextDateParts(25, 12);
     if (giftPurpose === 'Zi de nastere' && data) return getNextDateParts(Number(data.day), Number(data.month));
@@ -2480,13 +2464,15 @@ export default function LovedOneDetailsScreen({
 
     if (otherStoreImageUri && token) {
       try {
-        imageUrl = await uploadImageApi(
+        const uploaded = await uploadImageApi(
           {
             uri: otherStoreImageUri,
             file: otherStoreImageFile,
           },
-          token
+          token,
+          'purchase-proof'
         );
+        imageUrl = uploaded.imageUrl;
       } catch {
         setOtherStoreError('Nu am putut incarca imaginea. Incearca din nou.');
         return;
@@ -2920,7 +2906,7 @@ export default function LovedOneDetailsScreen({
     return lines;
   };
 
-  const retryAiSingleProduct = async (recId: string, giftPlan: GiftPlan) => {
+  const retryAiSingleProduct = async (recId: string) => {
     if (!token || !!retryingAiProductId) return;
 
     const catalog = buildCatalog(aiPromptInput || changeProductAiPromptInput);
@@ -3181,7 +3167,6 @@ export default function LovedOneDetailsScreen({
         .filter((product): product is ProductSuggestion => Boolean(product))
     );
     if (!recipientProductGender) return all;
-    const opposite = recipientProductGender === 'barbati' ? 'femei' : 'barbati';
 
     const genderScore = (p: ProductSuggestion) => {
       const g = p.gender || 'unisex';
@@ -5797,7 +5782,7 @@ export default function LovedOneDetailsScreen({
                             <Image
                               source={{ uri: botImageUrl }}
                               style={styles.aiBotProductImage}
-                              resizeMode="contain"
+                              contentFit="contain"
                             />
                           )}
                           <Text style={styles.aiBotProductName}>{suggestion.name}</Text>
@@ -5824,7 +5809,7 @@ export default function LovedOneDetailsScreen({
                             <Pressable
                               style={[styles.cancelGiftButton, !!retryingAiProductId && styles.disabledButton]}
                               disabled={!!retryingAiProductId}
-                              onPress={() => retryAiSingleProduct(rec.id, visibleSelectedGiftPlan)}
+                              onPress={() => retryAiSingleProduct(rec.id)}
                             >
                               <Text style={styles.cancelGiftButtonText}>Altă încercare</Text>
                             </Pressable>
@@ -6340,7 +6325,7 @@ export default function LovedOneDetailsScreen({
                               <Image
                                 source={{ uri: botImageUrl }}
                                 style={styles.aiBotProductImage}
-                                resizeMode="contain"
+                                contentFit="contain"
                               />
                             )}
                             <Text style={styles.aiBotProductName}>{suggestion.name}</Text>

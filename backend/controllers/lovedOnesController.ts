@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { logger } from "../config/logger";
 import {
   countActiveLovedOnes,
   createLovedOne,
@@ -8,6 +9,7 @@ import {
   updateLovedOne,
 } from "../services/lovedOnesService";
 import { getUserProfileByUid } from "../services/userService";
+import { signLovedOneImage } from "../services/uploadService";
 
 function isDateInFuture(day: number, month: number, year: number) {
   const selected = new Date(year, month - 1, day, 23, 59, 59, 999);
@@ -19,19 +21,30 @@ function getParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value || '';
 }
 
-function sanitizeUrl(raw?: string): string {
-  const url = String(raw || '').trim();
-  if (!url) return '';
+// Loved-one photos are stored privately; imagePath must point at the caller's own
+// upload folder so nobody can attach another user's photo by guessing/observing a path.
+function isValidLovedOneImagePath(uid: string, imagePath: string): boolean {
+  const prefix = `loved-ones/${uid}/`;
+  if (!imagePath.startsWith(prefix)) return false;
+  const rest = imagePath.slice(prefix.length);
+  return /^[a-f0-9-]+\.(jpg|jpeg|png|webp|gif)$/i.test(rest);
+}
+
+// imageUrl is never trusted from the client — it's resolved server-side from imagePath
+// (a fresh, short-lived signed URL) right before the record is sent back to its owner.
+async function withResolvedImage<T extends { imagePath?: string } | null | undefined>(lovedOne: T): Promise<T> {
+  if (!lovedOne || !lovedOne.imagePath) return lovedOne;
+
   try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'https:' ? url : '';
+    const imageUrl = await signLovedOneImage(lovedOne.imagePath);
+    return { ...lovedOne, imageUrl };
   } catch {
-    return '';
+    return lovedOne;
   }
 }
 
-function buildLovedOnePayload(body: any) {
-  const { name, day, month, year, estimatedAgeRange, gender, notes, imageUrl } =
+function buildLovedOnePayload(uid: string, body: any) {
+  const { name, day, month, year, estimatedAgeRange, gender, notes, imagePath } =
     body;
 
   if (!name?.trim()) {
@@ -98,9 +111,14 @@ function buildLovedOnePayload(body: any) {
     payload.notes = String(notes).trim();
   }
 
-  if (imageUrl !== undefined && imageUrl !== null && String(imageUrl).trim() !== '') {
-    const safe = sanitizeUrl(imageUrl);
-    if (safe) payload.imageUrl = safe;
+  if (imagePath !== undefined && imagePath !== null && String(imagePath).trim() !== '') {
+    const path = String(imagePath).trim();
+
+    if (!isValidLovedOneImagePath(uid, path)) {
+      return { error: 'Fotografia încărcată este invalidă.' };
+    }
+
+    payload.imagePath = path;
   }
 
   if (year !== undefined && year !== null && year !== "") {
@@ -137,7 +155,7 @@ export async function create(req: Request, res: Response) {
       }
     }
 
-    const result = buildLovedOnePayload(req.body);
+    const result = buildLovedOnePayload(uid, req.body);
 
     if ("error" in result) {
       return res.status(400).json({ message: result.error });
@@ -148,9 +166,9 @@ export async function create(req: Request, res: Response) {
       createdAt: new Date().toISOString(),
     });
 
-    return res.status(201).json(lovedOne);
+    return res.status(201).json(await withResolvedImage(lovedOne));
   } catch (error) {
-    console.error("CREATE LOVED ONE ERROR:", error);
+    logger.error({ err: error }, "CREATE LOVED ONE ERROR");
 
     return res.status(500).json({
       message: "Nu am putut salva.",
@@ -167,10 +185,11 @@ export async function getAll(req: Request, res: Response) {
     }
 
     const data = await getLovedOnes(uid);
+    const resolved = await Promise.all(data.map(withResolvedImage));
 
-    return res.status(200).json(data);
+    return res.status(200).json(resolved);
   } catch (error) {
-    console.error("GET LOVED ONES ERROR:", error);
+    logger.error({ err: error }, "GET LOVED ONES ERROR");
 
     return res.status(500).json({
       message: "Nu am putut prelua datele.",
@@ -197,9 +216,9 @@ export async function getOne(req: Request, res: Response) {
       return res.status(404).json({ message: "Persoana nu a fost găsită." });
     }
 
-    return res.status(200).json(lovedOne);
+    return res.status(200).json(await withResolvedImage(lovedOne));
   } catch (error) {
-    console.error("GET ONE LOVED ONE ERROR:", error);
+    logger.error({ err: error }, "GET ONE LOVED ONE ERROR");
 
     return res.status(500).json({
       message: "Nu am putut prelua persoana.",
@@ -226,7 +245,7 @@ export async function update(req: Request, res: Response) {
       return res.status(404).json({ message: 'Persoana nu a fost găsită.' });
     }
 
-    const result = buildLovedOnePayload(req.body);
+    const result = buildLovedOnePayload(uid, req.body);
 
     if ('error' in result) {
       return res.status(400).json({ message: result.error });
@@ -237,9 +256,9 @@ export async function update(req: Request, res: Response) {
       updatedAt: new Date().toISOString(),
     });
 
-    return res.status(200).json(updated);
+    return res.status(200).json(await withResolvedImage(updated));
   } catch (error) {
-    console.error('UPDATE LOVED ONE ERROR:', error);
+    logger.error({ err: error }, 'UPDATE LOVED ONE ERROR');
 
     return res.status(500).json({
       message: 'Nu am putut actualiza persoana.',
@@ -273,7 +292,7 @@ export async function remove(req: Request, res: Response) {
         'Persoana a fost stearsa din lista ta. Istoricul cadourilor ramane disponibil pentru statistici.',
     });
   } catch (error) {
-    console.error('DELETE LOVED ONE ERROR:', error);
+    logger.error({ err: error }, 'DELETE LOVED ONE ERROR');
 
     return res.status(500).json({
       message: 'Nu am putut sterge persoana.',

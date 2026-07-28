@@ -3,7 +3,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,10 +11,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useAuth } from '../../../context/AuthContext';
 import { changePasswordRequest, updateProfileRequest } from '../../../services/authApi';
 import { C, R, S } from '../../../constants/theme';
 import UpgradeModal from '../../../components/UpgradeModal';
+import LegalDocumentModal from '../../../components/LegalDocumentModal';
 
 type SettingsSection = 'personalData' | 'notifications';
 
@@ -106,6 +107,7 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
   const [settingsMessage, setSettingsMessage] = useState('');
 
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [legalDoc, setLegalDoc] = useState<'privacy' | 'terms' | null>(null);
 
   const [consentGiftBot, setConsentGiftBot] = useState(false);
   const [consentMarketing, setConsentMarketing] = useState(false);
@@ -378,6 +380,8 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
         visible={showUpgradeModal}
         onClose={() => setShowUpgradeModal(false)}
       />
+
+      <LegalDocumentModal type={legalDoc} onClose={() => setLegalDoc(null)} />
 
       {/* --- DATE PERSONALE --- */}
       <View style={styles.card}>
@@ -670,7 +674,14 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
         <Text style={styles.cardTitle}>Datele mele & Confidențialitate</Text>
 
         <Text style={styles.consentNote}>
-          Politica de confidențialitate și Termenii și condițiile sunt acceptate la crearea contului și nu pot fi revocate fără ștergerea acestuia.
+          <Text style={styles.consentNoteLink} onPress={() => setLegalDoc('privacy')}>
+            Politica de confidențialitate
+          </Text>
+          {' '}și{' '}
+          <Text style={styles.consentNoteLink} onPress={() => setLegalDoc('terms')}>
+            Termenii și condițiile
+          </Text>
+          {' '}sunt acceptate la crearea contului și nu pot fi revocate fără ștergerea acestuia.
         </Text>
 
         <View style={styles.divider} />
@@ -1085,6 +1096,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: C.textFaint,
     lineHeight: 18,
+  },
+  consentNoteLink: {
+    color: C.accent,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
   consentLabelWrap: {
     flex: 1,

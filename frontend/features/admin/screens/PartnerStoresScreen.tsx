@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   Linking,
   Modal,
   Platform,
@@ -12,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { openUrl } from '../../../utils/openUrl';
 import * as ImagePicker from 'expo-image-picker';
 import { Dropdown } from 'react-native-element-dropdown';
@@ -21,6 +21,7 @@ import {
   getAffiliateSummary,
   AffiliateSummary,
   getPartnerStoreProductUsage,
+  getPartnerStores,
   getStoreAffiliateStats,
   importPartnerStoreProducts,
   StoreAffiliateStats,
@@ -36,7 +37,6 @@ import {
   PartnerProductsImportPayload,
   PartnerStore,
   ProductImportItem,
-  ProductPriceHistorySummary,
   PartnerProductUsageStats,
 } from '../../../types/partnerStores';
 import { C, R, S } from '../../../constants/theme';
@@ -124,17 +124,10 @@ function getChartLabel(value: string) {
   };
 }
 
-function findPriceHistory(
-  store: PartnerStore,
-  product: ProductImportItem
-): ProductPriceHistorySummary | null {
-  const histories = store.productPriceHistory || [];
-
-  return (
-    histories.find((item) => item.productKey === product.priceHistoryKey) ||
-    histories.find((item) => item.name === product.name && item.brand === product.brand) ||
-    null
-  );
+// Price-history summary fields now live directly on each product (subcollection model),
+// so there's no separate array to search — just confirm there's history to chart.
+function findPriceHistory(product: ProductImportItem): ProductImportItem | null {
+  return product.history && product.history.length > 0 ? product : null;
 }
 
 function validateCui(input: string) {
@@ -451,7 +444,7 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
 
   const selectedPriceHistory = useMemo(() => {
     if (!selectedStore || !selectedPriceProduct) return null;
-    return findPriceHistory(selectedStore, selectedPriceProduct);
+    return findPriceHistory(selectedPriceProduct);
   }, [selectedPriceProduct, selectedStore]);
 
   const chartAvailableYears = useMemo(() => {
@@ -564,26 +557,6 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
     };
   }, [selectedPriceProduct, selectedStore, token]);
 
-  const usagePurposeOptions = useMemo(() => {
-    return [
-      { label: 'Toate scopurile', value: 'all' },
-      ...(productUsageStats?.purposes || []).map((purpose) => ({
-        label: purpose,
-        value: purpose,
-      })),
-    ];
-  }, [productUsageStats]);
-
-  const usageYearOptions = useMemo(() => {
-    return [
-      { label: 'Toti anii', value: 'all' },
-      ...(productUsageStats?.years || []).map((year) => ({
-        label: String(year),
-        value: String(year),
-      })),
-    ];
-  }, [productUsageStats]);
-
   const filteredUsageOccurrences = useMemo(() => {
     const occurrences = productUsageStats?.occurrences || [];
 
@@ -600,11 +573,6 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
   const filteredPurchasedFromThisStoreCount = filteredUsageOccurrences.filter(
     (occurrence) => occurrence.purchasedFromThisStore
   ).length;
-
-  const filteredAddedWithoutPurchaseFromThisStoreCount =
-    filteredUsageOccurrences.filter(
-      (occurrence) => !occurrence.purchasedFromThisStore
-    ).length;
 
   const categoryOptions = useMemo(() => {
     const categories = new Set<string>();
@@ -857,9 +825,14 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
         : await createPartnerStore(token, payload);
 
       setStores((current) => {
+        // updatePartnerStore only returns metadata (products live in a subcollection now)
+        // — merge it over the existing entry instead of replacing, so the already-loaded
+        // product list for that store isn't wiped from local state.
         const nextStores = editingStoreId
-          ? current.map((store) => (store.id === savedStore.id ? savedStore : store))
-          : [savedStore, ...current];
+          ? current.map((store) =>
+              store.id === savedStore.id ? { ...store, ...savedStore, products: store.products } : store
+            )
+          : [{ ...savedStore, products: savedStore.products || [] }, ...current];
         setAdminPartnerStoresCacheSnapshot(token, nextStores);
         invalidatePartnerStoresCache();
         return nextStores;
@@ -889,21 +862,19 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
           setImporting(true);
           const importPayload = parseProductsFile(file.name, String(reader.result || ''));
           if (!token) return;
-          const updatedStore = await importPartnerStoreProducts(
+          await importPartnerStoreProducts(
             token,
             selectedStore.id,
             importPayload,
             file.name
           );
 
-          setStores((current) => {
-            const nextStores = current.map((store) =>
-              store.id === selectedStore.id ? updatedStore : store
-            );
-            setAdminPartnerStoresCacheSnapshot(token, nextStores);
-            invalidatePartnerStoresCache();
-            return nextStores;
-          });
+          // The import response only carries store metadata (products now live in a
+          // subcollection) — refetch the aggregate list so the UI sees the new catalog.
+          const refreshedStores = await getPartnerStores(token);
+          setStores(refreshedStores);
+          setAdminPartnerStoresCacheSnapshot(token, refreshedStores);
+          invalidatePartnerStoresCache();
           setImportError('');
         } catch (err: any) {
           setImportError(err?.message || 'Fisierul nu a putut fi interpretat.');
@@ -1245,9 +1216,6 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
                   const productPromo = product.promo?.code ? product.promo : null;
                   const storePromo = !excluded && pi?.hasPromotion && pi?.code ? pi : null;
                   const effectivePromo = productPromo || storePromo;
-                  const hasNoMinOrder = effectivePromo &&
-                    !effectivePromo.hasMinimumOrderValue &&
-                    !effectivePromo.minimumOrderValue;
 
                   if (effectivePromo?.discountPercent) {
                     const promoPrice = productPromo?.priceAfterPromo && productPromo.priceAfterPromo > 0
@@ -1355,7 +1323,7 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
                     <Image
                       source={{ uri: selectedPriceProduct.imageUrl }}
                       style={styles.modalProductImage}
-                      resizeMode="contain"
+                      contentFit="contain"
                     />
                   )}
                   <View style={{ flex: 1 }}>
@@ -1412,7 +1380,7 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
                             selectedStore.currency || 'RON'
                           )}
                           {' / '}
-                          {Number(selectedPriceHistory.biggestDiscountPercent.toFixed(2))}%
+                          {Number((selectedPriceHistory.biggestDiscountPercent ?? 0).toFixed(2))}%
                         </Text>
                       </View>
                       <View style={styles.statBox}>

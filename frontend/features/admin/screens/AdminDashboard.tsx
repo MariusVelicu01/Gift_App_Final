@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Platform, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
-import { C, R, S } from '../../../constants/theme';
+import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { C, R } from '../../../constants/theme';
 
 import HomeScreen from './HomeScreen';
 import PartnerStoresScreen from './PartnerStoresScreen';

@@ -82,30 +82,6 @@ export async function changePasswordRequest(
   );
 }
 
-export type GoogleAuthResult =
-  | { isNewUser: false; token: string; refreshToken: string; expiresIn: string }
-  | { isNewUser: true; googleEmail: string; googleFirstName: string; googleLastName: string };
-
-export async function googleAuthRequest(googleAccessToken: string): Promise<GoogleAuthResult> {
-  return apiFetch('/auth/google', {
-    method: 'POST',
-    body: JSON.stringify({ googleAccessToken }),
-  });
-}
-
-export async function googleCompleteRequest(
-  googleAccessToken: string,
-  firstName: string,
-  lastName: string,
-  birthDate: string,
-  gender: UserGender
-): Promise<{ token: string; refreshToken: string; expiresIn: string }> {
-  return apiFetch('/auth/google/complete', {
-    method: 'POST',
-    body: JSON.stringify({ googleAccessToken, firstName, lastName, birthDate, gender }),
-  });
-}
-
 export async function googleProfileHintRequest(tempToken: string): Promise<{
   googleEmail: string;
   googleFirstName: string;

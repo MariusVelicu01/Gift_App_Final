@@ -1050,48 +1050,6 @@ function MetricCard({
   );
 }
 
-function TopListCard({
-  title,
-  entries,
-  emptyText,
-  tone,
-}: {
-  title: string;
-  entries: TopEntry[];
-  emptyText: string;
-  tone?: 'success';
-}) {
-  return (
-    <View style={styles.card}>
-      <Text style={styles.cardTitle}>{title}</Text>
-
-      {entries.length === 0 ? (
-        <Text style={styles.cardText}>{emptyText}</Text>
-      ) : (
-        entries.map((entry, index) => (
-          <View key={`${entry.label}-${index}`} style={styles.topRow}>
-            <View style={styles.rankBadge}>
-              <Text style={styles.rankBadgeText}>{index + 1}</Text>
-            </View>
-            <View style={styles.topInfo}>
-              <Text style={styles.topLabel}>{entry.label}</Text>
-              {!!entry.hint && <Text style={styles.metricHint}>{entry.hint}</Text>}
-            </View>
-            <Text
-              style={[
-                styles.topCount,
-                tone === 'success' && styles.metricValueSuccess,
-              ]}
-            >
-              {entry.count}
-            </Text>
-          </View>
-        ))
-      )}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     padding: 16,

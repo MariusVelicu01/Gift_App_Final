@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { logger } from '../config/logger';
 import { CatalogItem, getGiftBotRecommendations } from '../services/giftBotService';
 import { getUserProfileByUid } from '../services/userService';
 
@@ -68,9 +69,15 @@ export async function recommend(req: Request, res: Response) {
         subcategory: item.subcategory ? String(item.subcategory).slice(0, 100) : undefined,
         price: item.price,
         store: String(item.store || '').slice(0, 100),
-        ...(typeof item.affiliateUrl === 'string' && item.affiliateUrl ? { affiliateUrl: item.affiliateUrl } : {}),
-        ...(typeof item.productUrl === 'string' && item.productUrl ? { productUrl: item.productUrl } : {}),
-        ...(typeof item.imageUrl === 'string' && item.imageUrl ? { imageUrl: item.imageUrl } : {}),
+        ...(typeof item.affiliateUrl === 'string' && item.affiliateUrl
+          ? { affiliateUrl: item.affiliateUrl.slice(0, 500) }
+          : {}),
+        ...(typeof item.productUrl === 'string' && item.productUrl
+          ? { productUrl: item.productUrl.slice(0, 500) }
+          : {}),
+        ...(typeof item.imageUrl === 'string' && item.imageUrl
+          ? { imageUrl: item.imageUrl.slice(0, 500) }
+          : {}),
       }));
 
     if (safeCatalog.length === 0) {
@@ -80,7 +87,7 @@ export async function recommend(req: Request, res: Response) {
     const recommendations = await getGiftBotRecommendations(cleanPrompt, safeCatalog);
     return res.status(200).json({ recommendations });
   } catch (error: any) {
-    console.error('GIFTBOT ERROR:', error);
+    logger.error({ err: error }, 'GIFTBOT ERROR');
     const isConfig = error?.message?.includes('OPENAI_API_KEY');
     return res.status(500).json({
       message: isConfig

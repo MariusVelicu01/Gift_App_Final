@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
+  FlatList,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -70,6 +70,204 @@ function getDeadlineText(alert: DeadlineAlert) {
   return `Mai sunt ${alert.daysLeft} zile pana la deadline-ul de ${deadlineLabel}.`;
 }
 
+const AlertCard = React.memo(function AlertCard({
+  alert,
+  onPress,
+}: {
+  alert: AppNotification;
+  onPress: () => void;
+}) {
+  const isUnread = !alert.readAt;
+
+  if (isBirthdayAlert(alert)) {
+    return (
+      <Pressable
+        style={({ hovered, pressed }) => [
+          styles.alertCard,
+          isUnread && styles.birthdayCardUnread,
+          hovered && styles.alertCardHover,
+          pressed && styles.alertCardPressed,
+        ]}
+        onPress={onPress}
+      >
+        <View style={[styles.alertIcon, styles.birthdayIcon, !isUnread && styles.alertIconRead]}>
+          <Text style={styles.alertIconText}>{'🎂'}</Text>
+        </View>
+        <View style={styles.alertContent}>
+          <View style={styles.alertTitleRow}>
+            <Text style={[styles.alertTitle, styles.birthdayTitle, !isUnread && styles.alertTitleRead]}>
+              La multi ani!
+            </Text>
+            {isUnread && (
+              <Text style={[styles.unreadBadge, styles.birthdayBadge]}>Azi</Text>
+            )}
+          </View>
+          <Text style={styles.alertProduct}>{alert.lovedOneName}</Text>
+          <Text style={styles.alertText}>
+            Astazi este ziua de nastere a lui/a {alert.lovedOneName}!
+            {alert.year
+              ? ` Implineste ${new Date().getFullYear() - alert.year} ani.`
+              : ''}
+          </Text>
+          <Text style={[styles.alertAction, styles.birthdayAction]}>
+            {isUnread ? 'Deschide profilul' : 'Vezi persoana'}
+          </Text>
+        </View>
+      </Pressable>
+    );
+  }
+
+  if (isDeadlineAlert(alert)) {
+    const isPurchase = alert.type === 'purchase_deadline';
+    const isOverdue = alert.deadlineStatus === 'overdue';
+
+    return (
+      <Pressable
+        style={({ hovered, pressed }) => [
+          styles.alertCard,
+          isUnread && isPurchase && styles.purchaseDeadlineUnread,
+          isUnread && !isPurchase && styles.offerDeadlineUnread,
+          isUnread && isOverdue && styles.overdueDeadlineUnread,
+          hovered && styles.alertCardHover,
+          pressed && styles.alertCardPressed,
+        ]}
+        onPress={onPress}
+      >
+        <View
+          style={[
+            styles.alertIcon,
+            !isUnread && styles.alertIconRead,
+            isPurchase && styles.purchaseDeadlineIcon,
+            !isPurchase && styles.offerDeadlineIcon,
+            isOverdue && styles.overdueDeadlineIcon,
+          ]}
+        >
+          <Text style={styles.alertIconText}>
+            {isPurchase ? 'C' : 'O'}
+          </Text>
+        </View>
+
+        <View style={styles.alertContent}>
+          <View style={styles.alertTitleRow}>
+            <Text
+              style={[
+                styles.alertTitle,
+                !isUnread && styles.alertTitleRead,
+                isPurchase && styles.purchaseDeadlineTitle,
+                !isPurchase && styles.offerDeadlineTitle,
+                isOverdue && styles.overdueDeadlineTitle,
+              ]}
+            >
+              {getDeadlineTitle(alert)}
+            </Text>
+            {isUnread && <Text style={styles.unreadBadge}>Nou</Text>}
+          </View>
+          <Text style={styles.alertProduct}>{alert.giftPurpose}</Text>
+          <Text style={styles.alertText}>{getDeadlineText(alert)}</Text>
+          <Text style={styles.alertMeta}>
+            Pentru: {alert.lovedOneName || 'persoana draga'} - Data:{' '}
+            {formatDate(alert.deadlineDate)}
+          </Text>
+          <Text
+            style={[
+              styles.alertAction,
+              isPurchase && styles.purchaseDeadlineAction,
+              !isPurchase && styles.offerDeadlineAction,
+              isOverdue && styles.overdueDeadlineAction,
+            ]}
+          >
+            {isUnread
+              ? 'Deschide si marcheaza ca citita'
+              : 'Deschide cadoul'}
+          </Text>
+        </View>
+      </Pressable>
+    );
+  }
+
+  const priceAlert = alert as PriceAlert;
+  const isDown = priceAlert.changeDirection === 'down';
+  const isUp = priceAlert.changeDirection === 'up';
+  const directionLabel = isUp
+    ? 'Pret crescut'
+    : isDown
+      ? 'Pret scazut'
+      : 'Pret modificat';
+  const iconSymbol = isUp ? '↑' : isDown ? '↓' : '%';
+
+  return (
+    <Pressable
+      style={({ hovered, pressed }) => [
+        styles.alertCard,
+        isUnread && isDown && styles.alertCardDownUnread,
+        isUnread && isUp && styles.alertCardUpUnread,
+        isUnread && !isDown && !isUp && styles.alertCardUnread,
+        hovered && styles.alertCardHover,
+        pressed && styles.alertCardPressed,
+      ]}
+      onPress={onPress}
+    >
+      <View
+        style={[
+          styles.alertIcon,
+          !isUnread && styles.alertIconRead,
+          isUnread && isDown && styles.alertIconDown,
+          isUnread && isUp && styles.alertIconUp,
+        ]}
+      >
+        <Text style={styles.alertIconText}>{iconSymbol}</Text>
+      </View>
+
+      <View style={styles.alertContent}>
+        <View style={styles.alertTitleRow}>
+          <Text
+            style={[
+              styles.alertTitle,
+              !isUnread && styles.alertTitleRead,
+              isUnread && isDown && styles.alertTitleDown,
+              isUnread && isUp && styles.alertTitleUp,
+            ]}
+          >
+            {directionLabel}
+          </Text>
+          {isUnread && (
+            <Text
+              style={[
+                styles.unreadBadge,
+                isDown && styles.unreadBadgeDown,
+                isUp && styles.unreadBadgeUp,
+              ]}
+            >
+              Nou
+            </Text>
+          )}
+        </View>
+        <Text style={styles.alertProduct}>{priceAlert.productName}</Text>
+        <Text style={styles.alertText}>
+          {directionLabel} la {priceAlert.storeName}: de la{' '}
+          {formatMoney(priceAlert.oldPrice, priceAlert.currency)} la{' '}
+          {formatMoney(priceAlert.newPrice, priceAlert.currency)}.
+        </Text>
+        <Text style={styles.alertMeta}>
+          Pentru: {priceAlert.lovedOneName || 'persoana draga'} - Scop:{' '}
+          {priceAlert.giftPurpose || '-'} - {formatDate(priceAlert.createdAt)}
+        </Text>
+        <Text
+          style={[
+            styles.alertAction,
+            isUnread && isDown && styles.alertActionDown,
+            isUnread && isUp && styles.alertActionUp,
+          ]}
+        >
+          {isUnread
+            ? 'Deschide si marcheaza ca citita'
+            : 'Deschide cadoul'}
+        </Text>
+      </View>
+    </Pressable>
+  );
+});
+
 export default function NotificationsScreen({
   alerts,
   onOpenAlert,
@@ -85,58 +283,74 @@ export default function NotificationsScreen({
     onDeleteAlerts(mode);
   };
 
+  const renderItem = useCallback(
+    ({ item }: { item: AppNotification }) => (
+      <AlertCard alert={item} onPress={() => onOpenAlert(item)} />
+    ),
+    [onOpenAlert]
+  );
+
+  const listHeader = (
+    <>
+      <View style={styles.headerRow}>
+        <Text style={styles.title}>Notificari</Text>
+        <Text style={styles.subtitle}>
+          Alerte preturi, remindere cadouri si zile de nastere.
+        </Text>
+      </View>
+
+      <View style={styles.summaryRow}>
+        <View style={[styles.summaryCard, styles.unreadSummaryCard]}>
+          <Text style={styles.summaryValue}>{unreadCount}</Text>
+          <Text style={styles.summaryLabel}>noi</Text>
+        </View>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryValueMuted}>{readCount}</Text>
+          <Text style={styles.summaryLabel}>citite</Text>
+        </View>
+      </View>
+
+      <View style={styles.actionRow}>
+        <Pressable
+          style={({ hovered, pressed }) => [
+            styles.secondaryActionButton,
+            hovered && styles.secondaryActionButtonHover,
+            pressed && styles.actionButtonPressed,
+            unreadCount === 0 && styles.disabledButton,
+          ]}
+          onPress={onMarkAllRead}
+          disabled={unreadCount === 0}
+        >
+          <Text style={styles.secondaryActionButtonText}>
+            Marcheaza toate citite
+          </Text>
+        </Pressable>
+
+        <Pressable
+          style={({ hovered, pressed }) => [
+            styles.deleteButton,
+            hovered && styles.deleteButtonHover,
+            pressed && styles.actionButtonPressed,
+            alerts.length === 0 && styles.disabledButton,
+          ]}
+          onPress={() => setDeleteConfirmVisible(true)}
+          disabled={alerts.length === 0}
+        >
+          <Text style={styles.deleteButtonText}>Sterge notificari</Text>
+        </Pressable>
+      </View>
+    </>
+  );
+
   return (
     <>
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.headerRow}>
-          <Text style={styles.title}>Notificari</Text>
-          <Text style={styles.subtitle}>
-            Alerte preturi, remindere cadouri si zile de nastere.
-          </Text>
-        </View>
-
-        <View style={styles.summaryRow}>
-          <View style={[styles.summaryCard, styles.unreadSummaryCard]}>
-            <Text style={styles.summaryValue}>{unreadCount}</Text>
-            <Text style={styles.summaryLabel}>noi</Text>
-          </View>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryValueMuted}>{readCount}</Text>
-            <Text style={styles.summaryLabel}>citite</Text>
-          </View>
-        </View>
-
-        <View style={styles.actionRow}>
-          <Pressable
-            style={({ hovered, pressed }) => [
-              styles.secondaryActionButton,
-              hovered && styles.secondaryActionButtonHover,
-              pressed && styles.actionButtonPressed,
-              unreadCount === 0 && styles.disabledButton,
-            ]}
-            onPress={onMarkAllRead}
-            disabled={unreadCount === 0}
-          >
-            <Text style={styles.secondaryActionButtonText}>
-              Marcheaza toate citite
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={({ hovered, pressed }) => [
-              styles.deleteButton,
-              hovered && styles.deleteButtonHover,
-              pressed && styles.actionButtonPressed,
-              alerts.length === 0 && styles.disabledButton,
-            ]}
-            onPress={() => setDeleteConfirmVisible(true)}
-            disabled={alerts.length === 0}
-          >
-            <Text style={styles.deleteButtonText}>Sterge notificari</Text>
-          </Pressable>
-        </View>
-
-        {alerts.length === 0 ? (
+      <FlatList
+        contentContainerStyle={styles.container}
+        data={alerts}
+        keyExtractor={(alert) => alert.id}
+        renderItem={renderItem}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>Nu ai notificari</Text>
             <Text style={styles.emptyText}>
@@ -144,203 +358,8 @@ export default function NotificationsScreen({
               cumpararea sau oferirea cadourilor.
             </Text>
           </View>
-        ) : (
-          alerts.map((alert) => {
-            const isUnread = !alert.readAt;
-
-            if (isBirthdayAlert(alert)) {
-              return (
-                <Pressable
-                  key={alert.id}
-                  style={({ hovered, pressed }) => [
-                    styles.alertCard,
-                    isUnread && styles.birthdayCardUnread,
-                    hovered && styles.alertCardHover,
-                    pressed && styles.alertCardPressed,
-                  ]}
-                  onPress={() => onOpenAlert(alert)}
-                >
-                  <View style={[styles.alertIcon, styles.birthdayIcon, !isUnread && styles.alertIconRead]}>
-                    <Text style={styles.alertIconText}>{'\uD83C\uDF82'}</Text>
-                  </View>
-                  <View style={styles.alertContent}>
-                    <View style={styles.alertTitleRow}>
-                      <Text style={[styles.alertTitle, styles.birthdayTitle, !isUnread && styles.alertTitleRead]}>
-                        La multi ani!
-                      </Text>
-                      {isUnread && (
-                        <Text style={[styles.unreadBadge, styles.birthdayBadge]}>Azi</Text>
-                      )}
-                    </View>
-                    <Text style={styles.alertProduct}>{alert.lovedOneName}</Text>
-                    <Text style={styles.alertText}>
-                      Astazi este ziua de nastere a lui/a {alert.lovedOneName}!
-                      {alert.year
-                        ? ` Implineste ${new Date().getFullYear() - alert.year} ani.`
-                        : ''}
-                    </Text>
-                    <Text style={[styles.alertAction, styles.birthdayAction]}>
-                      {isUnread ? 'Deschide profilul' : 'Vezi persoana'}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            }
-
-            if (isDeadlineAlert(alert)) {
-              const isPurchase = alert.type === 'purchase_deadline';
-              const isOverdue = alert.deadlineStatus === 'overdue';
-
-              return (
-                <Pressable
-                  key={alert.id}
-                  style={({ hovered, pressed }) => [
-                    styles.alertCard,
-                    isUnread && isPurchase && styles.purchaseDeadlineUnread,
-                    isUnread && !isPurchase && styles.offerDeadlineUnread,
-                    isUnread && isOverdue && styles.overdueDeadlineUnread,
-                    hovered && styles.alertCardHover,
-                    pressed && styles.alertCardPressed,
-                  ]}
-                  onPress={() => onOpenAlert(alert)}
-                >
-                  <View
-                    style={[
-                      styles.alertIcon,
-                      !isUnread && styles.alertIconRead,
-                      isPurchase && styles.purchaseDeadlineIcon,
-                      !isPurchase && styles.offerDeadlineIcon,
-                      isOverdue && styles.overdueDeadlineIcon,
-                    ]}
-                  >
-                    <Text style={styles.alertIconText}>
-                      {isPurchase ? 'C' : 'O'}
-                    </Text>
-                  </View>
-
-                  <View style={styles.alertContent}>
-                    <View style={styles.alertTitleRow}>
-                      <Text
-                        style={[
-                          styles.alertTitle,
-                          !isUnread && styles.alertTitleRead,
-                          isPurchase && styles.purchaseDeadlineTitle,
-                          !isPurchase && styles.offerDeadlineTitle,
-                          isOverdue && styles.overdueDeadlineTitle,
-                        ]}
-                      >
-                        {getDeadlineTitle(alert)}
-                      </Text>
-                      {isUnread && <Text style={styles.unreadBadge}>Nou</Text>}
-                    </View>
-                    <Text style={styles.alertProduct}>{alert.giftPurpose}</Text>
-                    <Text style={styles.alertText}>{getDeadlineText(alert)}</Text>
-                    <Text style={styles.alertMeta}>
-                      Pentru: {alert.lovedOneName || 'persoana draga'} - Data:{' '}
-                      {formatDate(alert.deadlineDate)}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.alertAction,
-                        isPurchase && styles.purchaseDeadlineAction,
-                        !isPurchase && styles.offerDeadlineAction,
-                        isOverdue && styles.overdueDeadlineAction,
-                      ]}
-                    >
-                      {isUnread
-                        ? 'Deschide si marcheaza ca citita'
-                        : 'Deschide cadoul'}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            }
-
-            const priceAlert = alert as PriceAlert;
-            const isDown = priceAlert.changeDirection === 'down';
-            const isUp = priceAlert.changeDirection === 'up';
-            const directionLabel = isUp
-              ? 'Pret crescut'
-              : isDown
-                ? 'Pret scazut'
-                : 'Pret modificat';
-            const iconSymbol = isUp ? '\u2191' : isDown ? '\u2193' : '%';
-
-            return (
-              <Pressable
-                key={alert.id}
-                style={({ hovered, pressed }) => [
-                  styles.alertCard,
-                  isUnread && isDown && styles.alertCardDownUnread,
-                  isUnread && isUp && styles.alertCardUpUnread,
-                  isUnread && !isDown && !isUp && styles.alertCardUnread,
-                  hovered && styles.alertCardHover,
-                  pressed && styles.alertCardPressed,
-                ]}
-                onPress={() => onOpenAlert(priceAlert)}
-              >
-                <View
-                  style={[
-                    styles.alertIcon,
-                    !isUnread && styles.alertIconRead,
-                    isUnread && isDown && styles.alertIconDown,
-                    isUnread && isUp && styles.alertIconUp,
-                  ]}
-                >
-                  <Text style={styles.alertIconText}>{iconSymbol}</Text>
-                </View>
-
-                <View style={styles.alertContent}>
-                  <View style={styles.alertTitleRow}>
-                    <Text
-                      style={[
-                        styles.alertTitle,
-                        !isUnread && styles.alertTitleRead,
-                        isUnread && isDown && styles.alertTitleDown,
-                        isUnread && isUp && styles.alertTitleUp,
-                      ]}
-                    >
-                      {directionLabel}
-                    </Text>
-                    {isUnread && (
-                      <Text
-                        style={[
-                          styles.unreadBadge,
-                          isDown && styles.unreadBadgeDown,
-                          isUp && styles.unreadBadgeUp,
-                        ]}
-                      >
-                        Nou
-                      </Text>
-                    )}
-                  </View>
-                  <Text style={styles.alertProduct}>{priceAlert.productName}</Text>
-                  <Text style={styles.alertText}>
-                    {directionLabel} la {priceAlert.storeName}: de la{' '}
-                    {formatMoney(priceAlert.oldPrice, priceAlert.currency)} la{' '}
-                    {formatMoney(priceAlert.newPrice, priceAlert.currency)}.
-                  </Text>
-                  <Text style={styles.alertMeta}>
-                    Pentru: {priceAlert.lovedOneName || 'persoana draga'} - Scop:{' '}
-                    {priceAlert.giftPurpose || '-'} - {formatDate(priceAlert.createdAt)}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.alertAction,
-                      isUnread && isDown && styles.alertActionDown,
-                      isUnread && isUp && styles.alertActionUp,
-                    ]}
-                  >
-                    {isUnread
-                      ? 'Deschide si marcheaza ca citita'
-                      : 'Deschide cadoul'}
-                  </Text>
-                </View>
-              </Pressable>
-            );
-          })
-        )}
-      </ScrollView>
+        }
+      />
 
       <Modal
         visible={deleteConfirmVisible}

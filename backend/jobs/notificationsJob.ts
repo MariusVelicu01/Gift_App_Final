@@ -1,13 +1,7 @@
 import cron from 'node-cron';
 import { db } from '../config/firebase';
+import { logger } from '../config/logger';
 import { getPushTokens, sendPushNotification } from '../services/pushTokensService';
-
-const UPCOMING_DAYS = 7;
-
-function todayKey() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 function daysUntil(dateKey: string): number {
   const today = new Date();
@@ -105,16 +99,17 @@ async function processUser(uid: string): Promise<void> {
 
 export function startNotificationsJob() {
   // Runs every day at 09:00
-  cron.schedule('0 9 * * *', async () => {
-    console.log('[NotificationsJob] Starting daily push notifications...');
+  const task = cron.schedule('0 9 * * *', async () => {
+    logger.info('[NotificationsJob] Starting daily push notifications...');
     try {
       const userIds = await getAllUserIds();
       await Promise.allSettled(userIds.map(processUser));
-      console.log(`[NotificationsJob] Done. Processed ${userIds.length} users.`);
+      logger.info(`[NotificationsJob] Done. Processed ${userIds.length} users.`);
     } catch (err) {
-      console.error('[NotificationsJob] Error:', err);
+      logger.error({ err }, '[NotificationsJob] Error');
     }
   }, { timezone: 'Europe/Bucharest' });
 
-  console.log('[NotificationsJob] Scheduled at 09:00 Europe/Bucharest.');
+  logger.info('[NotificationsJob] Scheduled at 09:00 Europe/Bucharest.');
+  return task;
 }

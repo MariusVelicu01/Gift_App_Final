@@ -3,7 +3,6 @@ import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useAuth } from '../../../context/AuthContext';
 import { changePasswordRequest, updateProfileRequest } from '../../../services/authApi';
 import { C, R, S } from '../../../constants/theme';

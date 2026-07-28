@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { logger } from '../config/logger';
 import { getLovedOneById } from '../services/lovedOnesService';
 import { getPartnerStoreById } from '../services/partnerStoresService';
 import {
@@ -556,7 +557,7 @@ export async function getAllGiftPlans(req: Request, res: Response) {
 
     return res.status(200).json(giftPlans.map(withCanModify));
   } catch (error) {
-    console.error('GET GIFT PLANS ERROR:', error);
+    logger.error({ err: error }, 'GET GIFT PLANS ERROR');
     return res.status(500).json({ message: 'Nu am putut prelua cadourile.' });
   }
 }
@@ -592,7 +593,7 @@ export async function create(req: Request, res: Response) {
 
     return res.status(201).json(withCanModify(giftPlan));
   } catch (error) {
-    console.error('CREATE GIFT PLAN ERROR:', error);
+    logger.error({ err: error }, 'CREATE GIFT PLAN ERROR');
     return res.status(500).json({ message: 'Nu am putut salva cadoul.' });
   }
 }
@@ -640,7 +641,7 @@ export async function update(req: Request, res: Response) {
 
     return res.status(200).json(withCanModify(giftPlan));
   } catch (error) {
-    console.error('UPDATE GIFT PLAN ERROR:', error);
+    logger.error({ err: error }, 'UPDATE GIFT PLAN ERROR');
     return res.status(500).json({ message: 'Nu am putut actualiza cadoul.' });
   }
 }
@@ -671,7 +672,7 @@ export async function remove(req: Request, res: Response) {
 
     return res.status(204).send();
   } catch (error) {
-    console.error('DELETE GIFT PLAN ERROR:', error);
+    logger.error({ err: error }, 'DELETE GIFT PLAN ERROR');
     return res.status(500).json({ message: 'Nu am putut sterge cadoul.' });
   }
 }
@@ -801,7 +802,7 @@ export async function complete(req: Request, res: Response) {
 
     return res.status(200).json(withCanModify(giftPlan));
   } catch (error) {
-    console.error('COMPLETE GIFT PLAN ERROR:', error);
+    logger.error({ err: error }, 'COMPLETE GIFT PLAN ERROR');
     return res.status(500).json({ message: 'Nu am putut finaliza cadoul.' });
   }
 }
@@ -894,7 +895,7 @@ export async function offer(req: Request, res: Response) {
 
     return res.status(200).json(withCanModify(giftPlan));
   } catch (error) {
-    console.error('OFFER GIFT PLAN ERROR:', error);
+    logger.error({ err: error }, 'OFFER GIFT PLAN ERROR');
     return res.status(500).json({ message: 'Nu am putut muta cadoul in istoric.' });
   }
 }
@@ -975,7 +976,7 @@ export async function updateProducts(req: Request, res: Response) {
 
     return res.status(200).json(withCanModify(giftPlan));
   } catch (error) {
-    console.error('UPDATE GIFT PRODUCTS ERROR:', error);
+    logger.error({ err: error }, 'UPDATE GIFT PRODUCTS ERROR');
     return res.status(500).json({
       message: 'Nu am putut actualiza produsele cadoului.',
     });
