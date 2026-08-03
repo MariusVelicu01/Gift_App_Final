@@ -1,15 +1,21 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Animated,
   Modal,
-  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { Picker } from '@react-native-picker/picker';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
@@ -40,7 +46,7 @@ function pad(value: number) {
 function getDefaultBirthDateParts() {
   const today = new Date();
   return {
-    year: today.getFullYear() - 16,
+    year: today.getFullYear(),
     month: today.getMonth() + 1,
     day: today.getDate(),
   };
@@ -53,6 +59,10 @@ function buildBirthDate(year: number, month: number, day: number) {
 
 export default function AuthModal({ visible, onClose }: Props) {
   const { login, register, forgotPassword, loginFromTokens, completeGoogleProfile } = useAuth();
+
+  const { width: windowWidth } = useWindowDimensions();
+  const isPhone = windowWidth < 640;
+  const isWide = windowWidth >= 860;
 
   const defaultBirth = getDefaultBirthDateParts();
 
@@ -190,46 +200,37 @@ export default function AuthModal({ visible, onClose }: Props) {
     }
   };
 
-  const translateY = useRef(new Animated.Value(0)).current;
+  const modalProgress = useSharedValue(0);
 
   useEffect(() => {
     if (visible) {
-      translateY.setValue(0);
+      modalProgress.value = 0;
+      modalProgress.value = withTiming(1, { duration: 320, easing: Easing.out(Easing.cubic) });
     }
   }, [visible]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4,
-      onPanResponderMove: (_, gs) => {
-        if (gs.dy > 0) translateY.setValue(gs.dy);
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy > 100 || gs.vy > 0.5) {
-          Animated.timing(translateY, {
-            toValue: 800,
-            duration: 180,
-            useNativeDriver: true,
-          }).start(() => {
-            translateY.setValue(0);
-            handleClose();
-          });
-        } else {
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            bounciness: 4,
-          }).start();
-        }
-      },
-    })
-  ).current;
+  const cardStyle = useAnimatedStyle(() => ({
+    opacity: modalProgress.value,
+    transform: [
+      { translateY: (1 - modalProgress.value) * 20 },
+      { scale: 0.96 + modalProgress.value * 0.04 },
+    ],
+  }));
 
-  const handleClose = () => {
+  const finishClose = () => {
     resetFields();
     setTab('login');
     onClose();
+  };
+
+  const handleClose = () => {
+    modalProgress.value = withTiming(
+      0,
+      { duration: 180, easing: Easing.in(Easing.cubic) },
+      (finished) => {
+        if (finished) runOnJS(finishClose)();
+      }
+    );
   };
 
   const switchTab = (nextTab: AuthTab) => {
@@ -283,7 +284,7 @@ export default function AuthModal({ visible, onClose }: Props) {
   const years = useMemo(() => {
     const currentYear = new Date().getFullYear();
     const result: number[] = [];
-    for (let y = currentYear - 100; y <= currentYear - 16; y++) {
+    for (let y = currentYear - 100; y <= currentYear; y++) {
       result.push(y);
     }
     return result.reverse();
@@ -368,48 +369,265 @@ export default function AuthModal({ visible, onClose }: Props) {
     </Text>
   );
 
+  const personalDetailsFields = (
+    <>
+      <Text style={styles.sectionLabel}>Date personale</Text>
+
+      <View style={styles.nameRow}>
+        <TextInput
+          style={[styles.input, styles.nameInput]}
+          placeholder="Prenume"
+          value={firstName}
+          onChangeText={(value) => {
+            setFirstName(value);
+            if (errorMessage) setErrorMessage('');
+          }}
+        />
+
+        <TextInput
+          style={[styles.input, styles.nameInput]}
+          placeholder="Nume"
+          value={lastName}
+          onChangeText={(value) => {
+            setLastName(value);
+            if (errorMessage) setErrorMessage('');
+          }}
+        />
+      </View>
+
+      <Text style={styles.label}>Data nașterii</Text>
+
+      <View style={styles.dateRow}>
+        <View style={styles.datePickerWrapper}>
+          <Picker selectedValue={birthDay} onValueChange={(value) => setBirthDay(Number(value))}>
+            {days.map((day) => (
+              <Picker.Item key={day} label={String(day)} value={day} />
+            ))}
+          </Picker>
+        </View>
+
+        <View style={styles.datePickerWrapper}>
+          <Picker
+            selectedValue={birthMonth}
+            onValueChange={(value) => {
+              const nextMonth = Number(value);
+              setBirthMonth(nextMonth);
+
+              const maxDays = getDaysInMonth(birthYear, nextMonth);
+              if (birthDay > maxDays) {
+                setBirthDay(maxDays);
+              }
+            }}
+          >
+            {months.map((month) => (
+              <Picker.Item key={month} label={pad(month)} value={month} />
+            ))}
+          </Picker>
+        </View>
+
+        <View style={styles.datePickerWrapper}>
+          <Picker
+            selectedValue={birthYear}
+            onValueChange={(value) => {
+              const nextYear = Number(value);
+              setBirthYear(nextYear);
+
+              const maxDays = getDaysInMonth(nextYear, birthMonth);
+              if (birthDay > maxDays) {
+                setBirthDay(maxDays);
+              }
+            }}
+          >
+            {years.map((year) => (
+              <Picker.Item key={year} label={String(year)} value={year} />
+            ))}
+          </Picker>
+        </View>
+      </View>
+
+      <Text style={[styles.helperText, !isAgeValid && styles.errorTextInline]}>
+        {isAgeValid ? `✔ Vârsta este validă (${age} ani)` : 'Trebuie să ai cel puțin 16 ani.'}
+      </Text>
+
+      <Text style={styles.label}>Gen</Text>
+
+      <View style={styles.genderRow}>
+        {[
+          { value: 'male', label: 'Masculin' },
+          { value: 'female', label: 'Feminin' },
+          { value: 'unknown', label: 'Nespecificat' },
+        ].map((option) => (
+          <Pressable
+            key={option.value}
+            style={[styles.genderButton, gender === option.value && styles.genderButtonActive]}
+            onPress={() => setGender(option.value as UserGender)}
+          >
+            <Text
+              style={[
+                styles.genderButtonText,
+                gender === option.value && styles.genderButtonTextActive,
+              ]}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </>
+  );
+
+  const accountDetailsFields = (
+    <>
+      <Text style={styles.sectionLabel}>Detalii cont</Text>
+
+      <TextInput
+        style={styles.input}
+        placeholder="Email"
+        value={registerEmail}
+        onChangeText={(value) => {
+          setRegisterEmail(value);
+          if (errorMessage) setErrorMessage('');
+        }}
+        autoCapitalize="none"
+        keyboardType="email-address"
+      />
+
+      <View style={styles.passwordInputWrapper}>
+        <TextInput
+          style={[styles.input, styles.passwordInput]}
+          placeholder="Parolă"
+          value={registerPassword}
+          onChangeText={(value) => {
+            setRegisterPassword(value);
+            if (errorMessage) setErrorMessage('');
+          }}
+          secureTextEntry={!showRegisterPassword}
+          autoCapitalize="none"
+        />
+        <Pressable
+          style={({ hovered, pressed }) => [
+            styles.passwordRevealButton,
+            hovered && styles.passwordRevealButtonHover,
+            pressed && styles.passwordRevealButtonPressed,
+          ]}
+          onPress={() => setShowRegisterPassword((current) => !current)}
+        >
+          <Text style={styles.passwordRevealText}>
+            {showRegisterPassword ? 'Ascunde' : 'Arata'}
+          </Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.rulesBox}>
+        <Rule ok={passwordChecks.minLength} text="Minim 8 caractere" />
+        <Rule ok={passwordChecks.uppercase} text="Cel puțin o literă mare" />
+        <Rule ok={passwordChecks.lowercase} text="Cel puțin o literă mică" />
+        <Rule ok={passwordChecks.digit} text="Cel puțin o cifră" />
+        <Rule ok={passwordChecks.special} text="Cel puțin un caracter special" />
+      </View>
+
+      <View style={styles.passwordInputWrapper}>
+        <TextInput
+          style={[styles.input, styles.passwordInput]}
+          placeholder="Confirmă parola"
+          value={confirmPassword}
+          onChangeText={(value) => {
+            setConfirmPassword(value);
+            if (errorMessage) setErrorMessage('');
+          }}
+          secureTextEntry={!showConfirmPassword}
+          autoCapitalize="none"
+        />
+        <Pressable
+          style={({ hovered, pressed }) => [
+            styles.passwordRevealButton,
+            hovered && styles.passwordRevealButtonHover,
+            pressed && styles.passwordRevealButtonPressed,
+          ]}
+          onPress={() => setShowConfirmPassword((current) => !current)}
+        >
+          <Text style={styles.passwordRevealText}>
+            {showConfirmPassword ? 'Ascunde' : 'Arata'}
+          </Text>
+        </Pressable>
+      </View>
+
+      {confirmPassword.length > 0 && (
+        <Text
+          style={[
+            styles.helperText,
+            doPasswordsMatch ? styles.successTextInline : styles.errorTextInline,
+          ]}
+        >
+          {doPasswordsMatch ? '✔ Parolele coincid' : 'Parolele nu coincid'}
+        </Text>
+      )}
+    </>
+  );
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <View style={styles.overlay} {...getModalBackdropResponder(handleClose)}>
-        <Animated.View style={[styles.modalCard, { transform: [{ translateY }] }]}>
-          <View style={styles.dragHandleArea} {...panResponder.panHandlers}>
-            <View style={styles.dragHandleBar} />
-          </View>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
+      <View
+        style={[styles.overlay, isPhone && styles.overlayPhone]}
+        {...getModalBackdropResponder(handleClose)}
+      >
+        <Animated.View
+          style={[
+            styles.modalCard,
+            isWide && styles.modalCardWide,
+            isPhone && styles.modalCardPhone,
+            cardStyle,
+          ]}
+        >
           <View style={styles.tabsRow}>
-            <Pressable
-              onPress={() => switchTab('login')}
-              style={[styles.tabButton, tab === 'login' && styles.tabButtonActive]}
-            >
-              <Text style={[styles.tabText, tab === 'login' && styles.tabTextActive]}>
-                Autentificare
-              </Text>
-            </Pressable>
+            <View style={styles.tabsGroup}>
+              <Pressable
+                onPress={() => switchTab('login')}
+                style={[styles.tabButton, tab === 'login' && styles.tabButtonActive]}
+              >
+                <Text style={[styles.tabText, tab === 'login' && styles.tabTextActive]}>
+                  Autentificare
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => switchTab('register')}
+                style={[styles.tabButton, tab === 'register' && styles.tabButtonActive]}
+              >
+                <Text style={[styles.tabText, tab === 'register' && styles.tabTextActive]}>
+                  Inregistrare
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => switchTab('forgot')}
+                style={[styles.tabButton, tab === 'forgot' && styles.tabButtonActive]}
+              >
+                <Text style={[styles.tabText, tab === 'forgot' && styles.tabTextActive]}>
+                  Am uitat parola
+                </Text>
+              </Pressable>
+            </View>
 
             <Pressable
-              onPress={() => switchTab('register')}
-              style={[styles.tabButton, tab === 'register' && styles.tabButtonActive]}
+              style={({ hovered, pressed }) => [
+                styles.modalCloseButton,
+                hovered && styles.modalCloseButtonHover,
+                pressed && styles.modalCloseButtonPressed,
+              ]}
+              onPress={handleClose}
+              hitSlop={8}
             >
-              <Text style={[styles.tabText, tab === 'register' && styles.tabTextActive]}>
-                Inregistrare
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => switchTab('forgot')}
-              style={[styles.tabButton, tab === 'forgot' && styles.tabButtonActive]}
-            >
-              <Text style={[styles.tabText, tab === 'forgot' && styles.tabTextActive]}>
-                Resetare Parola
-              </Text>
+              <Text style={styles.modalCloseButtonText}>✕</Text>
             </Pressable>
           </View>
 
           <View style={styles.mascotArea}>
             {tab === 'forgot' ? (
-              <ConfusedGiver size={100} />
+              <ConfusedGiver size={52} />
             ) : (
               <GiftMascot
-                size={100}
+                size={52}
                 mood={
                   tab === 'login'
                     ? loginJustSucceeded
@@ -504,204 +722,16 @@ export default function AuthModal({ visible, onClose }: Props) {
 
                 {!!errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
 
-                <Text style={styles.sectionLabel}>Date personale</Text>
-
-                <View style={styles.nameRow}>
-                  <TextInput
-                    style={[styles.input, styles.nameInput]}
-                    placeholder="Prenume"
-                    value={firstName}
-                    onChangeText={(value) => {
-                      setFirstName(value);
-                      if (errorMessage) setErrorMessage('');
-                    }}
-                  />
-
-                  <TextInput
-                    style={[styles.input, styles.nameInput]}
-                    placeholder="Nume"
-                    value={lastName}
-                    onChangeText={(value) => {
-                      setLastName(value);
-                      if (errorMessage) setErrorMessage('');
-                    }}
-                  />
-                </View>
-
-                <Text style={styles.label}>Data nașterii</Text>
-
-                <View style={styles.dateRow}>
-                  <View style={styles.datePickerWrapper}>
-                    <Picker
-                      selectedValue={birthDay}
-                      onValueChange={(value) => setBirthDay(Number(value))}
-                    >
-                      {days.map((day) => (
-                        <Picker.Item key={day} label={String(day)} value={day} />
-                      ))}
-                    </Picker>
+                {isWide ? (
+                  <View style={styles.registerColumns}>
+                    <View style={styles.registerColumn}>{personalDetailsFields}</View>
+                    <View style={styles.registerColumn}>{accountDetailsFields}</View>
                   </View>
-
-                  <View style={styles.datePickerWrapper}>
-                    <Picker
-                      selectedValue={birthMonth}
-                      onValueChange={(value) => {
-                        const nextMonth = Number(value);
-                        setBirthMonth(nextMonth);
-
-                        const maxDays = getDaysInMonth(birthYear, nextMonth);
-                        if (birthDay > maxDays) {
-                          setBirthDay(maxDays);
-                        }
-                      }}
-                    >
-                      {months.map((month) => (
-                        <Picker.Item key={month} label={pad(month)} value={month} />
-                      ))}
-                    </Picker>
-                  </View>
-
-                  <View style={styles.datePickerWrapper}>
-                    <Picker
-                      selectedValue={birthYear}
-                      onValueChange={(value) => {
-                        const nextYear = Number(value);
-                        setBirthYear(nextYear);
-
-                        const maxDays = getDaysInMonth(nextYear, birthMonth);
-                        if (birthDay > maxDays) {
-                          setBirthDay(maxDays);
-                        }
-                      }}
-                    >
-                      {years.map((year) => (
-                        <Picker.Item key={year} label={String(year)} value={year} />
-                      ))}
-                    </Picker>
-                  </View>
-                </View>
-
-                <Text style={[styles.helperText, !isAgeValid && styles.errorTextInline]}>
-                  {isAgeValid
-                    ? `✔ Vârsta este validă (${age} ani)`
-                    : 'Trebuie să ai cel puțin 16 ani.'}
-                </Text>
-
-                <Text style={styles.label}>Gen</Text>
-
-                <View style={styles.genderRow}>
-                  {[
-                    { value: 'male', label: 'Masculin' },
-                    { value: 'female', label: 'Feminin' },
-                    { value: 'unknown', label: 'Nespecificat' },
-                  ].map((option) => (
-                    <Pressable
-                      key={option.value}
-                      style={[
-                        styles.genderButton,
-                        gender === option.value && styles.genderButtonActive,
-                      ]}
-                      onPress={() => setGender(option.value as UserGender)}
-                    >
-                      <Text
-                        style={[
-                          styles.genderButtonText,
-                          gender === option.value && styles.genderButtonTextActive,
-                        ]}
-                      >
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-
-                <Text style={styles.sectionLabel}>Detalii cont</Text>
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Email"
-                  value={registerEmail}
-                  onChangeText={(value) => {
-                    setRegisterEmail(value);
-                    if (errorMessage) setErrorMessage('');
-                  }}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
-
-                <View style={styles.passwordInputWrapper}>
-                  <TextInput
-                    style={[styles.input, styles.passwordInput]}
-                    placeholder="Parolă"
-                    value={registerPassword}
-                    onChangeText={(value) => {
-                      setRegisterPassword(value);
-                      if (errorMessage) setErrorMessage('');
-                    }}
-                    secureTextEntry={!showRegisterPassword}
-                    autoCapitalize="none"
-                  />
-                  <Pressable
-                    style={({ hovered, pressed }) => [
-                      styles.passwordRevealButton,
-                      hovered && styles.passwordRevealButtonHover,
-                      pressed && styles.passwordRevealButtonPressed,
-                    ]}
-                    onPress={() =>
-                      setShowRegisterPassword((current) => !current)
-                    }
-                  >
-                    <Text style={styles.passwordRevealText}>
-                      {showRegisterPassword ? 'Ascunde' : 'Arata'}
-                    </Text>
-                  </Pressable>
-                </View>
-
-                <View style={styles.rulesBox}>
-                  <Rule ok={passwordChecks.minLength} text="Minim 8 caractere" />
-                  <Rule ok={passwordChecks.uppercase} text="Cel puțin o literă mare" />
-                  <Rule ok={passwordChecks.lowercase} text="Cel puțin o literă mică" />
-                  <Rule ok={passwordChecks.digit} text="Cel puțin o cifră" />
-                  <Rule ok={passwordChecks.special} text="Cel puțin un caracter special" />
-                </View>
-
-                <View style={styles.passwordInputWrapper}>
-                  <TextInput
-                    style={[styles.input, styles.passwordInput]}
-                    placeholder="Confirmă parola"
-                    value={confirmPassword}
-                    onChangeText={(value) => {
-                      setConfirmPassword(value);
-                      if (errorMessage) setErrorMessage('');
-                    }}
-                    secureTextEntry={!showConfirmPassword}
-                    autoCapitalize="none"
-                  />
-                  <Pressable
-                    style={({ hovered, pressed }) => [
-                      styles.passwordRevealButton,
-                      hovered && styles.passwordRevealButtonHover,
-                      pressed && styles.passwordRevealButtonPressed,
-                    ]}
-                    onPress={() => setShowConfirmPassword((current) => !current)}
-                  >
-                    <Text style={styles.passwordRevealText}>
-                      {showConfirmPassword ? 'Ascunde' : 'Arata'}
-                    </Text>
-                  </Pressable>
-                </View>
-
-                {confirmPassword.length > 0 && (
-                  <Text
-                    style={[
-                      styles.helperText,
-                      doPasswordsMatch ? styles.successTextInline : styles.errorTextInline,
-                    ]}
-                  >
-                    {doPasswordsMatch
-                      ? '✔ Parolele coincid'
-                      : 'Parolele nu coincid'}
-                  </Text>
+                ) : (
+                  <>
+                    {personalDetailsFields}
+                    {accountDetailsFields}
+                  </>
                 )}
 
                 <Text style={styles.sectionLabel}>Consimțăminte</Text>
@@ -862,7 +892,7 @@ export default function AuthModal({ visible, onClose }: Props) {
 
             {tab === 'forgot' && (
               <>
-                <Text style={styles.title}>Resetare parolă</Text>
+                <Text style={styles.title}>Am uitat parola</Text>
 
                 {!!errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
                 {!!successMessage && <Text style={styles.successText}>{successMessage}</Text>}
@@ -903,40 +933,83 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(11,5,8,0.6)',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  overlayPhone: {
+    padding: 0,
   },
   modalCard: {
     backgroundColor: C.surface,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    maxHeight: '90%',
-    paddingBottom: 24,
+    borderRadius: 28,
+    width: '100%',
+    maxWidth: 460,
+    maxHeight: '94%',
+    paddingTop: 6,
+    paddingBottom: 8,
     ...S.float,
   },
-  dragHandleArea: {
-    alignItems: 'center',
-    paddingVertical: 12,
+  modalCardWide: {
+    maxWidth: 640,
   },
-  dragHandleBar: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#fecdd3',
+  modalCardPhone: {
+    borderRadius: 0,
+    maxWidth: '100%',
+    height: '100%',
+    maxHeight: '100%',
+    paddingBottom: 24,
+  },
+  registerColumns: {
+    flexDirection: 'row',
+    gap: 24,
+  },
+  registerColumn: {
+    flex: 1,
   },
   tabsRow: {
     flexDirection: 'row',
-    padding: 14,
+    alignItems: 'center',
+    padding: 8,
+    paddingTop: 8,
     gap: 8,
+  },
+  tabsGroup: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  modalCloseButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.surface2,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    flexShrink: 0,
+  },
+  modalCloseButtonHover: {
+    backgroundColor: C.border,
+  },
+  modalCloseButtonPressed: {
+    transform: [{ scale: 0.94 }],
+  },
+  modalCloseButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: C.textDim,
   },
   mascotArea: {
     alignItems: 'center',
     justifyContent: 'center',
-    height: 96,
-    marginBottom: 4,
+    height: 52,
+    marginBottom: 0,
   },
   tabButton: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 9,
     borderRadius: R.pill,
     backgroundColor: C.surface2,
     alignItems: 'center',
@@ -957,13 +1030,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   body: {
-    padding: 20,
+    padding: 10,
+    paddingTop: 4,
   },
   title: {
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: '900',
     color: C.text,
-    marginBottom: 18,
+    marginBottom: 10,
     letterSpacing: -0.8,
   },
   input: {
@@ -971,15 +1045,15 @@ const styles = StyleSheet.create({
     borderColor: C.border,
     borderRadius: R.md,
     paddingHorizontal: 14,
-    paddingVertical: 13,
-    marginBottom: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
     backgroundColor: C.surface2,
     fontSize: 15,
     color: C.text,
   },
   passwordInputWrapper: {
     position: 'relative',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   passwordInput: {
     marginBottom: 0,
@@ -987,14 +1061,14 @@ const styles = StyleSheet.create({
   },
   passwordRevealButton: {
     position: 'absolute',
-    right: 8,
-    top: 7,
+    right: 6,
+    top: 5,
     borderRadius: R.sm,
     backgroundColor: C.accentSoft,
     borderWidth: 0.5,
     borderColor: C.border,
     paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingVertical: 6,
   },
   passwordRevealButtonHover: {
     backgroundColor: C.surface2,
@@ -1010,7 +1084,7 @@ const styles = StyleSheet.create({
   forgotPasswordLink: {
     alignSelf: 'flex-end',
     marginTop: -2,
-    marginBottom: 14,
+    marginBottom: 8,
     paddingHorizontal: 4,
     paddingVertical: 4,
   },
@@ -1029,8 +1103,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: C.textDim,
-    marginBottom: 8,
-    marginTop: 4,
+    marginBottom: 5,
+    marginTop: 2,
   },
   sectionLabel: {
     fontSize: 11,
@@ -1038,8 +1112,8 @@ const styles = StyleSheet.create({
     color: C.accent,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
-    marginBottom: 10,
-    marginTop: 6,
+    marginBottom: 6,
+    marginTop: 3,
   },
   nameRow: {
     flexDirection: 'row',
@@ -1047,10 +1121,11 @@ const styles = StyleSheet.create({
   },
   nameInput: {
     flex: 1,
+    minWidth: 0,
   },
   helperText: {
     fontSize: 13,
-    marginBottom: 12,
+    marginBottom: 6,
     color: C.textFaint,
   },
   errorTextInline: {
@@ -1062,7 +1137,7 @@ const styles = StyleSheet.create({
   dateRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   datePickerWrapper: {
     flex: 1,
@@ -1077,51 +1152,25 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: C.border,
     borderRadius: R.md,
-    padding: 14,
-    marginBottom: 12,
+    padding: 10,
+    marginBottom: 8,
   },
   ruleText: {
     fontSize: 13,
     color: C.textFaint,
-    marginBottom: 6,
+    marginBottom: 3,
   },
   ruleTextOk: {
     color: C.sage,
   },
-  roleRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16,
-  },
-  roleButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: R.pill,
-    backgroundColor: C.surface2,
-    alignItems: 'center',
-    borderWidth: 0.5,
-    borderColor: C.border,
-  },
-  roleButtonActive: {
-    backgroundColor: C.accent,
-    borderColor: C.accent,
-  },
-  roleButtonText: {
-    fontWeight: '600',
-    color: C.textDim,
-    fontSize: 14,
-  },
-  roleButtonTextActive: {
-    color: C.accentInk,
-  },
   genderRow: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   genderButton: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderRadius: R.pill,
     backgroundColor: C.surface2,
     alignItems: 'center',
@@ -1143,9 +1192,9 @@ const styles = StyleSheet.create({
   actionButton: {
     backgroundColor: '#ff4d6d',
     borderRadius: R.pill,
-    paddingVertical: 16,
+    paddingVertical: 13,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 6,
     shadowColor: '#ff4d6d',
     shadowOpacity: 0.35,
     shadowRadius: 16,
@@ -1159,9 +1208,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   closeButton: {
-    marginTop: 12,
+    marginTop: 6,
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 6,
   },
   closeButtonText: {
     color: C.textFaint,
@@ -1193,7 +1242,7 @@ const styles = StyleSheet.create({
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 16,
+    marginVertical: 10,
     gap: 10,
   },
   dividerLine: {
@@ -1213,7 +1262,7 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: C.border,
     borderRadius: R.pill,
-    paddingVertical: 13,
+    paddingVertical: 10,
     backgroundColor: C.surface2,
   },
   googleButtonG: {
@@ -1229,13 +1278,13 @@ const styles = StyleSheet.create({
   googleEmailLabel: {
     fontSize: 14,
     color: C.textDim,
-    marginBottom: 16,
+    marginBottom: 10,
     textAlign: 'center',
   },
   consentSection: {
-    marginTop: 4,
-    marginBottom: 12,
-    gap: 10,
+    marginTop: 2,
+    marginBottom: 8,
+    gap: 6,
   },
   consentRow: {
     flexDirection: 'row',
