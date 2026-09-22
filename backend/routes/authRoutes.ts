@@ -8,14 +8,12 @@ import {
   googleProfileHint,
   login,
   me,
-  patchSubscription,
   refreshToken,
   register,
   updateConsent,
   updateProfile,
 } from '../controllers/authController';
 import { requireAuth } from '../middleware/requireAuth';
-import { requireRole } from '../middleware/requireRole';
 
 const router = Router();
 
@@ -30,7 +28,6 @@ router.post('/forgot-password', forgotPassword);
 router.get('/me', requireAuth, me);
 router.patch('/profile', requireAuth, updateProfile);
 router.post('/change-password', requireAuth, changePassword);
-router.patch('/subscription/:uid', requireAuth, requireRole('admin'), patchSubscription);
 router.patch('/consent', requireAuth, updateConsent);
 
 export default router;

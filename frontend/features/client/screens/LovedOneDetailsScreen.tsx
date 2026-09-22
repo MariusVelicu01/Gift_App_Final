@@ -8,8 +8,10 @@ import {
   ActivityIndicator,
   Modal,
   TextInput,
+  useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 import { openUrl } from '../../../utils/openUrl';
 import type { GestureResponderEvent } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -39,6 +41,12 @@ import {
 } from '../../../services/giftBotApi';
 import { uploadImageApi } from '../../../services/uploadApi';
 import AddLovedOneModal from '../../../components/AddLovedOneModal';
+import RevealIn from '../../../components/landing/RevealIn';
+import DriftBlob from '../../../components/landing/DriftBlob';
+import ClientFooter from '../components/ClientFooter';
+import AppFeaturesCarousel from '../components/AppFeaturesCarousel';
+import PartnerOffersCarousel from '../components/PartnerOffersCarousel';
+import type { ClientTab } from './ClientDashboard';
 import { LovedOne } from '../../../types/lovedOnes';
 import {
   GiftPlan,
@@ -75,6 +83,11 @@ const REACTION_OPTIONS = [
 ];
 
 const ADDED_PRODUCT_TOAST_DURATION = 5000;
+// Rendered height of the "Oferte de la parteneri" sidebar box — kept shorter than the
+// gift toy's own sidebar (see LovedOnesScreen) since it's just a banner, not a play area.
+const OFFERS_GROUP_HEIGHT = 280;
+// The client shell's own fixed top header sits above this screen's ScrollView.
+const CLIENT_HEADER_HEIGHT = 64;
 const BUDGET_CHART_WIDTH = 920;
 const BUDGET_CHART_HEIGHT = 380;
 const BUDGET_CHART_PLOT_WIDTH = 760;
@@ -92,6 +105,7 @@ type ProductSuggestion = GiftPlanProduct & {
   promoMinOrderCurrency?: string;
   promoEffectivePrice?: number; // price WITH code applied (always calculated)
   basePrice?: number;           // price WITHOUT code (catalog price before promo)
+  storeLogoUrl?: string;
 };
 
 function formatPromoEndDate(endDate?: string): string | null {
@@ -359,6 +373,25 @@ function getYearFromDateKey(dateKey: string) {
   return parseDateParts(dateKey).year;
 }
 
+function buildGiftPlanYearGroups(plans: GiftPlan[], currentYear: number) {
+  const groups = new Map<number, GiftPlan[]>();
+
+  plans.forEach((giftPlan) => {
+    const year = getYearFromDateKey(giftPlan.deadlineDate);
+    const yearPlans = groups.get(year) || [];
+    groups.set(year, [...yearPlans, giftPlan]);
+  });
+
+  return Array.from(groups.entries())
+    .sort(([yearA], [yearB]) => yearA - yearB)
+    .map(([year, yearPlans]) => ({
+      year,
+      title: year === currentYear ? `Anul curent - ${year}` : `Viitor - ${year}`,
+      plans: yearPlans,
+      totalBudget: yearPlans.reduce((total, giftPlan) => total + giftPlan.budget, 0),
+    }));
+}
+
 function getYearFromIsoDate(dateValue?: string) {
   if (!dateValue) return new Date().getFullYear();
 
@@ -490,6 +523,91 @@ function normalizeProductText(value?: string) {
     .trim();
 }
 
+function exactProductIdentityKey(product: {
+  name?: string;
+  brand?: string;
+  category?: string;
+  subcategory?: string;
+}) {
+  const name = normalizeProductText(product.name);
+  const brand = normalizeProductText(product.brand);
+  const category = normalizeProductText(product.category);
+  const subcategory = normalizeProductText(product.subcategory);
+  const descriptor = brand || [category, subcategory].filter(Boolean).join(' ');
+
+  return [name, descriptor].filter(Boolean).join('|');
+}
+
+// Same physical product often gets imported under slightly different names by
+// different stores (e.g. "Redken Clay Pomade" vs "REDKEN Brews Clay Pomade -
+// Pomad\u0103 cu argil\u0103..."), so an exact-text key treats them as different products.
+// This clusters same-brand/same-category listings whose name tokens overlap
+// heavily, so search results and the per-product "which stores sell this" view
+// both recognize them as one product.
+const PRODUCT_MATCH_STOPWORDS = new Set([
+  'de', 'pentru', 'cu', 'la', 'si', 'a', 'al', 'ai', 'ale', 'un', 'o',
+  'the', 'for', 'with', 'and', 'a', 'of', 'ml', 'g', 'l',
+]);
+const PRODUCT_MATCH_THRESHOLD = 0.6;
+
+function tokenizeProductName(normalizedName: string): Set<string> {
+  return new Set(
+    normalizedName.split(' ').filter((word) => word.length > 1 && !PRODUCT_MATCH_STOPWORDS.has(word))
+  );
+}
+
+function tokenOverlapRatio(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  const [smaller, larger] = a.size <= b.size ? [a, b] : [b, a];
+  let intersection = 0;
+  smaller.forEach((token) => {
+    if (larger.has(token)) intersection += 1;
+  });
+  return intersection / smaller.size;
+}
+
+type ProductCluster = { bucketKey: string; tokens: Set<string>; canonicalKey: string };
+
+// Rebuilt once per render (right after the current product catalog is known) so
+// getProductIdentityKey can stay a simple, stable `(product) => string` function
+// at all its ~30 call sites while still benefiting from fuzzy cross-store matching.
+let productClusterIndex: ProductCluster[] = [];
+
+function rebuildProductClusterIndex(offers: {
+  name?: string;
+  brand?: string;
+  category?: string;
+  subcategory?: string;
+}[]) {
+  const buckets = new Map<string, ProductCluster[]>();
+
+  offers.forEach((offer) => {
+    const brand = normalizeProductText(offer.brand);
+    const category = normalizeProductText(offer.category);
+    const bucketKey = brand
+      ? `brand:${brand}|cat:${category}`
+      : `cat:${category}|sub:${normalizeProductText(offer.subcategory)}`;
+    const tokens = tokenizeProductName(normalizeProductText(offer.name));
+    const exactKey = exactProductIdentityKey(offer);
+
+    const bucket = buckets.get(bucketKey) || [];
+    const match = bucket.find(
+      (cluster) => tokenOverlapRatio(cluster.tokens, tokens) >= PRODUCT_MATCH_THRESHOLD
+    );
+
+    if (match) {
+      // Keep the canonical key deterministic regardless of catalog iteration
+      // order, so a persisted productKey saved on one render still resolves
+      // to the same cluster on later renders/sessions.
+      if (exactKey < match.canonicalKey) match.canonicalKey = exactKey;
+    } else {
+      buckets.set(bucketKey, [...bucket, { bucketKey, tokens, canonicalKey: exactKey }]);
+    }
+  });
+
+  productClusterIndex = Array.from(buckets.values()).flat();
+}
+
 function getProductIdentityKey(product: {
   name?: string;
   brand?: string;
@@ -501,13 +619,23 @@ function getProductIdentityKey(product: {
     return product.productKey;
   }
 
-  const name = normalizeProductText(product.name);
   const brand = normalizeProductText(product.brand);
   const category = normalizeProductText(product.category);
-  const subcategory = normalizeProductText(product.subcategory);
-  const descriptor = brand || [category, subcategory].filter(Boolean).join(' ');
+  const bucketKey = brand
+    ? `brand:${brand}|cat:${category}`
+    : `cat:${category}|sub:${normalizeProductText(product.subcategory)}`;
+  const tokens = tokenizeProductName(normalizeProductText(product.name));
 
-  return [name, descriptor].filter(Boolean).join('|');
+  let best: { cluster: ProductCluster; score: number } | null = null;
+  productClusterIndex.forEach((cluster) => {
+    if (cluster.bucketKey !== bucketKey) return;
+    const score = tokenOverlapRatio(cluster.tokens, tokens);
+    if (score >= PRODUCT_MATCH_THRESHOLD && (!best || score > best.score)) {
+      best = { cluster, score };
+    }
+  });
+
+  return best ? (best as { cluster: ProductCluster; score: number }).cluster.canonicalKey : exactProductIdentityKey(product);
 }
 
 function getProductSuggestionId(store: PartnerStore, product: ProductImportItem, index: number) {
@@ -579,11 +707,17 @@ function toProductSuggestion(
   const hasPromoDiscount = Boolean(priceDetails && priceDetails.promoDiscount > 0);
   const suggestion: ProductSuggestion = {
     id: getProductSuggestionId(store, product, index),
-    productKey: getProductIdentityKey(product),
+    // Left unset here on purpose: this runs while allProductOffers (the full
+    // current catalog) is still being assembled, before rebuildProductClusterIndex
+    // has anything to cluster. getProductIdentityKey short-circuits on an
+    // already-set productKey, so baking one in here would lock every suggestion
+    // to its pre-cluster exact key and skip fuzzy matching entirely. Callers
+    // resolve the real (possibly clustered) key on demand once the index is built.
     productId: product.id || product.sku || '',
     externalId: product.externalId || '',
     storeId: store.id,
     storeName: store.displayName,
+    storeLogoUrl: store.brandImageUri,
     name: product.name,
     brand: product.brand,
     category: product.category,
@@ -701,6 +835,25 @@ function getZodiac(day: number, month: number) {
   return 'Pești';
 }
 
+const ZODIAC_EMOJIS: Record<string, string> = {
+  'Berbec': '♈',
+  'Taur': '♉',
+  'Gemeni': '♊',
+  'Rac': '♋',
+  'Leu': '♌',
+  'Fecioară': '♍',
+  'Balanță': '♎',
+  'Scorpion': '♏',
+  'Săgetător': '♐',
+  'Capricorn': '♑',
+  'Vărsător': '♒',
+  'Pești': '♓',
+};
+
+function getZodiacEmoji(zodiacName: string) {
+  return ZODIAC_EMOJIS[zodiacName] || '✨';
+}
+
 function calculateAge(day: number, month: number, year: number) {
   const today = new Date();
   let age = today.getFullYear() - year;
@@ -722,6 +875,7 @@ type Props = {
   onPriceAlertConsumed?: () => void;
   onGiftPlanTargetConsumed?: () => void;
   backLabel?: string;
+  onNavigateTab?: (tab: ClientTab) => void;
 };
 
 export default function LovedOneDetailsScreen({
@@ -733,7 +887,13 @@ export default function LovedOneDetailsScreen({
   onPriceAlertConsumed,
   onGiftPlanTargetConsumed,
   backLabel = 'Inapoi la persoana',
+  onNavigateTab,
 }: Props) {
+  const { width, height: windowHeight } = useWindowDimensions();
+  const isCompact = width < 960;
+  // Mirrors the sticky centering math used for the gift toy sidebar on the loved-ones page.
+  const offersGroupTop =
+    Math.max(windowHeight - CLIENT_HEADER_HEIGHT, 1) / 2 - OFFERS_GROUP_HEIGHT / 2;
   const { token } = useAuth();
   const [data, setData] = useState<LovedOne | null>(null);
   const [loading, setLoading] = useState(true);
@@ -741,6 +901,7 @@ export default function LovedOneDetailsScreen({
   const [deleteLovedOneVisible, setDeleteLovedOneVisible] = useState(false);
   const [deletingLovedOne, setDeletingLovedOne] = useState(false);
   const [deleteLovedOneError, setDeleteLovedOneError] = useState('');
+  const [deleteLovedOneConfirmText, setDeleteLovedOneConfirmText] = useState('');
   const [giftModalVisible, setGiftModalVisible] = useState(false);
   const [giftPurpose, setGiftPurpose] = useState<GiftPurpose | null>(null);
   const [giftBudget, setGiftBudget] = useState(200);
@@ -917,25 +1078,25 @@ export default function LovedOneDetailsScreen({
       .sort((a, b) => a.deadlineDate.localeCompare(b.deadlineDate));
   }, [giftPlans]);
 
-  const plannedGiftPlanGroups = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-    const groups = new Map<number, GiftPlan[]>();
+  const notPurchasedGiftPlans = useMemo(
+    () => plannedGiftPlans.filter((giftPlan) => giftPlan.status === 'planned'),
+    [plannedGiftPlans]
+  );
 
-    plannedGiftPlans.forEach((giftPlan) => {
-      const year = getYearFromDateKey(giftPlan.deadlineDate);
-      const yearPlans = groups.get(year) || [];
-      groups.set(year, [...yearPlans, giftPlan]);
-    });
+  const notOfferedGiftPlans = useMemo(
+    () => plannedGiftPlans.filter((giftPlan) => giftPlan.status === 'purchased'),
+    [plannedGiftPlans]
+  );
 
-    return Array.from(groups.entries())
-      .sort(([yearA], [yearB]) => yearA - yearB)
-      .map(([year, plans]) => ({
-        year,
-        title: year === currentYear ? `Anul curent - ${year}` : `Viitor - ${year}`,
-        plans,
-        totalBudget: plans.reduce((total, giftPlan) => total + giftPlan.budget, 0),
-      }));
-  }, [plannedGiftPlans]);
+  const notPurchasedGiftPlanGroups = useMemo(
+    () => buildGiftPlanYearGroups(notPurchasedGiftPlans, new Date().getFullYear()),
+    [notPurchasedGiftPlans]
+  );
+
+  const notOfferedGiftPlanGroups = useMemo(
+    () => buildGiftPlanYearGroups(notOfferedGiftPlans, new Date().getFullYear()),
+    [notOfferedGiftPlans]
+  );
 
   const completedGiftPlanBase = useMemo(() => {
     return giftPlans
@@ -1098,6 +1259,7 @@ export default function LovedOneDetailsScreen({
 
     setDeleteLovedOneVisible(false);
     setDeleteLovedOneError('');
+    setDeleteLovedOneConfirmText('');
   };
 
   const confirmDeleteLovedOne = async () => {
@@ -2567,7 +2729,8 @@ export default function LovedOneDetailsScreen({
       return giftPlan.budget;
     }
 
-    return Math.max(0, giftPlan.budget - getGiftPlanProductsTotal(giftPlan));
+    const remaining = Math.max(0, giftPlan.budget - getGiftPlanProductsTotal(giftPlan));
+    return Math.round(remaining * 100) / 100;
   };
 
   const openAiHelpModal = (giftPlan: GiftPlan) => {
@@ -2609,7 +2772,8 @@ export default function LovedOneDetailsScreen({
       .filter((product) => product.id !== productToChange.id)
       .reduce((sum, product) => sum + product.price, 0);
 
-    return Math.max(0, giftPlan.budget - usedBudgetWithoutProduct);
+    const remaining = Math.max(0, giftPlan.budget - usedBudgetWithoutProduct);
+    return Math.round(remaining * 100) / 100;
   };
 
   const openChangeProductOptions = (product: GiftPlanProduct) => {
@@ -3144,7 +3308,11 @@ export default function LovedOneDetailsScreen({
     return (
       <View style={styles.center}>
         <Text>Persoana nu a fost găsită.</Text>
-        <Pressable style={styles.backButton} onPress={() => onBack()}>
+        <Pressable style={({ hovered, pressed }) => [
+            styles.backButton,
+            hovered && styles.backButtonHover,
+            pressed && styles.backButtonPressed,
+          ]} onPress={() => onBack()}>
           <Text style={styles.backButtonText}>Înapoi</Text>
         </Pressable>
       </View>
@@ -3152,6 +3320,22 @@ export default function LovedOneDetailsScreen({
   }
 
   const zodiac = getZodiac(data.day, data.month);
+  const aiDescriptionLabel =
+    data.gender === 'male'
+      ? 'Descriere despre el'
+      : data.gender === 'female'
+      ? 'Descriere despre ea'
+      : 'Descriere despre persoana draga';
+  const aiPersonAgeText = data.year
+    ? `${calculateAge(data.day, data.month, data.year)} ani`
+    : data.estimatedAgeRange || null;
+  const aiPersonSummaryText = [
+    data.gender === 'male' ? '👨 Masculin' : data.gender === 'female' ? '👩 Feminin' : null,
+    `${getZodiacEmoji(zodiac)} ${zodiac}`,
+    aiPersonAgeText ? `🎂 ${aiPersonAgeText}` : null,
+  ]
+    .filter(Boolean)
+    .join('   ·   ');
   const visibleSelectedGiftPlan = selectedGiftPlan
     ? giftPlans.find((giftPlan) => giftPlan.id === selectedGiftPlan.id) ||
       selectedGiftPlan
@@ -3177,6 +3361,7 @@ export default function LovedOneDetailsScreen({
 
     return [...all].sort((a, b) => genderScore(a) - genderScore(b));
   })();
+  rebuildProductClusterIndex(allProductOffers);
   const lowestPriceByKey = new Map<string, number>();
   const bestImageByKey = new Map<string, string>();
   allProductOffers.forEach((offer) => {
@@ -3292,6 +3477,9 @@ export default function LovedOneDetailsScreen({
           },
         ]
       : [];
+  const budgetHistoryListDescending = [...selectedGiftBudgetHistory].sort(
+    (a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime()
+  );
   const budgetHistoryValues = selectedGiftBudgetHistory.map((entry) => entry.value);
   const budgetHistoryMin =
     budgetHistoryValues.length > 0 ? Math.min(...budgetHistoryValues) : 0;
@@ -3378,19 +3566,27 @@ export default function LovedOneDetailsScreen({
             {
               ...selectedProductDetail,
               searchText: '',
+              storeLogoUrl: partnerStores.find(
+                (store) => store.id === selectedProductDetail.storeId
+              )?.brandImageUri,
             } as ProductSuggestion,
           ];
 
     return (
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView contentContainerStyle={[styles.container, isCompact && styles.containerFlush]}>
         <Pressable
-          style={styles.backButton}
+          style={({ hovered, pressed }) => [
+            styles.backButton,
+            hovered && styles.backButtonHover,
+            pressed && styles.backButtonPressed,
+          ]}
           onPress={goBackFromProductDetail}
         >
           <Text style={styles.backButtonText}>Inapoi la cadou</Text>
         </Pressable>
 
-        <View style={styles.card}>
+        <RevealIn delay={0}>
+        <View style={[styles.card, isCompact && styles.cardCompact]}>
           <View style={styles.productDetailHeader}>
             {!!selectedProductDetail.imageUrl && (
               <Image
@@ -3438,6 +3634,10 @@ export default function LovedOneDetailsScreen({
               const hasDiscount =
                 Boolean(offer.hasDiscount) && originalPrice > offer.price;
               const isBestOffer = index === 0;
+              const isPurchasedFromThisOffer =
+                Boolean(selectedProductDetail.isPurchased) &&
+                Boolean(selectedProductDetail.purchasedFromImportedStore) &&
+                offer.storeName === selectedProductDetail.purchasedStoreName;
               const isFreshPriceChange =
                 priceAlertHighlightActive &&
                 !!activePriceAlert &&
@@ -3457,11 +3657,32 @@ export default function LovedOneDetailsScreen({
                     styles.offerCard,
                     isBestOffer && styles.bestOfferCard,
                     isFreshPriceChange && styles.freshPriceDropCard,
+                    isPurchasedFromThisOffer && styles.purchasedOfferCard,
                   ]}
                 >
                   <View style={styles.offerHeader}>
+                    <View style={styles.offerStoreRow}>
+                      {offer.storeLogoUrl ? (
+                        <Image
+                          source={{ uri: offer.storeLogoUrl }}
+                          style={styles.offerStoreLogo}
+                          contentFit="contain"
+                          transition={0}
+                        />
+                      ) : (
+                        <View style={styles.offerStoreLogoPlaceholder}>
+                          <Text style={styles.offerStoreLogoPlaceholderText}>
+                            {offer.storeName.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
                     <View style={styles.productInfo}>
                       <Text style={styles.offerStoreName}>{offer.storeName}</Text>
+                      {isPurchasedFromThisOffer && (
+                        <Text style={styles.purchasedOfferBadge}>
+                          ✓ Cumparat de aici
+                        </Text>
+                      )}
                       {isFreshPriceChange && (
                         <Text style={styles.freshPriceDropBadge}>
                           Pret modificat la acest magazin
@@ -3484,6 +3705,7 @@ export default function LovedOneDetailsScreen({
                           </Text>
                         </View>
                       )}
+                    </View>
                     </View>
                     <Text style={styles.reducedPriceDetail}>
                       {formatMoney(offer.price, offer.currency)}
@@ -3684,6 +3906,7 @@ export default function LovedOneDetailsScreen({
             ) : null}
           </View>
         </View>
+        </RevealIn>
 
         <Modal
           visible={!!promoConfirmPending}
@@ -3851,39 +4074,58 @@ export default function LovedOneDetailsScreen({
             </View>
           </View>
         </Modal>
+
+        <ClientFooter onNavigate={onNavigateTab} />
       </ScrollView>
     );
   }
 
   if (visibleSelectedGiftPlan) {
-    return (
-      <ScrollView contentContainerStyle={styles.container}>
+    const mainContentEl = (
+      <>
         <Pressable
-          style={styles.backButton}
+          style={({ hovered, pressed }) => [
+            styles.backButton,
+            hovered && styles.backButtonHover,
+            pressed && styles.backButtonPressed,
+          ]}
           onPress={goBackFromSelectedGiftPlan}
         >
           <Text style={styles.backButtonText}>{backLabel}</Text>
         </Pressable>
 
-        <View style={styles.card}>
+        <RevealIn delay={0}>
+        <View style={[styles.card, isCompact && styles.cardCompact]}>
           <Text style={styles.sectionTitle}>{visibleSelectedGiftPlan.purpose}</Text>
-          <Text style={styles.info}>
-            Cumpara pana la:{' '}
-            {formatDate(
-              visibleSelectedGiftPlan.purchaseDeadlineDate ||
-                visibleSelectedGiftPlan.deadlineDate
-            )}
-          </Text>
-          <Text style={styles.info}>
-            Ofera pe: {formatDate(visibleSelectedGiftPlan.deadlineDate)}
-          </Text>
-          <Text style={styles.info}>
-            Buget: {visibleSelectedGiftPlan.budget} RON
-          </Text>
-          <Text style={styles.info}>
-            Status:{' '}
-            {getGiftStatusLabel(visibleSelectedGiftPlan.status)}
-          </Text>
+
+          <View style={styles.forPersonRow}>
+            <Ionicons name="person-outline" size={14} color={C.textDim} />
+            <Text style={styles.forPersonText}>Pentru {data?.name || 'persoana draga'}</Text>
+          </View>
+
+          <View style={styles.metaChipsRow}>
+            <View style={styles.metaChip}>
+              <Text style={styles.metaChipLabel}>Cumpara pana la</Text>
+              <Text style={styles.metaChipValue}>
+                {formatDate(
+                  visibleSelectedGiftPlan.purchaseDeadlineDate ||
+                    visibleSelectedGiftPlan.deadlineDate
+                )}
+              </Text>
+            </View>
+            <View style={styles.metaChip}>
+              <Text style={styles.metaChipLabel}>Ofera pe</Text>
+              <Text style={styles.metaChipValue}>{formatDate(visibleSelectedGiftPlan.deadlineDate)}</Text>
+            </View>
+            <View style={styles.metaChip}>
+              <Text style={styles.metaChipLabel}>Buget</Text>
+              <Text style={styles.metaChipValue}>{visibleSelectedGiftPlan.budget} RON</Text>
+            </View>
+            <View style={styles.metaChip}>
+              <Text style={styles.metaChipLabel}>Status</Text>
+              <Text style={styles.metaChipValue}>{getGiftStatusLabel(visibleSelectedGiftPlan.status)}</Text>
+            </View>
+          </View>
           {visibleSelectedGiftPlan.status !== 'planned' && (
             <>
               <Text style={styles.info}>
@@ -3914,9 +4156,11 @@ export default function LovedOneDetailsScreen({
 
           {visibleSelectedGiftPlan.status === 'planned' && (
             <Pressable
-              style={[
+              style={({ hovered, pressed }) => [
                 styles.deadlineEditButton,
                 !canModifyGiftPlan(visibleSelectedGiftPlan) && styles.disabledButton,
+                hovered && !pressed && styles.deadlineEditButtonHover,
+                pressed && styles.buttonPressed,
               ]}
               onPress={() => openDeadlineEditModal(visibleSelectedGiftPlan)}
               disabled={!canModifyGiftPlan(visibleSelectedGiftPlan)}
@@ -3929,7 +4173,7 @@ export default function LovedOneDetailsScreen({
 
           {visibleSelectedGiftPlan.status === 'completed' ? (
             <>
-              <View style={styles.notesBox}>
+              <View style={[styles.notesBox, isCompact && styles.notesBoxCompact]}>
                 <Text style={styles.notesTitle}>Experienta</Text>
                 <Text style={styles.historyDetails}>
                   Cumparat la:{' '}
@@ -3959,7 +4203,7 @@ export default function LovedOneDetailsScreen({
                 )}
               </View>
 
-              <View style={styles.notesBox}>
+              <View style={[styles.notesBox, isCompact && styles.notesBoxCompact]}>
                 <Text style={styles.notesTitle}>Lista de cumparaturi</Text>
                 {selectedGiftProducts
                   .filter((product) => product.isPurchased)
@@ -3969,8 +4213,40 @@ export default function LovedOneDetailsScreen({
                         (reaction) => reaction.productId === product.id
                       );
 
+                    const purchasedProductImageUrl = product.purchaseImageUrl || product.imageUrl;
+                    const purchasedProductKey = getProductIdentityKey(product);
+                    const purchasedFromOffer = product.purchasedFromImportedStore
+                      ? allProductOffers.find(
+                          (offer) =>
+                            offer.storeName === product.purchasedStoreName &&
+                            getProductIdentityKey(offer) === purchasedProductKey
+                        )
+                      : undefined;
+                    const purchasedLinkUrl =
+                      purchasedFromOffer?.affiliateUrl ||
+                      purchasedFromOffer?.productUrl ||
+                      product.affiliateUrl ||
+                      product.productUrl;
+
                     return (
-                      <View key={product.id} style={styles.shoppingHistoryRow}>
+                      <Pressable
+                        key={product.id}
+                        style={({ hovered, pressed }) => [
+                          styles.shoppingHistoryRow,
+                          isCompact && styles.shoppingHistoryRowCompact,
+                          !purchasedLinkUrl && styles.disabledButton,
+                          hovered && !pressed && !!purchasedLinkUrl && styles.shoppingHistoryRowHover,
+                          pressed && styles.historyItemPressed,
+                        ]}
+                        onPress={() => openProductLink(purchasedLinkUrl)}
+                        disabled={!purchasedLinkUrl}
+                      >
+                        {!!purchasedProductImageUrl && (
+                          <Image
+                            source={{ uri: purchasedProductImageUrl }}
+                            style={[styles.productThumb, isCompact && styles.productThumbCompact]}
+                          />
+                        )}
                         <View style={styles.productInfo}>
                           <Text style={styles.productName}>{product.name}</Text>
                           <Text style={styles.productMeta}>
@@ -4000,7 +4276,7 @@ export default function LovedOneDetailsScreen({
                             product.currency
                           )}
                         </Text>
-                      </View>
+                      </Pressable>
                     );
                   })}
               </View>
@@ -4009,9 +4285,11 @@ export default function LovedOneDetailsScreen({
             <>
               <View style={styles.detailTabs}>
                 <Pressable
-                  style={[
+                  style={({ hovered, pressed }) => [
                     styles.detailTab,
                     giftDetailTab === 'details' && styles.detailTabActive,
+                    hovered && !pressed && giftDetailTab !== 'details' && styles.detailTabHover,
+                    pressed && styles.buttonPressed,
                   ]}
                   onPress={() => setGiftDetailTab('details')}
                 >
@@ -4027,9 +4305,11 @@ export default function LovedOneDetailsScreen({
                 {visibleSelectedGiftPlan.status === 'planned' && (
                   <>
                     <Pressable
-                      style={[
+                      style={({ hovered, pressed }) => [
                         styles.detailTab,
                         giftDetailTab === 'products' && styles.detailTabActive,
+                        hovered && !pressed && giftDetailTab !== 'products' && styles.detailTabHover,
+                        pressed && styles.buttonPressed,
                       ]}
                       onPress={() => setGiftDetailTab('products')}
                     >
@@ -4043,7 +4323,12 @@ export default function LovedOneDetailsScreen({
                       </Text>
                     </Pressable>
                     <Pressable
-                      style={[styles.detailTab, styles.aiHelpTab]}
+                      style={({ hovered, pressed }) => [
+                        styles.detailTab,
+                        styles.aiHelpTab,
+                        hovered && !pressed && styles.aiHelpTabHover,
+                        pressed && styles.buttonPressed,
+                      ]}
                       onPress={() => openAiHelpModal(visibleSelectedGiftPlan)}
                     >
                       <Text style={styles.aiHelpButtonText}>GiftBot</Text>
@@ -4135,11 +4420,11 @@ export default function LovedOneDetailsScreen({
                       );
 
                       return (
-                        <View key={product.id} style={styles.productSuggestionRow}>
+                        <View key={product.id} style={[styles.productSuggestionRow, isCompact && styles.productSuggestionRowCompact]}>
                           {!!product.imageUrl && (
                             <Image
                               source={{ uri: product.imageUrl }}
-                              style={styles.productThumb}
+                              style={[styles.productThumb, isCompact && styles.productThumbCompact]}
                             />
                           )}
                           <View style={styles.productInfo}>
@@ -4228,7 +4513,7 @@ export default function LovedOneDetailsScreen({
                 </View>
               ) : (
                 <>
-                  <View style={styles.detailsProductsBox}>
+                  <View style={[styles.detailsProductsBox, isCompact && styles.detailsProductsBoxCompact]}>
                     <Text style={styles.notesTitle}>Lista de cadouri</Text>
 
                     {selectedGiftProducts.length === 0 ? (
@@ -4271,29 +4556,39 @@ export default function LovedOneDetailsScreen({
                           )}
                         </View>
 
-                        {visibleSelectedGiftPlan.status === 'planned' && (
+                        <View style={styles.budgetActionsRow}>
+                          {visibleSelectedGiftPlan.status === 'planned' && (
+                            <Pressable
+                              style={({ hovered, pressed }) => [
+                                styles.updateBudgetButton,
+                                styles.budgetActionButton,
+                                savingGiftProducts && styles.disabledButton,
+                                hovered && !pressed && styles.updateBudgetButtonHover,
+                                pressed && styles.buttonPressed,
+                              ]}
+                              onPress={() => openBudgetModal(visibleSelectedGiftPlan)}
+                              disabled={savingGiftProducts}
+                            >
+                              <Text style={styles.updateBudgetButtonText}>
+                                Modifica bugetul
+                              </Text>
+                            </Pressable>
+                          )}
+
                           <Pressable
-                            style={[
-                              styles.updateBudgetButton,
-                              savingGiftProducts && styles.disabledButton,
+                            style={({ hovered, pressed }) => [
+                              styles.budgetHistoryButton,
+                              styles.budgetActionButton,
+                              hovered && !pressed && styles.budgetHistoryButtonHover,
+                              pressed && styles.buttonPressed,
                             ]}
-                            onPress={() => openBudgetModal(visibleSelectedGiftPlan)}
-                            disabled={savingGiftProducts}
+                            onPress={() => setBudgetHistoryVisible(true)}
                           >
-                            <Text style={styles.updateBudgetButtonText}>
-                              Modifica bugetul
+                            <Text style={styles.budgetHistoryButtonText}>
+                              Vezi istoricul bugetului
                             </Text>
                           </Pressable>
-                        )}
-
-                        <Pressable
-                          style={styles.budgetHistoryButton}
-                          onPress={() => setBudgetHistoryVisible(true)}
-                        >
-                          <Text style={styles.budgetHistoryButtonText}>
-                            Vezi istoricul bugetului
-                          </Text>
-                        </Pressable>
+                        </View>
 
                         {selectedGiftProducts.map((product) => {
                           const isAlertProduct =
@@ -4311,84 +4606,107 @@ export default function LovedOneDetailsScreen({
                           return (
                             <Pressable
                               key={product.id}
-                              style={[
+                              style={({ hovered, pressed }) => [
                                 styles.selectedProductRow,
+                                isCompact && styles.selectedProductRowCompact,
                                 product.isPurchased && styles.purchasedProductRow,
                                 isAlertProduct && styles.alertSelectedProductRow,
+                                hovered && !pressed && styles.selectedProductRowHover,
+                                pressed && styles.historyItemPressed,
                               ]}
                               onPress={() => setSelectedProductDetailId(product.id)}
                             >
-                              {!!displayImageUrl && (
-                                <Image
-                                  source={{ uri: displayImageUrl }}
-                                  style={styles.productThumb}
-                                />
-                              )}
-                              <View style={styles.productInfo}>
-                                <Text style={styles.productName}>{product.name}</Text>
-                                <Text style={styles.productMeta}>
-                                  {product.brand || product.category || 'Produs adaugat'}
-                                </Text>
-                                {isAlertProduct && (
-                                  <Text style={styles.alertProductHint}>
-                                    Pret schimbat la {activePriceAlert.storeName}. Apasa pentru detalii.
-                                  </Text>
+                              <View style={styles.productRowMain}>
+                                {!!displayImageUrl && (
+                                  <Image
+                                    source={{ uri: displayImageUrl }}
+                                    style={[styles.productThumb, isCompact && styles.productThumbCompact]}
+                                  />
                                 )}
-                                {product.isPurchased && (
-                                  <Text style={styles.purchasedBadge}>
-                                    Cumparat
+                                <View style={styles.productInfo}>
+                                  <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
+                                  <Text style={styles.productMeta} numberOfLines={1}>
+                                    {product.brand || product.category || 'Produs adaugat'}
                                   </Text>
-                                )}
-                              </View>
-                              <View style={styles.productPriceBox}>
+                                  {isAlertProduct && (
+                                    <Text style={styles.alertProductHint}>
+                                      Pret schimbat la {activePriceAlert.storeName}. Apasa pentru detalii.
+                                    </Text>
+                                  )}
+                                  {product.isPurchased && (
+                                    <Text style={styles.purchasedBadge}>
+                                      Cumparat
+                                    </Text>
+                                  )}
+                                </View>
                                 <Text style={styles.productPrice}>
                                   {formatMoney(getDisplayedProductPrice(product), product.currency)}
                                 </Text>
-                                {visibleSelectedGiftPlan.status !== 'planned' ? (
-                                  <Text style={styles.lockedProductText}>
-                                    {product.isPurchased
-                                      ? 'Cumparat'
-                                      : 'Neinclus in buget'}
-                                  </Text>
-                                ) : product.isPurchased ? (
-                                  <Text style={styles.lockedProductText}>
-                                    Ramane in lista
-                                  </Text>
-                                ) : (
-                                  <>
-                                    <Pressable
-                                      style={[
-                                        styles.changeProductButton,
-                                        savingGiftProducts && styles.disabledButton,
-                                      ]}
-                                      onPress={(event) => {
-                                        stopPressPropagation(event);
-                                        openChangeProductOptions(product);
-                                      }}
-                                      disabled={savingGiftProducts}
-                                    >
-                                      <Text style={styles.changeProductButtonText}>
-                                        Schimba produs
-                                      </Text>
-                                    </Pressable>
-                                    <Pressable
-                                      style={[
-                                        styles.removeProductButton,
-                                        savingGiftProducts && styles.disabledButton,
-                                      ]}
-                                      onPress={(event) => {
-                                        stopPressPropagation(event);
-                                        requestRemoveProductFromGift(product);
-                                      }}
-                                      disabled={savingGiftProducts}
-                                    >
-                                      <Text style={styles.removeProductText}>
-                                        Scoate
-                                      </Text>
-                                    </Pressable>
-                                  </>
-                                )}
                               </View>
+
+                              {visibleSelectedGiftPlan.status !== 'planned' ? (
+                                <Text style={styles.lockedProductText}>
+                                  {product.isPurchased
+                                    ? 'Cumparat'
+                                    : 'Neinclus in buget'}
+                                </Text>
+                              ) : product.isPurchased ? (
+                                <Text style={styles.lockedProductText}>
+                                  Ramane in lista
+                                </Text>
+                              ) : (
+                                <View style={styles.productRowActions}>
+                                  <Pressable
+                                    style={({ hovered, pressed }) => [
+                                      styles.markPurchasedLinkButton,
+                                      hovered && !pressed && styles.markPurchasedLinkButtonHover,
+                                      pressed && styles.buttonPressed,
+                                    ]}
+                                    onPress={(event) => {
+                                      stopPressPropagation(event);
+                                      setSelectedProductDetailId(product.id);
+                                    }}
+                                  >
+                                    <Text style={styles.markPurchasedLinkButtonText}>
+                                      Marcheaza ca fiind cumparat
+                                    </Text>
+                                  </Pressable>
+                                  <Pressable
+                                    style={({ hovered, pressed }) => [
+                                      styles.changeProductButton,
+                                      savingGiftProducts && styles.disabledButton,
+                                      hovered && !pressed && styles.changeProductButtonHover,
+                                      pressed && styles.buttonPressed,
+                                    ]}
+                                    onPress={(event) => {
+                                      stopPressPropagation(event);
+                                      openChangeProductOptions(product);
+                                    }}
+                                    disabled={savingGiftProducts}
+                                  >
+                                    <Text style={styles.changeProductButtonText}>
+                                      Schimba produs
+                                    </Text>
+                                  </Pressable>
+                                  <Pressable
+                                    style={({ hovered, pressed }) => [
+                                      styles.removeProductButton,
+                                      savingGiftProducts && styles.disabledButton,
+                                      hovered && !pressed && styles.removeProductButtonHover,
+                                      pressed && styles.buttonPressed,
+                                    ]}
+                                    onPress={(event) => {
+                                      stopPressPropagation(event);
+                                      requestRemoveProductFromGift(product);
+                                    }}
+                                    disabled={savingGiftProducts}
+                                  >
+                                    <Text style={styles.removeProductText}>
+                                      Scoate
+                                    </Text>
+                                  </Pressable>
+                                </View>
+                              )}
                             </Pressable>
                           );
                         })}
@@ -4419,12 +4737,18 @@ export default function LovedOneDetailsScreen({
                       </Text>
                     </Pressable>
                   )}
+                  {visibleSelectedGiftPlan.status === 'planned' && (
+                    <Text style={styles.completeHintText}>
+                      Marcheaza cel putin un produs din lista ca fiind cumparat inainte sa poti stabili cadoul ca fiind cumparat.
+                    </Text>
+                  )}
 
                 </>
               )}
             </>
           )}
         </View>
+        </RevealIn>
 
         <Modal
           visible={Boolean(addedProductToast)}
@@ -5277,16 +5601,22 @@ export default function LovedOneDetailsScreen({
                   </View>
                 </View>
 
-                {selectedGiftBudgetHistory.map((entry, index) => (
-                  <View key={`${entry.changedAt}-row-${index}`} style={styles.budgetHistoryRow}>
-                    <Text style={styles.budgetHistoryDate}>
-                      {formatShortDateTime(entry.changedAt)}
-                    </Text>
-                    <Text style={styles.budgetHistoryValue}>
-                      {formatMoney(entry.value)}
-                    </Text>
-                  </View>
-                ))}
+                <ScrollView
+                  style={styles.budgetHistoryListBox}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator
+                >
+                  {budgetHistoryListDescending.map((entry, index) => (
+                    <View key={`${entry.changedAt}-row-${index}`} style={styles.budgetHistoryRow}>
+                      <Text style={styles.budgetHistoryDate}>
+                        {formatShortDateTime(entry.changedAt)}
+                      </Text>
+                      <Text style={styles.budgetHistoryValue}>
+                        {formatMoney(entry.value)}
+                      </Text>
+                    </View>
+                  ))}
+                </ScrollView>
 
                 <Pressable
                   style={styles.cancelGiftButton}
@@ -5579,43 +5909,20 @@ export default function LovedOneDetailsScreen({
                 ) : (
                   <>
                 {aiResponse.length === 0 && (<>
-                <View style={styles.aiPersonBox}>
-                  <Text style={styles.notesTitle}>Persoana draga</Text>
-                  <Text style={styles.historyDetails}>Nume: {data.name}</Text>
-                  <Text style={styles.historyDetails}>
-                    Varsta estimata: {data.estimatedAgeRange || '-'}
-                  </Text>
-                  <Text style={styles.historyDetails}>
-                    Gen:{' '}
-                    {data.gender === 'male'
-                      ? 'Masculin'
-                      : data.gender === 'female'
-                      ? 'Feminin'
-                      : '-'}
-                  </Text>
-                  <Text style={styles.historyDetails}>Zodie: {zodiac}</Text>
-                  <Text style={styles.historyDetails}>
-                    Data nasterii: {String(data.day).padStart(2, '0')}.
-                    {String(data.month).padStart(2, '0')}
-                    {data.year ? `.${data.year}` : ''}
-                  </Text>
-                  {!!data.year && (
-                    <Text style={styles.historyDetails}>
-                      Vârstă: {calculateAge(data.day, data.month, data.year)} ani
-                    </Text>
-                  )}
+                <View style={styles.aiPersonBoxCompact}>
+                  <Text style={styles.aiPersonName}>{data.name}</Text>
+                  <Text style={styles.aiPersonSummary}>{aiPersonSummaryText}</Text>
                 </View>
 
                 {selectedGiftProducts.length > 0 && (
-                  <View style={styles.aiPersonBox}>
+                  <View style={styles.aiPersonBoxCompact}>
                     <Text style={styles.notesTitle}>
                       Pastrezi produsele deja adaugate?
                     </Text>
                     <Text style={styles.productMeta}>
-                      Ai {selectedGiftProducts.length} produse in lista, total{' '}
-                      {formatMoney(selectedGiftProductsTotal, selectedGiftCurrency)}.
+                      {selectedGiftProducts.length} produse in lista ({formatMoney(selectedGiftProductsTotal, selectedGiftCurrency)}) · buget cautare {formatMoney(Number(aiBudget) || 0)}
                     </Text>
-                    <View style={styles.aiChoiceRow}>
+                    <View style={styles.aiChoiceRowCompact}>
                       <Pressable
                         style={[
                           styles.aiChoiceButton,
@@ -5655,67 +5962,70 @@ export default function LovedOneDetailsScreen({
                         </Text>
                       </Pressable>
                     </View>
-                    <Text style={styles.productMeta}>
-                      Buget folosit pentru cautare:{' '}
-                      {formatMoney(Number(aiBudget) || 0)}
-                    </Text>
                   </View>
                 )}
 
-                <Text style={styles.modalLabel}>Descriere despre ea</Text>
+                <Text style={styles.modalLabel}>{aiDescriptionLabel}</Text>
                 <TextInput
                   placeholder="Ex: preferinte, hobby-uri, stil, lucruri pe care le evita..."
-                  style={[styles.modalInput, styles.modalTextArea]}
+                  style={[styles.modalInput, styles.modalTextAreaCompact]}
                   multiline
                   value={aiPersonDescription}
                   onChangeText={setAiPersonDescription}
                 />
 
-                <Text style={styles.modalLabel}>Scopul cadoului</Text>
-                <TextInput
-                  style={[styles.modalInput, styles.disabledInput]}
-                  value={visibleSelectedGiftPlan.purpose}
-                  editable={false}
-                />
+                <View style={styles.aiFieldsRow}>
+                  <View style={styles.aiFieldsCol}>
+                    <Text style={styles.modalLabel}>Scopul cadoului</Text>
+                    <TextInput
+                      style={[styles.modalInput, styles.disabledInput]}
+                      value={visibleSelectedGiftPlan.purpose}
+                      editable={false}
+                    />
+                  </View>
+                  <View style={styles.aiFieldsCol}>
+                    <Text style={styles.modalLabel}>Buget</Text>
+                    <TextInput
+                      placeholder="Buget maxim"
+                      style={styles.modalInput}
+                      keyboardType="numeric"
+                      value={aiBudget}
+                      onChangeText={(value) => setAiBudget(value.replace(/[^0-9]/g, ''))}
+                    />
+                  </View>
+                </View>
 
-                <Text style={styles.modalLabel}>Buget</Text>
-                <TextInput
-                  placeholder="Buget maxim"
-                  style={styles.modalInput}
-                  keyboardType="numeric"
-                  value={aiBudget}
-                  onChangeText={(value) => setAiBudget(value.replace(/[^0-9]/g, ''))}
-                />
-
-                <Text style={styles.modalLabel}>Numarul de produse dorite</Text>
-                <View style={styles.stepperRow}>
-                  <Pressable
-                    style={[styles.stepperBtn, Number(aiProductCount) <= 0 && styles.stepperBtnDisabled]}
-                    onPress={() => {
-                      const next = Math.max(0, Number(aiProductCount) - 1);
-                      setAiProductCount(String(next));
-                      setAiHelpError('');
-                      setAiPromptInput('');
-                      setAiConfirmVisible(false);
-                    }}
-                    disabled={Number(aiProductCount) <= 0}
-                  >
-                    <Text style={styles.stepperBtnText}>−</Text>
-                  </Pressable>
-                  <Text style={styles.stepperValue}>{aiProductCount}</Text>
-                  <Pressable
-                    style={[styles.stepperBtn, Number(aiProductCount) >= 10 && styles.stepperBtnDisabled]}
-                    onPress={() => {
-                      const next = Math.min(10, Number(aiProductCount) + 1);
-                      setAiProductCount(String(next));
-                      setAiHelpError('');
-                      setAiPromptInput('');
-                      setAiConfirmVisible(false);
-                    }}
-                    disabled={Number(aiProductCount) >= 10}
-                  >
-                    <Text style={styles.stepperBtnText}>+</Text>
-                  </Pressable>
+                <View style={styles.aiStepperRow}>
+                  <Text style={styles.modalLabel}>Numarul de produse dorite</Text>
+                  <View style={styles.stepperRowInline}>
+                    <Pressable
+                      style={[styles.stepperBtn, Number(aiProductCount) <= 0 && styles.stepperBtnDisabled]}
+                      onPress={() => {
+                        const next = Math.max(0, Number(aiProductCount) - 1);
+                        setAiProductCount(String(next));
+                        setAiHelpError('');
+                        setAiPromptInput('');
+                        setAiConfirmVisible(false);
+                      }}
+                      disabled={Number(aiProductCount) <= 0}
+                    >
+                      <Text style={styles.stepperBtnText}>−</Text>
+                    </Pressable>
+                    <Text style={styles.stepperValue}>{aiProductCount}</Text>
+                    <Pressable
+                      style={[styles.stepperBtn, Number(aiProductCount) >= 10 && styles.stepperBtnDisabled]}
+                      onPress={() => {
+                        const next = Math.min(10, Number(aiProductCount) + 1);
+                        setAiProductCount(String(next));
+                        setAiHelpError('');
+                        setAiPromptInput('');
+                        setAiConfirmVisible(false);
+                      }}
+                      disabled={Number(aiProductCount) >= 10}
+                    >
+                      <Text style={styles.stepperBtnText}>+</Text>
+                    </Pressable>
+                  </View>
                 </View>
 
                 <Pressable
@@ -6114,11 +6424,11 @@ export default function LovedOneDetailsScreen({
                   </View>
                 ) : (
                   changeProductSuggestions.map((product) => (
-                    <View key={product.id} style={styles.productSuggestionRow}>
+                    <View key={product.id} style={[styles.productSuggestionRow, isCompact && styles.productSuggestionRowCompact]}>
                       {!!product.imageUrl && (
                         <Image
                           source={{ uri: product.imageUrl }}
-                          style={styles.productThumb}
+                          style={[styles.productThumb, isCompact && styles.productThumbCompact]}
                         />
                       )}
                       <View style={styles.productInfo}>
@@ -6201,53 +6511,47 @@ export default function LovedOneDetailsScreen({
               >
                 <Text style={styles.modalTitle}>GiftBot pentru schimbare</Text>
 
-                <View style={styles.aiPersonBox}>
-                  <Text style={styles.notesTitle}>Persoana draga</Text>
-                  <Text style={styles.historyDetails}>Nume: {data.name}</Text>
-                  <Text style={styles.historyDetails}>
-                    Varsta estimata: {data.estimatedAgeRange || '-'}
-                  </Text>
-                  <Text style={styles.historyDetails}>Zodie: {zodiac}</Text>
-                  <Text style={styles.historyDetails}>
-                    Produs schimbat: {changeProduct?.name || '-'}
+                <View style={styles.aiPersonBoxCompact}>
+                  <Text style={styles.aiPersonName}>{data.name}</Text>
+                  <Text style={styles.aiPersonSummary}>{aiPersonSummaryText}</Text>
+                  <Text style={styles.aiPersonSummary}>
+                    🔄 Produs schimbat: {changeProduct?.name || '-'}
                   </Text>
                 </View>
 
                 {!changeProductAiLoading && !changeProductAiConfirmVisible && changeProductAiResponse.length === 0 && (
                   <>
-                    <Text style={styles.modalLabel}>Descriere despre ea</Text>
+                    <Text style={styles.modalLabel}>{aiDescriptionLabel}</Text>
                     <TextInput
                       placeholder="Ex: preferinte, hobby-uri, stil, lucruri pe care le evita..."
-                      style={[styles.modalInput, styles.modalTextArea]}
+                      style={[styles.modalInput, styles.modalTextAreaCompact]}
                       multiline
                       value={changeProductAiDescription}
                       onChangeText={setChangeProductAiDescription}
                     />
 
-                    <Text style={styles.modalLabel}>Scopul cadoului</Text>
-                    <TextInput
-                      style={[styles.modalInput, styles.disabledInput]}
-                      value={visibleSelectedGiftPlan.purpose}
-                      editable={false}
-                    />
-
-                    <Text style={styles.modalLabel}>Buget pentru inlocuire</Text>
-                    <TextInput
-                      placeholder="Buget maxim"
-                      style={styles.modalInput}
-                      keyboardType="numeric"
-                      value={changeProductAiBudget}
-                      onChangeText={(value) =>
-                        setChangeProductAiBudget(value.replace(/[^0-9]/g, ''))
-                      }
-                    />
-
-                    <Text style={styles.modalLabel}>Numarul de produse dorite</Text>
-                    <TextInput
-                      style={[styles.modalInput, styles.disabledInput]}
-                      value="1"
-                      editable={false}
-                    />
+                    <View style={styles.aiFieldsRow}>
+                      <View style={styles.aiFieldsCol}>
+                        <Text style={styles.modalLabel}>Scopul cadoului</Text>
+                        <TextInput
+                          style={[styles.modalInput, styles.disabledInput]}
+                          value={visibleSelectedGiftPlan.purpose}
+                          editable={false}
+                        />
+                      </View>
+                      <View style={styles.aiFieldsCol}>
+                        <Text style={styles.modalLabel}>Buget pentru inlocuire</Text>
+                        <TextInput
+                          placeholder="Buget maxim"
+                          style={styles.modalInput}
+                          keyboardType="numeric"
+                          value={changeProductAiBudget}
+                          onChangeText={(value) =>
+                            setChangeProductAiBudget(value.replace(/[^0-9]/g, ''))
+                          }
+                        />
+                      </View>
+                    </View>
 
                     <Pressable
                       style={[styles.saveGiftButton, !changeProduct && styles.disabledButton]}
@@ -6384,20 +6688,88 @@ export default function LovedOneDetailsScreen({
             </View>
           </View>
         </Modal>
+      </>
+    );
+
+    return (
+      <ScrollView contentContainerStyle={[styles.container, isCompact && styles.containerFlush]}>
+        {isCompact ? (
+          <>
+            {mainContentEl}
+
+            <View style={styles.mobileFeaturesBox}>
+              <View style={styles.sideBlobClip} pointerEvents="none">
+                <DriftBlob style={styles.sideBlobA} driftX={12} driftY={9} duration={5400} />
+                <DriftBlob style={styles.sideBlobB} driftX={-14} driftY={-8} duration={6800} />
+              </View>
+
+              <View style={styles.mobileFeaturesBoxInner}>
+                <View style={styles.sideTextRow}>
+                  <View style={styles.sideCopy}>
+                    <Text style={styles.sideHeadline}>Oferte</Text>
+                    <Text style={[styles.sideHeadline, styles.sideHeadlineAccent]}>de la parteneri</Text>
+                  </View>
+                  <View style={styles.sideDemoPill}>
+                    <Text style={styles.sideDemoPillText}>DEMO</Text>
+                  </View>
+                </View>
+
+                <View style={styles.mobileFeaturesPlayBox}>
+                  <PartnerOffersCarousel fill arrows={false} />
+                </View>
+              </View>
+            </View>
+          </>
+        ) : (
+          <View style={styles.wideRow}>
+            <View style={styles.leftCol}>{mainContentEl}</View>
+
+            <View style={styles.sideCol}>
+              <View style={styles.sideBlobClip} pointerEvents="none">
+                <DriftBlob style={styles.sideBlobA} driftX={12} driftY={9} duration={5400} />
+                <DriftBlob style={styles.sideBlobB} driftX={-14} driftY={-8} duration={6800} />
+              </View>
+
+              <View style={[styles.sideGroup, styles.sideGroupCompact, { top: offersGroupTop }]}>
+                <View style={styles.sideTextRow}>
+                  <View style={styles.sideCopy}>
+                    <Text style={styles.sideHeadline}>Oferte</Text>
+                    <Text style={[styles.sideHeadline, styles.sideHeadlineAccent]}>de la parteneri</Text>
+                  </View>
+                  <View style={styles.sideDemoPill}>
+                    <Text style={styles.sideDemoPillText}>DEMO</Text>
+                  </View>
+                </View>
+
+                <View style={styles.sidePlayBox}>
+                  <PartnerOffersCarousel fill arrows={false} />
+                </View>
+              </View>
+            </View>
+          </View>
+        )}
+
+        <ClientFooter onNavigate={onNavigateTab} />
       </ScrollView>
     );
   }
 
   if (historyVisible) {
     return (
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView contentContainerStyle={[styles.container, isCompact && styles.containerFlush]}>
+        <View style={styles.historyStretch}>
         <Pressable
-          style={styles.backButton}
+          style={({ hovered, pressed }) => [
+            styles.backButton,
+            hovered && styles.backButtonHover,
+            pressed && styles.backButtonPressed,
+          ]}
           onPress={goBackFromHistory}
         >
           <Text style={styles.backButtonText}>Inapoi la persoana</Text>
         </Pressable>
 
+        <RevealIn delay={0}>
         <View style={styles.giftsSection}>
           <Text style={styles.sectionTitle}>Istoric cadouri</Text>
 
@@ -6548,19 +6920,59 @@ export default function LovedOneDetailsScreen({
                     </Text>
                   </View>
 
-                  {group.plans.map((gift) => (
+                  {group.plans.map((gift) => {
+                    const historyPurchasedProducts = (gift.selectedProducts || []).filter(
+                      (product) => product.isPurchased
+                    );
+                    const historyProductsPreview = historyPurchasedProducts.slice(0, 5);
+                    const historyProductsExtraCount =
+                      historyPurchasedProducts.length - historyProductsPreview.length;
+
+                    return (
                     <Pressable
                       key={gift.id}
-                      style={styles.historyItem}
+                      style={({ hovered, pressed }) => [
+                        styles.historyItem,
+                        hovered && styles.historyItemHover,
+                        pressed && styles.historyItemPressed,
+                      ]}
                       onPress={() => setSelectedGiftPlan(gift)}
                     >
                       <View style={styles.historyItemHeader}>
-                        <Text style={styles.historyPurpose}>{gift.purpose}</Text>
+                        <View style={styles.historyItemInfo}>
+                          <Text style={styles.historyPurpose} numberOfLines={1}>{gift.purpose}</Text>
+                          <Text style={styles.historyDeadline} numberOfLines={1}>
+                            Oferit pe {formatDate(gift.deadlineDate)}
+                          </Text>
+                        </View>
                         <Text style={styles.historyBudget}>{gift.budget} RON</Text>
                       </View>
-                      <Text style={styles.historyDeadline}>
-                        Oferit pe: {formatDate(gift.deadlineDate)}
-                      </Text>
+                      {historyProductsPreview.length > 0 && (
+                        <View style={styles.historyProductsRow}>
+                          {historyProductsPreview.map((product) =>
+                            product.imageUrl ? (
+                              <Image
+                                key={product.id}
+                                source={{ uri: product.imageUrl }}
+                                style={styles.historyProductThumb}
+                                contentFit="cover"
+                                transition={0}
+                              />
+                            ) : (
+                              <View key={product.id} style={styles.historyProductThumbPlaceholder}>
+                                <Ionicons name="gift-outline" size={14} color={C.textFaint} />
+                              </View>
+                            )
+                          )}
+                          {historyProductsExtraCount > 0 && (
+                            <View style={styles.historyProductThumbMore}>
+                              <Text style={styles.historyProductThumbMoreText}>
+                                +{historyProductsExtraCount}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      )}
                       <Text style={styles.historyDetails}>
                         Cumparat la: {formatIsoDate(gift.completedAt)}
                       </Text>
@@ -6586,93 +6998,239 @@ export default function LovedOneDetailsScreen({
                         )?.label || ':|'}
                       </Text>
                     </Pressable>
-                  ))}
+                    );
+                  })}
                 </View>
               ))}
             </>
           )}
         </View>
+        </RevealIn>
+        </View>
+
+        <ClientFooter onNavigate={onNavigateTab} />
       </ScrollView>
     );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Pressable style={styles.backButton} onPress={() => onBack()}>
+    <ScrollView contentContainerStyle={[styles.container, isCompact && styles.containerFlush]}>
+      <Pressable style={({ hovered, pressed }) => [
+            styles.backButton,
+            hovered && styles.backButtonHover,
+            pressed && styles.backButtonPressed,
+          ]} onPress={() => onBack()}>
         <Text style={styles.backButtonText}>{backLabel}</Text>
       </Pressable>
 
-      <View style={styles.card}>
-        {data.imageUrl ? (
-          <Image source={{ uri: data.imageUrl }} style={styles.image} />
-        ) : (
-          <View style={styles.placeholder}>
-            <Text style={styles.placeholderText}>
-              {data.name?.charAt(0)?.toUpperCase() || '?'}
+      {(() => {
+      const personCardEl = (
+      <RevealIn delay={0}>
+      <View style={[styles.card, isCompact && styles.cardCompact]}>
+        <View style={styles.personHero}>
+          {data.imageUrl ? (
+            <Image source={{ uri: data.imageUrl }} style={styles.image} />
+          ) : (
+            <View style={styles.placeholder}>
+              <Text style={styles.placeholderText}>
+                {data.name?.charAt(0)?.toUpperCase() || '?'}
+              </Text>
+            </View>
+          )}
+          <Text style={styles.name}>{data.name}</Text>
+        </View>
+
+        <View style={styles.metaChipsRow}>
+          <View style={styles.metaChip}>
+            <Ionicons name="gift-outline" size={14} color={C.accent} />
+            <Text style={styles.metaChipLabel}>Data de naștere</Text>
+            <Text style={styles.metaChipValue}>
+              {String(data.day).padStart(2, '0')}.{String(data.month).padStart(2, '0')}
+              {data.year ? `.${data.year}` : ''}
             </Text>
           </View>
-        )}
 
-        <Text style={styles.name}>{data.name}</Text>
+          {data.year ? (
+            <View style={styles.metaChip}>
+              <Ionicons name="hourglass-outline" size={14} color={C.accent} />
+              <Text style={styles.metaChipLabel}>Vârstă</Text>
+              <Text style={styles.metaChipValue}>{calculateAge(data.day, data.month, data.year)} ani</Text>
+            </View>
+          ) : !!data.estimatedAgeRange ? (
+            <View style={styles.metaChip}>
+              <Ionicons name="hourglass-outline" size={14} color={C.accent} />
+              <Text style={styles.metaChipLabel}>Vârstă est.</Text>
+              <Text style={styles.metaChipValue}>{data.estimatedAgeRange}</Text>
+            </View>
+          ) : null}
 
-        <Text style={styles.info}>
-          Data: {String(data.day).padStart(2, '0')}.{String(data.month).padStart(2, '0')}
-          {data.year ? `.${data.year}` : ''}
-        </Text>
+          <View style={styles.metaChip}>
+            <Ionicons
+              name={data.gender === 'male' ? 'male-outline' : data.gender === 'female' ? 'female-outline' : 'person-outline'}
+              size={14}
+              color={C.accent}
+            />
+            <Text style={styles.metaChipLabel}>Gen</Text>
+            <Text style={styles.metaChipValue}>
+              {data.gender === 'male' ? 'Masculin' : data.gender === 'female' ? 'Feminin' : '-'}
+            </Text>
+          </View>
 
-        {data.year ? (
-          <Text style={styles.info}>Vârstă: {calculateAge(data.day, data.month, data.year)} ani</Text>
-        ) : !!data.estimatedAgeRange ? (
-          <Text style={styles.info}>Vârstă estimată: {data.estimatedAgeRange}</Text>
-        ) : null}
-
-        <Text style={styles.info}>
-          Gen:{' '}
-          {data.gender === 'male'
-            ? 'Masculin'
-            : data.gender === 'female'
-            ? 'Feminin'
-            : '-'}
-        </Text>
-
-        <Text style={styles.info}>Zodie: {zodiac}</Text>
+          <View style={styles.metaChip}>
+            <Ionicons name="star-outline" size={14} color={C.accent} />
+            <Text style={styles.metaChipLabel}>Zodie</Text>
+            <Text style={styles.metaChipValue}>{zodiac}</Text>
+          </View>
+        </View>
 
         {!!data.notes && (
-          <View style={styles.notesBox}>
+          <View style={[styles.notesBox, isCompact && styles.notesBoxCompact]}>
             <Text style={styles.notesTitle}>Detalii</Text>
             <Text style={styles.notesText}>{data.notes}</Text>
           </View>
         )}
 
-        <Pressable style={styles.editButton} onPress={() => setEditVisible(true)}>
-          <Text style={styles.editButtonText}>Editează</Text>
-        </Pressable>
-        <Pressable
-          style={styles.deleteLovedOneButton}
-          onPress={() => setDeleteLovedOneVisible(true)}
-        >
-          <Text style={styles.deleteLovedOneButtonText}>
-            Sterge persoana
-          </Text>
-        </Pressable>
+        <View style={styles.personActionsRow}>
+          <Pressable
+            style={({ hovered, pressed }) => [
+              styles.editButton,
+              styles.personActionButton,
+              hovered && styles.editButtonHover,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={() => setEditVisible(true)}
+          >
+            <Text style={styles.editButtonText}>Editează</Text>
+          </Pressable>
+          <Pressable
+            style={({ hovered, pressed }) => [
+              styles.deleteLovedOneButton,
+              styles.personActionButton,
+              hovered && styles.deleteLovedOneButtonHover,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={() => setDeleteLovedOneVisible(true)}
+          >
+            <Text style={styles.deleteLovedOneButtonText}>
+              Sterge persoana
+            </Text>
+          </Pressable>
+        </View>
       </View>
+      </RevealIn>
+      );
 
+      const renderGiftPlanYearGroups = (groups: ReturnType<typeof buildGiftPlanYearGroups>) =>
+        groups.map((group) => (
+          <View key={group.year} style={styles.yearGroup}>
+            <View style={styles.yearGroupHeader}>
+              <Text style={styles.yearGroupTitle}>{group.title}</Text>
+              <Text style={styles.yearGroupMeta}>
+                {group.plans.length} cadouri - {group.totalBudget} RON
+              </Text>
+            </View>
+
+            {group.plans.map((gift) => {
+              const timingNotes = getGiftTimingNotes(gift);
+
+              return (
+                <Pressable
+                  key={gift.id}
+                  style={({ hovered, pressed }) => [
+                    styles.historyItem,
+                    hovered && styles.historyItemHover,
+                    pressed && styles.historyItemPressed,
+                  ]}
+                  onPress={() => setSelectedGiftPlan(gift)}
+                >
+                  <View style={styles.historyItemHeader}>
+                    <View style={styles.historyItemInfo}>
+                      <Text style={styles.historyPurpose} numberOfLines={1}>{gift.purpose}</Text>
+                      {gift.status === 'planned' && (
+                        <Text style={styles.historyDeadline} numberOfLines={1}>
+                          Cumpara pana la {formatDate(gift.purchaseDeadlineDate || gift.deadlineDate)}
+                        </Text>
+                      )}
+                      {gift.status === 'purchased' && (
+                        <Text style={styles.historyDeadline} numberOfLines={1}>
+                          Ofera pe {formatDate(gift.deadlineDate)}
+                        </Text>
+                      )}
+                    </View>
+                    <Text style={styles.historyBudget}>{gift.budget} RON</Text>
+                  </View>
+                  {timingNotes.map((note) => (
+                    <Text key={note} style={styles.expiredText}>
+                      {note}
+                    </Text>
+                  ))}
+                  {gift.status === 'planned' && (
+                    <View style={styles.historyActions}>
+                      <Pressable
+                        style={({ hovered, pressed }) => [
+                          styles.historyActionButton,
+                          hovered && styles.historyActionButtonHover,
+                          pressed && styles.buttonPressed,
+                        ]}
+                        onPress={(event) => {
+                          stopPressPropagation(event);
+                          openEditGiftModal(gift);
+                        }}
+                      >
+                        <Text style={styles.historyActionText}>Editeaza</Text>
+                      </Pressable>
+                      <Pressable
+                        style={({ hovered, pressed }) => [
+                          styles.historyActionButton,
+                          styles.deleteActionButton,
+                          hovered && styles.deleteActionButtonHover,
+                          pressed && styles.buttonPressed,
+                        ]}
+                        onPress={(event) => {
+                          stopPressPropagation(event);
+                          requestDeleteGiftPlan(gift);
+                        }}
+                      >
+                        <Text style={styles.deleteActionText}>Sterge</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+        ));
+
+      const giftsSectionEl = (
+      <RevealIn delay={80}>
       <View style={styles.giftsSection}>
         <Text style={styles.sectionTitle}>Cadouri</Text>
 
-        <Pressable
-          style={styles.newGiftButton}
-          onPress={openCreateGiftModal}
-        >
-          <Text style={styles.newGiftButtonText}>Stabileste un nou cadou</Text>
-        </Pressable>
+        <View style={styles.giftsActionsRow}>
+          <Pressable
+            style={({ hovered, pressed }) => [
+              styles.newGiftButton,
+              styles.giftsActionButton,
+              hovered && styles.newGiftButtonHover,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={openCreateGiftModal}
+          >
+            <Text style={styles.newGiftButtonText}>+ Cadou nou</Text>
+          </Pressable>
 
-        <Pressable
-          style={styles.historyButton}
-          onPress={() => setHistoryVisible(true)}
-        >
-          <Text style={styles.historyButtonText}>Istoric cadouri</Text>
-        </Pressable>
+          <Pressable
+            style={({ hovered, pressed }) => [
+              styles.historyButton,
+              styles.giftsActionButton,
+              hovered && styles.historyButtonHover,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={() => setHistoryVisible(true)}
+          >
+            <Text style={styles.historyButtonText}>Istoric</Text>
+          </Pressable>
+        </View>
 
         <View style={styles.historyBox}>
           <Text style={styles.historyTitle}>Cadouri stabilite</Text>
@@ -6683,78 +7241,114 @@ export default function LovedOneDetailsScreen({
             <Text style={styles.emptyHistoryText}>
               Nu exista cadouri active pentru aceasta persoana.
             </Text>
-          ) : (
-            plannedGiftPlanGroups.map((group) => (
-              <View key={group.year} style={styles.yearGroup}>
-                <View style={styles.yearGroupHeader}>
-                  <Text style={styles.yearGroupTitle}>{group.title}</Text>
-                  <Text style={styles.yearGroupMeta}>
-                    {group.plans.length} cadouri - {group.totalBudget} RON
-                  </Text>
-                </View>
-
-                {group.plans.map((gift) => {
-                  const timingNotes = getGiftTimingNotes(gift);
-
-                  return (
-                    <Pressable
-                      key={gift.id}
-                      style={styles.historyItem}
-                      onPress={() => setSelectedGiftPlan(gift)}
-                    >
-                      <View style={styles.historyItemHeader}>
-                        <Text style={styles.historyPurpose}>{gift.purpose}</Text>
-                        <Text style={styles.historyBudget}>{gift.budget} RON</Text>
-                      </View>
-                      {gift.status === 'planned' && (
-                        <Text style={styles.historyDeadline}>
-                          Cumpara pana la:{' '}
-                          {formatDate(gift.purchaseDeadlineDate || gift.deadlineDate)}
-                        </Text>
-                      )}
-                      {gift.status === 'purchased' && (
-                        <Text style={styles.historyDeadline}>
-                          Ofera pe: {formatDate(gift.deadlineDate)}
-                        </Text>
-                      )}
-                      {timingNotes.map((note) => (
-                        <Text key={note} style={styles.expiredText}>
-                          {note}
-                        </Text>
-                      ))}
-                      {gift.status === 'planned' && (
-                        <View style={styles.historyActions}>
-                          <Pressable
-                            style={styles.historyActionButton}
-                            onPress={(event) => {
-                              stopPressPropagation(event);
-                              openEditGiftModal(gift);
-                            }}
-                          >
-                            <Text style={styles.historyActionText}>Editeaza</Text>
-                          </Pressable>
-                          <Pressable
-                            style={[
-                              styles.historyActionButton,
-                              styles.deleteActionButton,
-                            ]}
-                            onPress={(event) => {
-                              stopPressPropagation(event);
-                              requestDeleteGiftPlan(gift);
-                            }}
-                          >
-                            <Text style={styles.deleteActionText}>Sterge</Text>
-                          </Pressable>
-                        </View>
-                      )}
-                    </Pressable>
-                  );
-                })}
+          ) : isCompact ? (
+            <View style={styles.giftsSplitStack}>
+              <View>
+                <Text style={styles.giftsSplitColTitle}>De cumparat</Text>
+                {notPurchasedGiftPlanGroups.length === 0 ? (
+                  <Text style={styles.emptyHistoryText}>Niciun cadou de cumparat.</Text>
+                ) : (
+                  renderGiftPlanYearGroups(notPurchasedGiftPlanGroups)
+                )}
               </View>
-            ))
+
+              <View>
+                <Text style={styles.giftsSplitColTitle}>De oferit</Text>
+                {notOfferedGiftPlanGroups.length === 0 ? (
+                  <Text style={styles.emptyHistoryText}>Niciun cadou de oferit.</Text>
+                ) : (
+                  renderGiftPlanYearGroups(notOfferedGiftPlanGroups)
+                )}
+              </View>
+            </View>
+          ) : (
+            <View style={styles.giftsSplitRow}>
+              <View style={styles.giftsSplitCol}>
+                <Text style={styles.giftsSplitColTitle}>De cumparat</Text>
+                {notPurchasedGiftPlanGroups.length === 0 ? (
+                  <Text style={styles.emptyHistoryText}>Niciun cadou de cumparat.</Text>
+                ) : (
+                  renderGiftPlanYearGroups(notPurchasedGiftPlanGroups)
+                )}
+              </View>
+
+              <View style={styles.giftsSplitDivider} />
+
+              <View style={styles.giftsSplitCol}>
+                <Text style={styles.giftsSplitColTitle}>De oferit</Text>
+                {notOfferedGiftPlanGroups.length === 0 ? (
+                  <Text style={styles.emptyHistoryText}>Niciun cadou de oferit.</Text>
+                ) : (
+                  renderGiftPlanYearGroups(notOfferedGiftPlanGroups)
+                )}
+              </View>
+            </View>
           )}
         </View>
       </View>
+      </RevealIn>
+      );
+
+      if (isCompact) {
+        return (
+          <>
+            {personCardEl}
+            {giftsSectionEl}
+
+            <View style={styles.mobileFeaturesBox}>
+              <View style={styles.sideBlobClip} pointerEvents="none">
+                <DriftBlob style={styles.sideBlobA} driftX={12} driftY={9} duration={5400} />
+                <DriftBlob style={styles.sideBlobB} driftX={-14} driftY={-8} duration={6800} />
+              </View>
+
+              <View style={styles.mobileFeaturesBoxInner}>
+                <View style={styles.sideTextRow}>
+                  <View style={styles.sideCopy}>
+                    <Text style={styles.sideHeadline}>Cadoul potrivit.</Text>
+                    <Text style={[styles.sideHeadline, styles.sideHeadlineAccent]}>La timpul potrivit.</Text>
+                  </View>
+                  <Text style={styles.sideBrand}>PresentPerfect</Text>
+                </View>
+
+                <View style={styles.mobileFeaturesPlayBox}>
+                  <AppFeaturesCarousel arrows={false} />
+                </View>
+              </View>
+            </View>
+          </>
+        );
+      }
+
+      return (
+        <View style={styles.wideRow}>
+          <View style={styles.leftCol}>
+            {personCardEl}
+            {giftsSectionEl}
+          </View>
+
+          <View style={styles.sideCol}>
+            <View style={styles.sideBlobClip} pointerEvents="none">
+              <DriftBlob style={styles.sideBlobA} driftX={12} driftY={9} duration={5400} />
+              <DriftBlob style={styles.sideBlobB} driftX={-14} driftY={-8} duration={6800} />
+            </View>
+
+            <View style={styles.sideGroup}>
+              <View style={styles.sideTextRow}>
+                <View style={styles.sideCopy}>
+                  <Text style={styles.sideHeadline}>Cadoul potrivit.</Text>
+                  <Text style={[styles.sideHeadline, styles.sideHeadlineAccent]}>La timpul potrivit.</Text>
+                </View>
+                <Text style={styles.sideBrand}>PresentPerfect</Text>
+              </View>
+
+              <View style={styles.sidePlayBox}>
+                <AppFeaturesCarousel arrows={false} />
+              </View>
+            </View>
+          </View>
+        </View>
+      );
+      })()}
 
       <AddLovedOneModal
         visible={editVisible}
@@ -6779,40 +7373,49 @@ export default function LovedOneDetailsScreen({
           <View style={styles.confirmModalCard}>
             <Text style={styles.modalTitle}>Sterge persoana</Text>
             <Text style={styles.confirmText}>
-              {data.name} va disparea din lista ta si din calendar. Cadourile
-              si produsele deja salvate raman in baza de date pentru statisticile
-              admin.
+              Sigur doresti sa stergi aceasta persoana?
             </Text>
-            <Text style={styles.confirmText}>
-              Daca adaugi din nou aceeasi persoana, va fi tratata ca o persoana
-              noua, fara istoricul vechi.
+
+            <Text style={styles.modalLabel}>
+              Scrie CONFIRM pentru a activa ștergerea
             </Text>
+            <TextInput
+              placeholder="CONFIRM"
+              style={styles.modalInput}
+              value={deleteLovedOneConfirmText}
+              onChangeText={setDeleteLovedOneConfirmText}
+              autoCapitalize="characters"
+              editable={!deletingLovedOne}
+            />
 
             {!!deleteLovedOneError && (
               <Text style={styles.giftErrorText}>{deleteLovedOneError}</Text>
             )}
 
-            <Pressable
-              style={[
-                styles.saveGiftButton,
-                styles.deleteConfirmButton,
-                deletingLovedOne && styles.disabledButton,
-              ]}
-              onPress={confirmDeleteLovedOne}
-              disabled={deletingLovedOne}
-            >
-              <Text style={styles.saveGiftButtonText}>
-                {deletingLovedOne ? 'Se sterge...' : 'Sterge persoana'}
-              </Text>
-            </Pressable>
+            <View style={styles.deletePersonActionsRow}>
+              <Pressable
+                style={[styles.cancelGiftButton, styles.deletePersonActionButton, styles.deletePersonCancelButton]}
+                onPress={closeDeleteLovedOneModal}
+                disabled={deletingLovedOne}
+              >
+                <Text style={styles.cancelGiftButtonText}>Anuleaza</Text>
+              </Pressable>
 
-            <Pressable
-              style={styles.cancelGiftButton}
-              onPress={closeDeleteLovedOneModal}
-              disabled={deletingLovedOne}
-            >
-              <Text style={styles.cancelGiftButtonText}>Anuleaza</Text>
-            </Pressable>
+              <Pressable
+                style={[
+                  styles.saveGiftButton,
+                  styles.deleteConfirmButton,
+                  styles.deletePersonActionButton,
+                  (deletingLovedOne || deleteLovedOneConfirmText.trim() !== 'CONFIRM') && styles.disabledButton,
+                ]}
+                onPress={confirmDeleteLovedOne}
+                disabled={deletingLovedOne || deleteLovedOneConfirmText.trim() !== 'CONFIRM'}
+              >
+                <Text style={styles.saveGiftButtonText}>
+                  {deletingLovedOne ? 'Se sterge...' : 'Sterge persoana'}
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </Modal>
@@ -7136,16 +7739,162 @@ export default function LovedOneDetailsScreen({
           </View>
         </View>
       </Modal>
+
+      <ClientFooter onNavigate={onNavigateTab} />
     </ScrollView>
   );
 }
 
+// Web-only smooth hover/press transition, spread into interactive elements' base
+// styles so their hover/pressed style swaps animate instead of popping instantly.
+const HOVER_TRANSITION = {
+  transitionProperty: 'transform, background-color, border-color, box-shadow' as any,
+  transitionDuration: '160ms' as any,
+  transitionTimingFunction: 'ease-out' as any,
+  cursor: 'pointer' as any,
+};
+
 const styles = StyleSheet.create({
   container: {
-    padding: 16,
-    gap: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    gap: 14,
     backgroundColor: C.bg,
     paddingBottom: 32,
+    flexGrow: 1,
+  },
+  containerFlush: {
+    paddingHorizontal: 0,
+  },
+  historyStretch: {
+    flex: 1,
+    gap: 14,
+  },
+  wideRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 16,
+  },
+  leftCol: {
+    flex: 3,
+    gap: 14,
+  },
+  sideCol: {
+    flex: 1,
+    minHeight: 160,
+    backgroundColor: '#0b0508',
+    borderRadius: R.xl,
+    position: 'relative',
+  },
+  mobileFeaturesBox: {
+    backgroundColor: '#0b0508',
+    borderRadius: R.xl,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  mobileFeaturesBoxInner: {
+    height: 340,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 14,
+  },
+  mobileFeaturesPlayBox: {
+    flex: 1,
+    borderRadius: R.lg,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  sideBlobClip: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: R.xl,
+    overflow: 'hidden',
+  },
+  sideBlobA: {
+    position: 'absolute',
+    top: -30,
+    left: -30,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(255,77,109,0.16)',
+  },
+  sideBlobB: {
+    position: 'absolute',
+    bottom: -40,
+    right: -20,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(253,242,244,0.06)',
+  },
+  sideGroup: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 14,
+    userSelect: 'none' as any,
+  },
+  sideGroupCompact: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: 'auto',
+    position: 'sticky' as any,
+    left: 0,
+    right: 0,
+    height: OFFERS_GROUP_HEIGHT,
+  },
+  sideTextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  sidePlayBox: {
+    flex: 1,
+    borderRadius: R.lg,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  sideCopy: {
+    flexShrink: 1,
+    gap: 2,
+  },
+  sideHeadline: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#fdf2f4',
+    letterSpacing: -0.3,
+    lineHeight: 18,
+  },
+  sideHeadlineAccent: {
+    color: '#ff4d6d',
+  },
+  sideBrand: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: 'rgba(253,242,244,0.65)',
+    letterSpacing: 0.1,
+    textAlign: 'center',
+  },
+  sideDemoPill: {
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderRadius: R.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  sideDemoPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#ff4d6d',
+    letterSpacing: 0.5,
   },
   center: {
     flex: 1,
@@ -7166,6 +7915,15 @@ const styles = StyleSheet.create({
     borderRadius: R.pill,
     borderWidth: 0.5,
     borderColor: C.border,
+    ...HOVER_TRANSITION,
+  },
+  backButtonHover: {
+    backgroundColor: C.accentSoft,
+    borderColor: C.accent,
+    transform: [{ translateX: -2 }],
+  },
+  backButtonPressed: {
+    transform: [{ scale: 0.96 }],
   },
   backButtonText: {
     color: C.textDim,
@@ -7177,7 +7935,8 @@ const styles = StyleSheet.create({
     borderRadius: R.xl,
     borderWidth: 0.5,
     borderColor: C.border,
-    padding: 18,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
     alignItems: 'flex-start',
     shadowColor: C.text,
     shadowOpacity: 0.05,
@@ -7185,34 +7944,89 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 1,
   },
+  cardCompact: {
+    paddingHorizontal: 10,
+  },
+  personHero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    width: '100%',
+  },
   image: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    marginBottom: 14,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
   },
   placeholder: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     backgroundColor: C.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 14,
   },
   placeholderText: {
     fontFamily: 'serif',
-    fontSize: 40,
+    fontSize: 28,
     fontWeight: '400',
     color: C.accent,
   },
   name: {
+    flex: 1,
     fontFamily: 'serif',
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '400',
     color: C.text,
-    marginBottom: 12,
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
+  },
+  forPersonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  forPersonText: {
+    color: C.textDim,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  metaChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+  },
+  metaChip: {
+    backgroundColor: C.surface2,
+    borderRadius: R.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  metaChipLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: C.textDim,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  metaChipValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.text,
+  },
+  personActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 16,
+  },
+  personActionButton: {
+    marginTop: 0,
   },
   info: {
     fontSize: 14,
@@ -7227,6 +8041,9 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 0.5,
     borderColor: C.border,
+  },
+  notesBoxCompact: {
+    paddingHorizontal: 8,
   },
   notesTitle: {
     fontSize: 14,
@@ -7250,6 +8067,15 @@ const styles = StyleSheet.create({
     padding: 10,
     backgroundColor: C.surface,
     marginTop: 8,
+    ...HOVER_TRANSITION,
+  },
+  shoppingHistoryRowHover: {
+    borderColor: C.accent,
+    backgroundColor: C.accentSoft,
+    transform: [{ translateY: -1 }],
+  },
+  shoppingHistoryRowCompact: {
+    paddingHorizontal: 6,
   },
   productReactionCard: {
     borderWidth: 0.5,
@@ -7286,6 +8112,10 @@ const styles = StyleSheet.create({
     backgroundColor: C.sage,
     borderColor: C.sage,
   },
+  aiHelpTabHover: {
+    opacity: 0.88,
+    transform: [{ translateY: -1 }],
+  },
   aiPersonBox: {
     borderWidth: 0.5,
     borderColor: C.border,
@@ -7293,6 +8123,25 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: C.surface2,
     marginBottom: 14,
+  },
+  aiPersonBoxCompact: {
+    borderWidth: 0.5,
+    borderColor: C.border,
+    borderRadius: R.md,
+    padding: 10,
+    backgroundColor: C.surface2,
+    marginBottom: 10,
+  },
+  aiPersonName: {
+    fontFamily: 'serif',
+    fontSize: 16,
+    fontWeight: '400',
+    color: C.text,
+  },
+  aiPersonSummary: {
+    color: C.textDim,
+    fontSize: 13,
+    marginTop: 3,
   },
   aiPromptBox: {
     marginTop: 14,
@@ -7346,6 +8195,11 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 10,
   },
+  aiChoiceRowCompact: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
   aiChoiceButton: {
     flex: 1,
     borderWidth: 0.5,
@@ -7383,10 +8237,18 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: C.surface2,
     borderRadius: R.md,
+    borderWidth: 0.5,
+    borderColor: 'transparent',
     paddingVertical: 12,
     alignItems: 'center',
     marginTop: 6,
     marginBottom: 12,
+    ...HOVER_TRANSITION,
+  },
+  deadlineEditButtonHover: {
+    backgroundColor: C.surface,
+    borderColor: C.accent,
+    transform: [{ translateY: -1 }],
   },
   deadlineEditButtonText: {
     color: C.text,
@@ -7401,6 +8263,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: C.surface2,
+    ...HOVER_TRANSITION,
+  },
+  detailTabHover: {
+    backgroundColor: C.border,
+    transform: [{ translateY: -1 }],
   },
   detailTabActive: {
     backgroundColor: C.accent,
@@ -7486,6 +8353,10 @@ const styles = StyleSheet.create({
     borderColor: C.sage,
     backgroundColor: C.sageBg,
   },
+  purchasedOfferCard: {
+    borderColor: C.sage,
+    backgroundColor: C.sageBg,
+  },
   freshPriceDropCard: {
     borderColor: C.accent,
     backgroundColor: C.accentSoft,
@@ -7502,6 +8373,32 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 10,
   },
+  offerStoreRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    minWidth: 0,
+  },
+  offerStoreLogo: {
+    width: 34,
+    height: 34,
+    borderRadius: R.sm,
+    backgroundColor: C.surface,
+  },
+  offerStoreLogoPlaceholder: {
+    width: 34,
+    height: 34,
+    borderRadius: R.sm,
+    backgroundColor: C.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  offerStoreLogoPlaceholderText: {
+    color: C.accent,
+    fontSize: 15,
+    fontWeight: '700',
+  },
   offerStoreName: {
     color: C.text,
     fontSize: 15,
@@ -7517,6 +8414,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     paddingHorizontal: 8,
     paddingVertical: 4,
+  },
+  purchasedOfferBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: C.sage,
+    borderRadius: R.pill,
+    color: C.accentInk,
+    fontSize: 12,
+    fontWeight: '700',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginBottom: 4,
   },
   freshPriceDropBadge: {
     alignSelf: 'flex-start',
@@ -7585,12 +8493,26 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+  budgetActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  budgetActionButton: {
+    flex: 1,
+    marginBottom: 0,
+  },
   updateBudgetButton: {
     backgroundColor: C.danger,
     borderRadius: R.md,
     paddingVertical: 12,
     alignItems: 'center',
     marginBottom: 12,
+    ...HOVER_TRANSITION,
+  },
+  updateBudgetButtonHover: {
+    opacity: 0.88,
+    transform: [{ translateY: -2 }],
   },
   updateBudgetButtonText: {
     color: C.accentInk,
@@ -7604,6 +8526,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
     backgroundColor: C.surface,
+    ...HOVER_TRANSITION,
+  },
+  budgetHistoryButtonHover: {
+    backgroundColor: C.surface2,
+    borderColor: C.accent,
+    transform: [{ translateY: -1 }],
   },
   budgetHistoryButtonText: {
     color: C.text,
@@ -7759,6 +8687,15 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     marginTop: 4,
   },
+  budgetHistoryListBox: {
+    maxHeight: 112,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    borderRadius: R.md,
+    paddingHorizontal: 12,
+    marginTop: 4,
+    marginBottom: 14,
+  },
   budgetHistoryRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -7792,6 +8729,9 @@ const styles = StyleSheet.create({
     backgroundColor: C.surface,
     marginBottom: 14,
   },
+  detailsProductsBoxCompact: {
+    paddingHorizontal: 6,
+  },
   productSectionTitle: {
     color: C.text,
     fontSize: 15,
@@ -7799,15 +8739,50 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   selectedProductRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+    gap: 8,
     borderWidth: 0.5,
     borderColor: C.border,
     borderRadius: R.md,
     padding: 10,
     marginBottom: 8,
     backgroundColor: C.surface2,
+    ...HOVER_TRANSITION,
+  },
+  selectedProductRowCompact: {
+    paddingHorizontal: 6,
+  },
+  selectedProductRowHover: {
+    borderColor: C.accent,
+    backgroundColor: C.surface,
+    transform: [{ translateY: -1 }],
+  },
+  productRowMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  productRowActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  markPurchasedLinkButton: {
+    backgroundColor: C.sageBg,
+    borderRadius: R.pill,
+    borderWidth: 0.5,
+    borderColor: C.sage,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    ...HOVER_TRANSITION,
+  },
+  markPurchasedLinkButtonHover: {
+    opacity: 0.75,
+    transform: [{ translateY: -1 }],
+  },
+  markPurchasedLinkButtonText: {
+    color: C.sage,
+    fontSize: 12,
+    fontWeight: '600',
   },
   purchasedProductRow: {
     borderColor: C.sage,
@@ -7845,11 +8820,18 @@ const styles = StyleSheet.create({
     marginTop: 8,
     backgroundColor: C.surface2,
   },
+  productSuggestionRowCompact: {
+    paddingHorizontal: 6,
+  },
   productThumb: {
     width: 54,
     height: 54,
     borderRadius: R.sm,
     backgroundColor: C.surface2,
+  },
+  productThumbCompact: {
+    width: 42,
+    height: 42,
   },
   productInfo: {
     flex: 1,
@@ -8039,12 +9021,22 @@ const styles = StyleSheet.create({
     borderRadius: R.pill,
     paddingVertical: 8,
     paddingHorizontal: 10,
+    ...HOVER_TRANSITION,
+  },
+  removeProductButtonHover: {
+    opacity: 0.8,
+    transform: [{ translateY: -1 }],
   },
   changeProductButton: {
     backgroundColor: C.surface2,
     borderRadius: R.pill,
     paddingVertical: 8,
     paddingHorizontal: 10,
+    ...HOVER_TRANSITION,
+  },
+  changeProductButtonHover: {
+    backgroundColor: C.border,
+    transform: [{ translateY: -1 }],
   },
   changeProductButtonText: {
     color: C.textDim,
@@ -8100,28 +9092,43 @@ const styles = StyleSheet.create({
   editButton: {
     marginTop: 18,
     backgroundColor: C.accent,
-    borderRadius: R.xl,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    alignSelf: 'stretch',
+    borderRadius: R.pill,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignSelf: 'flex-start',
     alignItems: 'center',
+    ...HOVER_TRANSITION,
+  },
+  editButtonHover: {
+    opacity: 0.88,
+    transform: [{ translateY: -2 }],
+  },
+  buttonPressed: {
+    transform: [{ scale: 0.96 }],
   },
   editButtonText: {
     color: C.accentInk,
     fontWeight: '600',
+    fontSize: 13,
   },
   deleteLovedOneButton: {
     marginTop: 10,
     backgroundColor: C.dangerBg,
-    borderRadius: R.xl,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    alignSelf: 'stretch',
+    borderRadius: R.pill,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignSelf: 'flex-start',
     alignItems: 'center',
+    ...HOVER_TRANSITION,
+  },
+  deleteLovedOneButtonHover: {
+    opacity: 0.8,
+    transform: [{ translateY: -2 }],
   },
   deleteLovedOneButtonText: {
     color: C.danger,
     fontWeight: '600',
+    fontSize: 13,
   },
   giftsSection: {
     backgroundColor: C.surface,
@@ -8143,16 +9150,31 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     letterSpacing: -0.3,
   },
+  giftsActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  giftsActionButton: {
+    marginBottom: 0,
+  },
   newGiftButton: {
     backgroundColor: C.accent,
     borderRadius: R.pill,
-    paddingVertical: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     alignItems: 'center',
     marginBottom: 16,
+    ...HOVER_TRANSITION,
+  },
+  newGiftButtonHover: {
+    opacity: 0.88,
+    transform: [{ translateY: -2 }],
   },
   newGiftButtonText: {
     color: C.accentInk,
     fontWeight: '600',
+    fontSize: 13,
   },
   budgetSummaryRow: {
     flexDirection: 'row',
@@ -8184,13 +9206,20 @@ const styles = StyleSheet.create({
   historyButton: {
     backgroundColor: C.text,
     borderRadius: R.pill,
-    paddingVertical: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     alignItems: 'center',
     marginBottom: 16,
+    ...HOVER_TRANSITION,
+  },
+  historyButtonHover: {
+    opacity: 0.82,
+    transform: [{ translateY: -2 }],
   },
   historyButtonText: {
     color: C.accentInk,
     fontWeight: '600',
+    fontSize: 13,
   },
   historyBox: {
     width: '100%',
@@ -8214,6 +9243,29 @@ const styles = StyleSheet.create({
     color: C.textDim,
     fontSize: 14,
     lineHeight: 20,
+  },
+  giftsSplitRow: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  giftsSplitStack: {
+    gap: 16,
+  },
+  giftsSplitCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  giftsSplitColTitle: {
+    color: C.textDim,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginTop: 10,
+  },
+  giftsSplitDivider: {
+    width: 0.5,
+    backgroundColor: C.border,
   },
   yearGroup: {
     borderWidth: 0.5,
@@ -8248,18 +9300,32 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: C.border,
     padding: 12,
-    marginTop: 10,
+    marginTop: 8,
+    gap: 4,
+    ...HOVER_TRANSITION,
+  },
+  historyItemHover: {
+    backgroundColor: C.accentSoft,
+    borderColor: C.accent,
+    transform: [{ translateY: -2 }],
+  },
+  historyItemPressed: {
+    transform: [{ scale: 0.99 }],
   },
   historyItemHeader: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    marginBottom: 6,
+  },
+  historyItemInfo: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
   },
   historyPurpose: {
-    flex: 1,
     color: C.text,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '500',
   },
   historyBudget: {
@@ -8270,14 +9336,51 @@ const styles = StyleSheet.create({
   },
   historyDeadline: {
     color: C.textDim,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '400',
-    marginBottom: 6,
   },
   historyDetails: {
     color: C.textDim,
     fontSize: 13,
     lineHeight: 20,
+  },
+  historyProductsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  historyProductThumb: {
+    width: 36,
+    height: 36,
+    borderRadius: R.sm,
+    backgroundColor: C.surface,
+  },
+  historyProductThumbPlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: R.sm,
+    backgroundColor: C.surface,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  historyProductThumbMore: {
+    width: 36,
+    height: 36,
+    borderRadius: R.sm,
+    backgroundColor: C.surface,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  historyProductThumbMoreText: {
+    color: C.textDim,
+    fontSize: 11,
+    fontWeight: '700',
   },
   historyActions: {
     flexDirection: 'row',
@@ -8292,6 +9395,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderWidth: 0.5,
     borderColor: C.border,
+    ...HOVER_TRANSITION,
+  },
+  historyActionButtonHover: {
+    backgroundColor: C.surface,
+    borderColor: C.accent,
+    transform: [{ translateY: -1 }],
   },
   historyActionText: {
     color: C.text,
@@ -8301,6 +9410,10 @@ const styles = StyleSheet.create({
   deleteActionButton: {
     backgroundColor: C.dangerBg,
     borderColor: C.dangerBg,
+  },
+  deleteActionButtonHover: {
+    opacity: 0.75,
+    transform: [{ translateY: -1 }],
   },
   deleteActionText: {
     color: C.danger,
@@ -8431,6 +9544,26 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     gap: 16,
   },
+  stepperRowInline: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+  },
+  aiFieldsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  aiFieldsCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  aiStepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 14,
+  },
   stepperBtn: {
     width: 40,
     height: 40,
@@ -8479,6 +9612,10 @@ const styles = StyleSheet.create({
   },
   modalTextArea: {
     minHeight: 110,
+    textAlignVertical: 'top',
+  },
+  modalTextAreaCompact: {
+    minHeight: 64,
     textAlignVertical: 'top',
   },
   reactionRow: {
@@ -8559,6 +9696,7 @@ const styles = StyleSheet.create({
     backgroundColor: C.accent,
     borderRadius: R.xl,
     paddingVertical: 14,
+    paddingHorizontal: 22,
     alignItems: 'center',
   },
   aiChangeButton: {
@@ -8571,12 +9709,35 @@ const styles = StyleSheet.create({
   deleteConfirmButton: {
     backgroundColor: C.danger,
   },
+  deletePersonActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  deletePersonActionButton: {
+    flex: 1,
+    marginTop: 0,
+  },
+  deletePersonCancelButton: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.xl,
+    paddingVertical: 14,
+    backgroundColor: C.surface2,
+  },
   disabledButton: {
     opacity: 0.6,
   },
   saveGiftButtonText: {
     color: C.accentInk,
     fontWeight: '600',
+  },
+  completeHintText: {
+    color: C.textFaint,
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'center',
+    marginTop: 8,
   },
   cancelGiftButton: {
     marginTop: 12,

@@ -66,17 +66,6 @@ export async function updateLovedOne(uid: string, lovedOneId: string, data: any)
   return updated.data();
 }
 
-export async function countActiveLovedOnes(uid: string): Promise<number> {
-  // .select() fetches only the isDeleted field — reduces Firestore read bandwidth ~90%
-  const snapshot = await db
-    .collection(COLLECTION)
-    .doc(uid)
-    .collection('lovedOnes')
-    .select('isDeleted')
-    .get();
-  return snapshot.docs.filter((doc) => !doc.data().isDeleted).length;
-}
-
 export async function deleteLovedOne(uid: string, lovedOneId: string) {
   const ref = db
     .collection(COLLECTION)

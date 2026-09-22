@@ -17,7 +17,6 @@ import { uploadImageApi } from '../services/uploadApi';
 import { LovedOne } from '../types/lovedOnes';
 import { getModalBackdropResponder } from '../utils/modalBackdrop';
 import { C, R, S } from '../constants/theme';
-import UpgradeModal from './UpgradeModal';
 
 const MONTHS = [
   { label: 'Ianuarie', value: 1 },
@@ -102,7 +101,6 @@ export default function AddLovedOneModal({
   const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showUpgrade, setShowUpgrade] = useState(false);
 
   const years = useMemo(() => getYearOptions(), []);
   const estimatedAgeOptions = useMemo(() => getEstimatedAgeOptions(), []);
@@ -256,20 +254,14 @@ export default function AddLovedOneModal({
 
       handleClose();
       onSaved();
-    } catch (e: any) {
-      if (!initialData && e?.code === 'LIMIT_LOVED_ONES') {
-        handleClose();
-        setShowUpgrade(true);
-      } else {
-        setError(initialData ? 'Nu am putut actualiza.' : 'Nu am putut salva.');
-      }
+    } catch {
+      setError(initialData ? 'Nu am putut actualiza.' : 'Nu am putut salva.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <React.Fragment>
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
       <View style={styles.overlay} {...getModalBackdropResponder(handleClose)}>
         <View style={styles.modalCard}>
@@ -293,64 +285,66 @@ export default function AddLovedOneModal({
               onChangeText={setName}
             />
 
-            <Text style={styles.label}>Zi *</Text>
-            <Dropdown
-              style={styles.dropdown}
-              containerStyle={styles.dropdownContainer}
-              placeholderStyle={styles.dropdownPlaceholder}
-              selectedTextStyle={styles.dropdownSelectedText}
-              inputSearchStyle={styles.dropdownSearch}
-              data={DAYS}
-              search
-              maxHeight={260}
-              labelField="label"
-              valueField="value"
-              placeholder="Selectează ziua"
-              searchPlaceholder="Caută ziua..."
-              value={day}
-              onChange={(item) => setDay(item.value)}
-            />
+            <Text style={styles.label}>Data nașterii *</Text>
+            <View style={styles.dateRow}>
+              <Dropdown
+                style={[styles.dropdown, styles.dateDropdown]}
+                containerStyle={styles.dropdownContainer}
+                placeholderStyle={styles.dropdownPlaceholder}
+                selectedTextStyle={styles.dropdownSelectedText}
+                inputSearchStyle={styles.dropdownSearch}
+                data={DAYS}
+                search
+                maxHeight={260}
+                labelField="label"
+                valueField="value"
+                placeholder="Zi"
+                searchPlaceholder="Caută ziua..."
+                value={day}
+                onChange={(item) => setDay(item.value)}
+              />
 
-            <Text style={styles.label}>Lună *</Text>
-            <Dropdown
-              style={styles.dropdown}
-              containerStyle={styles.dropdownContainer}
-              placeholderStyle={styles.dropdownPlaceholder}
-              selectedTextStyle={styles.dropdownSelectedText}
-              inputSearchStyle={styles.dropdownSearch}
-              data={MONTHS}
-              search
-              maxHeight={260}
-              labelField="label"
-              valueField="value"
-              placeholder="Selectează luna"
-              searchPlaceholder="Caută luna..."
-              value={month}
-              onChange={(item) => handleMonthChange(item.value)}
-            />
+              <Dropdown
+                style={[styles.dropdown, styles.dateDropdown, styles.dateDropdownWide]}
+                containerStyle={styles.dropdownContainer}
+                placeholderStyle={styles.dropdownPlaceholder}
+                selectedTextStyle={styles.dropdownSelectedText}
+                inputSearchStyle={styles.dropdownSearch}
+                data={MONTHS}
+                search
+                maxHeight={260}
+                labelField="label"
+                valueField="value"
+                placeholder="Lună"
+                searchPlaceholder="Caută luna..."
+                value={month}
+                onChange={(item) => handleMonthChange(item.value)}
+              />
 
-            <Text style={styles.label}>An</Text>
-            <Dropdown
-              style={styles.dropdown}
-              containerStyle={styles.dropdownContainer}
-              placeholderStyle={styles.dropdownPlaceholder}
-              selectedTextStyle={styles.dropdownSelectedText}
-              inputSearchStyle={styles.dropdownSearch}
-              data={years}
-              search
-              maxHeight={260}
-              labelField="label"
-              valueField="value"
-              placeholder="Selectează anul"
-              searchPlaceholder="Caută anul..."
-              value={year}
-              onChange={(item) => handleYearChange(item.value)}
-            />
+              <Dropdown
+                style={[styles.dropdown, styles.dateDropdown]}
+                containerStyle={styles.dropdownContainer}
+                placeholderStyle={styles.dropdownPlaceholder}
+                selectedTextStyle={styles.dropdownSelectedText}
+                inputSearchStyle={styles.dropdownSearch}
+                data={years}
+                search
+                maxHeight={260}
+                labelField="label"
+                valueField="value"
+                placeholder="An"
+                searchPlaceholder="Caută anul..."
+                value={year}
+                onChange={(item) => handleYearChange(item.value)}
+              />
+            </View>
 
-            <Text style={styles.label}>Vârstă estimată</Text>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Vârstă estimată</Text>
+              <Text style={styles.optionalBadge}>Opțional</Text>
+            </View>
             <Text style={styles.fieldHint}>
-              Completează acest câmp doar dacă nu știi anul nașterii. Dacă alegi
-              un an, vârsta se calculează automat.
+              Doar dacă nu știi anul nașterii — cu anul completat, vârsta se calculează automat.
             </Text>
             <Dropdown
               style={styles.dropdown}
@@ -447,13 +441,6 @@ export default function AddLovedOneModal({
         </View>
       </View>
     </Modal>
-
-    <UpgradeModal
-      visible={showUpgrade}
-      reason="loved_ones"
-      onClose={() => setShowUpgrade(false)}
-    />
-    </React.Fragment>
   );
 }
 
@@ -486,22 +473,22 @@ const styles = StyleSheet.create({
   },
   title: {
     fontFamily: 'serif',
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '400',
     color: C.text,
-    marginBottom: 6,
+    marginBottom: 4,
     letterSpacing: -0.3,
   },
   sectionHint: {
-    fontSize: 13,
+    fontSize: 12,
     color: C.textFaint,
-    marginBottom: 14,
+    marginBottom: 10,
   },
   errorText: {
     color: C.danger,
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 10,
     backgroundColor: C.dangerBg,
     borderRadius: R.sm,
     padding: 10,
@@ -509,17 +496,17 @@ const styles = StyleSheet.create({
     borderColor: C.borderStrong,
   },
   label: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: C.textDim,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   labelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   optionalBadge: {
     backgroundColor: C.surface2,
@@ -535,33 +522,44 @@ const styles = StyleSheet.create({
   },
   fieldHint: {
     color: C.textFaint,
-    fontSize: 12,
-    lineHeight: 17,
-    marginBottom: 8,
+    fontSize: 11,
+    lineHeight: 15,
+    marginBottom: 6,
   },
   input: {
     borderWidth: 0.5,
     borderColor: C.border,
     borderRadius: R.md,
     paddingHorizontal: 14,
-    paddingVertical: 13,
-    marginBottom: 12,
+    paddingVertical: 11,
+    marginBottom: 10,
     backgroundColor: C.surface2,
     fontSize: 15,
     color: C.text,
   },
   textArea: {
-    minHeight: 84,
+    minHeight: 56,
     textAlignVertical: 'top',
   },
   dropdown: {
-    height: 50,
+    height: 44,
     borderWidth: 0.5,
     borderColor: C.border,
     borderRadius: R.md,
     paddingHorizontal: 12,
     backgroundColor: C.surface2,
-    marginBottom: 12,
+    marginBottom: 10,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dateDropdown: {
+    flex: 1,
+    marginBottom: 10,
+  },
+  dateDropdownWide: {
+    flex: 1.4,
   },
   dropdownContainer: {
     borderRadius: R.md,
@@ -582,11 +580,11 @@ const styles = StyleSheet.create({
   genderRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   genderButton: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderRadius: R.pill,
     backgroundColor: C.surface2,
     alignItems: 'center',
@@ -600,7 +598,7 @@ const styles = StyleSheet.create({
   genderButtonText: {
     color: C.textDim,
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: 13,
   },
   genderButtonTextActive: {
     color: C.accentInk,
@@ -610,9 +608,9 @@ const styles = StyleSheet.create({
     borderRadius: R.md,
     borderWidth: 0.5,
     borderColor: C.border,
-    paddingVertical: 12,
+    paddingVertical: 10,
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   imageButtonText: {
     color: C.textDim,
@@ -620,18 +618,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   preview: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginBottom: 14,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    marginBottom: 10,
     alignSelf: 'flex-start',
   },
   saveButton: {
     backgroundColor: C.accent,
     borderRadius: R.pill,
-    paddingVertical: 15,
+    paddingVertical: 13,
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: 2,
   },
   disabledButton: {
     opacity: 0.6,
@@ -642,9 +640,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   closeButton: {
-    marginTop: 12,
+    marginTop: 8,
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
   closeButtonText: {
     color: C.textFaint,

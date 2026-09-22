@@ -1,14 +1,12 @@
 import { Request, Response } from "express";
 import { logger } from "../config/logger";
 import {
-  countActiveLovedOnes,
   createLovedOne,
   deleteLovedOne,
   getLovedOneById,
   getLovedOnes,
   updateLovedOne,
 } from "../services/lovedOnesService";
-import { getUserProfileByUid } from "../services/userService";
 import { signLovedOneImage } from "../services/uploadService";
 
 function isDateInFuture(day: number, month: number, year: number) {
@@ -142,17 +140,6 @@ export async function create(req: Request, res: Response) {
 
     if (!uid) {
       return res.status(401).json({ message: "Unauthorized." });
-    }
-
-    const profile = await getUserProfileByUid(uid);
-    if (!profile || profile.subscriptionTier !== 'premium') {
-      const activeCount = await countActiveLovedOnes(uid);
-      if (activeCount >= 3) {
-        return res.status(403).json({
-          code: 'LIMIT_LOVED_ONES',
-          message: 'Ai atins limita de 3 persoane. Upgradează la Premium pentru persoane nelimitate.',
-        });
-      }
     }
 
     const result = buildLovedOnePayload(uid, req.body);

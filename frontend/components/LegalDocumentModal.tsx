@@ -2,23 +2,35 @@ import React from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { getModalBackdropResponder } from '../utils/modalBackdrop';
 import {
+  AFFILIATE_MARKETING_SECTIONS,
   LEGAL_LAST_UPDATED,
   PRIVACY_POLICY_SECTIONS,
   TERMS_SECTIONS,
 } from '../constants/legalContent';
 import { C, R, S } from '../constants/theme';
 
-type LegalDocType = 'privacy' | 'terms' | null;
+type LegalDocType = 'privacy' | 'terms' | 'affiliate' | null;
 
 type Props = {
   type: LegalDocType;
   onClose: () => void;
 };
 
+const TITLES: Record<Exclude<LegalDocType, null>, string> = {
+  privacy: 'Politica de confidențialitate',
+  terms: 'Termeni și condiții',
+  affiliate: 'Marketing afiliat',
+};
+
+const SECTIONS: Record<Exclude<LegalDocType, null>, typeof PRIVACY_POLICY_SECTIONS> = {
+  privacy: PRIVACY_POLICY_SECTIONS,
+  terms: TERMS_SECTIONS,
+  affiliate: AFFILIATE_MARKETING_SECTIONS,
+};
+
 export default function LegalDocumentModal({ type, onClose }: Props) {
-  const isPrivacy = type === 'privacy';
-  const title = isPrivacy ? 'Politica de confidențialitate' : 'Termeni și condiții';
-  const sections = isPrivacy ? PRIVACY_POLICY_SECTIONS : TERMS_SECTIONS;
+  const title = type ? TITLES[type] : '';
+  const sections = type ? SECTIONS[type] : [];
 
   return (
     <Modal visible={type !== null} transparent animationType="slide" onRequestClose={onClose}>

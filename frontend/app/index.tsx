@@ -35,9 +35,11 @@ import AdminDashboard from '../features/admin/screens/AdminDashboard';
 import { checkServerHealth } from '../services/authApi';
 import { initAnalytics, identifyUser, resetAnalyticsUser, track, Events } from '../services/analytics';
 import { initSentry, setSentryUser, clearSentryUser } from '../services/sentry';
+import { applyWebRootFix } from '../utils/webRootFix';
 
 initSentry();
 initAnalytics();
+applyWebRootFix();
 
 const ONBOARDING_KEY = 'gift_app_onboarding_done';
 
@@ -187,7 +189,7 @@ function GuestHome({
   onOpenAuth,
   scrollY,
 }: {
-  onOpenAuth: () => void;
+  onOpenAuth: (tab?: 'login' | 'register') => void;
   scrollY: SharedValue<number>;
 }) {
   const { width } = useWindowDimensions();
@@ -267,7 +269,7 @@ function GuestHome({
             </Animated.View>
 
             <RevealIn delay={300} style={styles.heroActions}>
-              <MagneticButton onPress={onOpenAuth} style={styles.heroButton}>
+              <MagneticButton onPress={() => onOpenAuth('register')} style={styles.heroButton}>
                 <Text style={styles.heroButtonText}>Începe acum</Text>
                 <Text style={styles.heroButtonArrow}>→</Text>
               </MagneticButton>
@@ -289,7 +291,7 @@ function GuestHome({
       {/* ── MARQUEE ── */}
       <View style={styles.marqueeStrip}>
         <Marquee
-          text="   Ⓟ DEDICAȚII PENTRU PRESENTPERFECT   Ⓟ Un student: „Eram la testul de engleză și am ajuns aici...”   Ⓟ O soacră: „Nu mai caut cadouri la întâmplare, PresentPerfect știe mai bine ca mine!”   Ⓟ Un burlac în panică: „Ziua ei e mâine. Salvați-mă!”   Ⓟ O mamă ocupată: „Copilul zice că vrea «orice». Mulțumesc că traduceți pentru mine!”   Ⓟ Un coleg de birou: „Secret Santa nu mai e coșmar de birou grație vouă.”   Ⓟ Un tată uituc: „Aniversarea era azi? Bine că am alertă de preț, nu doar scuze.”   Ⓟ O bunică modernă: „Nepotu-i pe telefon toată ziua, măcar cadoul i-l aleg eu bine.”   Ⓟ Un mire emoționat: „Lista de nuntă s-a transformat în listă de cadouri perfecte.”   "
+          text="   DEMO TEXT   ✦   DEMO TEXT   ✦   DEMO TEXT   ✦   DEMO TEXT   ✦  "
           textStyle={styles.marqueeText}
           pxPerSecond={55}
         />
@@ -380,12 +382,12 @@ function GuestHome({
         </RevealIn>
 
         <RevealIn delay={90} style={styles.ctaButtonWrap}>
-          <MagneticButton onPress={onOpenAuth} style={styles.ctaButton}>
+          <MagneticButton onPress={() => onOpenAuth('register')} style={styles.ctaButton}>
             <Text style={styles.ctaButtonText}>Începe acum</Text>
           </MagneticButton>
         </RevealIn>
 
-        <Pressable onPress={onOpenAuth} style={styles.ctaLoginWrap}>
+        <Pressable onPress={() => onOpenAuth('login')} style={styles.ctaLoginWrap}>
           <Text style={styles.ctaLoginLink}>Ai deja cont? Autentifică-te →</Text>
         </Pressable>
       </View>
@@ -438,10 +440,16 @@ function ServerDown({ onRetry }: { onRetry: () => void }) {
 function IndexContent() {
   const { loading, profile, logout } = useAuth();
   const [authModalVisible, setAuthModalVisible] = useState(false);
+  const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
   const [serverChecking, setServerChecking] = useState(true);
   const [serverUp, setServerUp] = useState(false);
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   const scrollY = useSharedValue(0);
+
+  const openAuthModal = (tab: 'login' | 'register' = 'login') => {
+    setAuthModalTab(tab);
+    setAuthModalVisible(true);
+  };
 
   const checkServer = async () => {
     setServerChecking(true);
@@ -544,7 +552,7 @@ function IndexContent() {
           {!profile && (
             <Pressable
               style={[styles.topBarButton, !serverUp && styles.topBarButtonDisabled]}
-              onPress={() => setAuthModalVisible(true)}
+              onPress={() => openAuthModal('login')}
               disabled={!serverUp}
             >
               <Text style={styles.topBarButtonText}>{headerButtonLabel}</Text>
@@ -567,7 +575,7 @@ function IndexContent() {
             <Text style={styles.loadingText}>Se încarcă sesiunea...</Text>
           </View>
         ) : !profile ? (
-          <GuestHome onOpenAuth={() => setAuthModalVisible(true)} scrollY={scrollY} />
+          <GuestHome onOpenAuth={openAuthModal} scrollY={scrollY} />
         ) : profile.role === 'client' ? (
           <ClientDashboard
             firstName={profile.firstName}
@@ -586,6 +594,7 @@ function IndexContent() {
 
       <AuthModal
         visible={authModalVisible}
+        initialTab={authModalTab}
         onClose={() => setAuthModalVisible(false)}
       />
 

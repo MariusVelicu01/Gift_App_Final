@@ -26,7 +26,6 @@ import MagneticButton from './landing/MagneticButton';
 import GiftMascot from './landing/GiftMascot';
 import ConfusedGiver from './landing/ConfusedGiver';
 import type { UserGender } from '../types/user';
-import { getModalBackdropResponder } from '../utils/modalBackdrop';
 import { calculateAge, getDaysInMonth } from '../utils/dateUtils';
 import { C, R, S } from '../constants/theme';
 
@@ -34,6 +33,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 type Props = {
   visible: boolean;
+  initialTab?: 'login' | 'register';
   onClose: () => void;
 };
 
@@ -57,7 +57,7 @@ function buildBirthDate(year: number, month: number, day: number) {
 }
 
 
-export default function AuthModal({ visible, onClose }: Props) {
+export default function AuthModal({ visible, initialTab, onClose }: Props) {
   const { login, register, forgotPassword, loginFromTokens, completeGoogleProfile } = useAuth();
 
   const { width: windowWidth } = useWindowDimensions();
@@ -204,6 +204,7 @@ export default function AuthModal({ visible, onClose }: Props) {
 
   useEffect(() => {
     if (visible) {
+      setTab(initialTab ?? 'login');
       modalProgress.value = 0;
       modalProgress.value = withTiming(1, { duration: 320, easing: Easing.out(Easing.cubic) });
     }
@@ -567,10 +568,7 @@ export default function AuthModal({ visible, onClose }: Props) {
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
-      <View
-        style={[styles.overlay, isPhone && styles.overlayPhone]}
-        {...getModalBackdropResponder(handleClose)}
-      >
+      <View style={[styles.overlay, isPhone && styles.overlayPhone]}>
         <Animated.View
           style={[
             styles.modalCard,

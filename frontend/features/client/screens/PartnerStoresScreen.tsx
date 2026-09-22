@@ -8,6 +8,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { openUrl } from '../../../utils/openUrl';
@@ -17,6 +18,8 @@ import { getPartnerStoresCache, subscribePartnerStoresCache } from '../../../ser
 import { pushAppBackEntry } from '../../../services/navigationHistory';
 import { PartnerStore } from '../../../types/partnerStores';
 import { C, R, S } from '../../../constants/theme';
+import ClientFooter from '../components/ClientFooter';
+import type { ClientTab } from './ClientDashboard';
 
 function fmt(value: number) {
   return Number.isFinite(value) ? Number(value.toFixed(2)) : value;
@@ -139,11 +142,14 @@ const StoreCard = React.memo(function StoreCard({
 type Props = {
   resetRef?: React.MutableRefObject<(() => void) | null>;
   userGender?: string;
+  onNavigateTab?: (tab: ClientTab) => void;
 };
 
-export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
+export default function PartnerStoresScreen({ resetRef, userGender, onNavigateTab }: Props) {
   const userProductGender = profileGenderToProductGender(userGender);
   const { token } = useAuth();
+  const { width } = useWindowDimensions();
+  const isNarrow = width < 960;
   const [stores, setStores] = useState<PartnerStore[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStore, setSelectedStore] = useState<PartnerStore | null>(null);
@@ -292,7 +298,7 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
 
   if (selectedStore) {
     return (
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView contentContainerStyle={[styles.container, isNarrow && styles.containerFlush]}>
         <Pressable style={styles.backButton} onPress={goBackFromStore}>
           <Text style={styles.backButtonText}>Inapoi la magazine</Text>
         </Pressable>
@@ -508,7 +514,7 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
 
       <FlatList
         style={styles.listBody}
-        contentContainerStyle={styles.container}
+        contentContainerStyle={[styles.container, isNarrow && styles.containerFlush]}
         data={filteredStores}
         keyExtractor={(store) => store.id}
         renderItem={renderStoreItem}
@@ -529,13 +535,15 @@ export default function PartnerStoresScreen({ resetRef, userGender }: Props) {
             </View>
           )
         }
+        ListFooterComponent={<ClientFooter onNavigate={onNavigateTab} />}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, gap: 16, backgroundColor: C.bg, paddingBottom: 32 },
+  container: { paddingVertical: 16, paddingHorizontal: 16, gap: 16, backgroundColor: C.bg, paddingBottom: 32 },
+  containerFlush: { paddingHorizontal: 0 },
   center: {
     padding: 24,
     alignItems: 'center',

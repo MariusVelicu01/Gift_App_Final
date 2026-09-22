@@ -10,13 +10,15 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useAuth } from '../../../context/AuthContext';
 import { changePasswordRequest, updateProfileRequest } from '../../../services/authApi';
 import { C, R, S } from '../../../constants/theme';
-import UpgradeModal from '../../../components/UpgradeModal';
 import LegalDocumentModal from '../../../components/LegalDocumentModal';
+import ClientFooter from '../components/ClientFooter';
+import type { ClientTab } from './ClientDashboard';
 
 type SettingsSection = 'personalData' | 'notifications';
 
@@ -25,6 +27,7 @@ type Props = {
   personalDataOpen: boolean;
   notificationsOpen: boolean;
   onToggleSection: (section: SettingsSection) => void;
+  onNavigateTab?: (tab: ClientTab) => void;
 };
 import {
   ClientSettings,
@@ -81,8 +84,10 @@ function formatBirthDate(birthDate: string) {
 }
 
 
-export default function SettingsScreen({ onLogout, personalDataOpen, notificationsOpen, onToggleSection }: Props) {
+export default function SettingsScreen({ onLogout, personalDataOpen, notificationsOpen, onToggleSection, onNavigateTab }: Props) {
   const { profile, token, refreshProfile, updateConsent } = useAuth();
+  const { width } = useWindowDimensions();
+  const isNarrow = width < 960;
 
   const [photoUri, setPhotoUri] = useState<string | null>(null);
 
@@ -106,15 +111,12 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
 
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [legalDoc, setLegalDoc] = useState<'privacy' | 'terms' | null>(null);
 
   const [consentGiftBot, setConsentGiftBot] = useState(false);
   const [consentMarketing, setConsentMarketing] = useState(false);
   const [savingConsent, setSavingConsent] = useState(false);
   const [consentMessage, setConsentMessage] = useState('');
-
-  const isPremium = profile?.subscriptionTier === 'premium';
 
   useEffect(() => {
     if (profile) {
@@ -296,7 +298,7 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
   const roleLabel = profile?.role === 'admin' ? 'Administrator' : 'Client';
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={[styles.container, isNarrow && styles.containerFlush]}>
       <Text style={styles.pageTitle}>Setari</Text>
 
       {/* --- CONT --- */}
@@ -326,60 +328,6 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
           </View>
         </View>
       </View>
-
-      {/* --- ABONAMENT --- */}
-      <View style={[styles.card, isPremium && styles.premiumCard]}>
-        <View style={styles.subscriptionRow}>
-          <View style={styles.subscriptionInfo}>
-            <Text style={styles.cardTitle}>
-              {isPremium ? '★ GiftApp Premium' : 'Plan gratuit'}
-            </Text>
-            {isPremium ? (
-              profile?.subscriptionExpiresAt ? (
-                <Text style={styles.subscriptionMeta}>
-                  Activ până la{' '}
-                  {new Date(profile.subscriptionExpiresAt).toLocaleDateString('ro-RO')}
-                </Text>
-              ) : (
-                <Text style={styles.subscriptionMeta}>Abonament activ</Text>
-              )
-            ) : (
-              <Text style={styles.subscriptionMeta}>
-                3 persoane · 10 alerte · GiftBot de bază
-              </Text>
-            )}
-          </View>
-          {!isPremium && (
-            <Pressable
-              style={({ pressed }) => [
-                styles.upgradeChip,
-                pressed && { opacity: 0.8 },
-              ]}
-              onPress={() => setShowUpgradeModal(true)}
-            >
-              <Text style={styles.upgradeChipText}>Upgrade</Text>
-            </Pressable>
-          )}
-        </View>
-        {!isPremium && (
-          <Pressable
-            style={({ pressed }) => [
-              styles.upgradeFullButton,
-              pressed && { opacity: 0.85 },
-            ]}
-            onPress={() => setShowUpgradeModal(true)}
-          >
-            <Text style={styles.upgradeFullButtonText}>
-              ★  Descoperă Premium — de la 19 RON/lună
-            </Text>
-          </Pressable>
-        )}
-      </View>
-
-      <UpgradeModal
-        visible={showUpgradeModal}
-        onClose={() => setShowUpgradeModal(false)}
-      />
 
       <LegalDocumentModal type={legalDoc} onClose={() => setLegalDoc(null)} />
 
@@ -736,16 +684,22 @@ export default function SettingsScreen({ onLogout, personalDataOpen, notificatio
       <Pressable style={styles.logoutButton} onPress={onLogout}>
         <Text style={styles.logoutButtonText}>Deconecteaza-te</Text>
       </Pressable>
+
+      <ClientFooter onNavigate={onNavigateTab} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    padding: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
     gap: 16,
-    paddingBottom: 40,
+    paddingBottom: 32,
     backgroundColor: C.bg,
+  },
+  containerFlush: {
+    paddingHorizontal: 0,
   },
   pageTitle: {
     fontFamily: 'serif',
@@ -1048,49 +1002,6 @@ const styles = StyleSheet.create({
     color: C.textDim,
     fontWeight: '600',
     fontSize: 15,
-  },
-  premiumCard: {
-    borderColor: C.borderStrong,
-    borderWidth: 1,
-    backgroundColor: C.accentSoft,
-  },
-  subscriptionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  subscriptionInfo: {
-    flex: 1,
-    gap: 3,
-  },
-  subscriptionMeta: {
-    fontSize: 12,
-    color: C.textFaint,
-  },
-  upgradeChip: {
-    backgroundColor: C.accent,
-    borderRadius: R.pill,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  upgradeChipText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  upgradeFullButton: {
-    backgroundColor: C.accent,
-    borderRadius: R.lg,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  upgradeFullButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 0.2,
   },
   consentNote: {
     fontSize: 13,

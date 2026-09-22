@@ -11,7 +11,7 @@ import {
   sendPasswordReset,
   updateUserName,
 } from '../services/authService';
-import { updateSubscription, getUserProfileByUid, updateUserConsent, SubscriptionTier } from '../services/userService';
+import { updateUserConsent } from '../services/userService';
 import { db } from '../config/firebase';
 
 // ─── Firestore-backed OAuth stores (survive restarts & scale-out) ────────────
@@ -255,34 +255,6 @@ export async function updateProfile(req: Request, res: Response) {
     return res.status(200).json(profile);
   } catch {
     return res.status(500).json({ message: 'Nu am putut actualiza profilul.' });
-  }
-}
-
-export async function patchSubscription(req: Request, res: Response) {
-  try {
-    const targetUid = String(req.params.uid || '').trim();
-    if (!targetUid) {
-      return res.status(400).json({ message: 'UID lipsă.' });
-    }
-
-    const { subscriptionTier, subscriptionExpiresAt } = req.body;
-    if (!subscriptionTier || !['free', 'premium'].includes(subscriptionTier)) {
-      return res.status(400).json({ message: 'subscriptionTier trebuie să fie "free" sau "premium".' });
-    }
-
-    const existingProfile = await getUserProfileByUid(targetUid);
-    if (!existingProfile) {
-      return res.status(404).json({ message: 'Utilizatorul nu a fost găsit.' });
-    }
-
-    const profile = await updateSubscription(
-      targetUid,
-      subscriptionTier as SubscriptionTier,
-      typeof subscriptionExpiresAt === 'string' ? subscriptionExpiresAt : undefined
-    );
-    return res.status(200).json(profile);
-  } catch {
-    return res.status(500).json({ message: 'Nu am putut actualiza abonamentul.' });
   }
 }
 

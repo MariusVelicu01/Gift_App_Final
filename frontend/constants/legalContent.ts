@@ -71,7 +71,7 @@ export const TERMS_SECTIONS: LegalSection[] = [
   },
   {
     heading: '3. Descrierea serviciului',
-    body: `${LEGAL_APP_NAME} te ajută să organizezi persoanele dragi, să planifici cadouri, să urmărești prețuri la produse din magazine partenere și, opțional, să primești recomandări generate de inteligență artificială (GiftBot). Contul gratuit are anumite limite (de exemplu, un număr maxim de persoane dragi active); contul Premium ridică aceste limite conform condițiilor comunicate în aplicație.`,
+    body: `${LEGAL_APP_NAME} te ajută să organizezi persoanele dragi, să planifici cadouri, să urmărești prețuri la produse din magazine partenere și, opțional, să primești recomandări generate de inteligență artificială (GiftBot).`,
   },
   {
     heading: '4. Produse, prețuri și linkuri afiliate',
@@ -100,5 +100,24 @@ export const TERMS_SECTIONS: LegalSection[] = [
   {
     heading: '10. Contact',
     body: `Pentru întrebări legate de acești termeni, ne poți scrie la ${LEGAL_CONTACT_EMAIL}. Ultima actualizare: ${LEGAL_LAST_UPDATED}.`,
+  },
+];
+
+export const AFFILIATE_MARKETING_SECTIONS: LegalSection[] = [
+  {
+    heading: 'Pe scurt',
+    body: `${LEGAL_APP_NAME} este gratuită pentru tine. Ea se susține printr-un sistem numit marketing afiliat: când cumperi un produs printr-un link din aplicație, magazinul ne dă un mic comision, ca mulțumire că i-am trimis un client. Tu plătești exact același preț ca și cum ai fi intrat direct pe site-ul lor.`,
+  },
+  {
+    heading: 'De ce facem asta',
+    body: `Serverele, inteligența artificială din spatele GiftBot, notificările și tot ce ține aplicația în funcțiune costă bani în fiecare lună. Nu punem reclame și nu vindem datele tale — comisioanele de la magazinele partenere sunt, practic, singurul mod prin care ne acoperim aceste costuri și putem continua să oferim aplicația gratuit.`,
+  },
+  {
+    heading: 'Ce nu se schimbă pentru tine',
+    body: 'Prețul pe care îl vezi în aplicație este prețul real din magazin — comisionul vine din partea magazinului, niciodată din buzunarul tău. Nu alegem ce produse să-ți arătăm în funcție de cât comision aduc; recomandările rămân pe baza a ceea ce se potrivește persoanei pentru care cumperi.',
+  },
+  {
+    heading: 'Cum ne ajuți',
+    body: 'Simplu: cumpără prin linkurile din aplicație, nu ocolindu-le. Fiecare achiziție prin PresentPerfect contribuie direct la costurile care ne țin online — practic, folosind aplicația așa cum a fost gândită, ne ajuți să existăm în continuare și să o îmbunătățim.',
   },
 ];

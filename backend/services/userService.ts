@@ -1,8 +1,7 @@
-import { db, adminAuth } from '../config/firebase';
+import { db } from '../config/firebase';
 
 export type AppRole = 'client' | 'admin';
 export type UserGender = 'male' | 'female' | 'unknown';
-export type SubscriptionTier = 'free' | 'premium';
 
 export type UserConsent = {
   privacyAndTerms: true;
@@ -21,8 +20,6 @@ export type UserProfile = {
   email: string;
   role: AppRole;
   createdAt: string;
-  subscriptionTier: SubscriptionTier;
-  subscriptionExpiresAt?: string;
   consent?: UserConsent;
 };
 
@@ -83,18 +80,3 @@ export async function updateUserConsent(
   return getUserProfileByUid(uid);
 }
 
-export async function updateSubscription(
-  uid: string,
-  tier: SubscriptionTier,
-  expiresAt?: string
-) {
-  cacheInvalidate(uid);
-  const updates: Record<string, any> = { subscriptionTier: tier };
-  if (expiresAt) updates.subscriptionExpiresAt = expiresAt;
-  else updates.subscriptionExpiresAt = null;
-  await db.collection(USERS_COLLECTION).doc(uid).update(updates);
-  // Revoke refresh tokens so the user's next token refresh picks up the new subscription tier.
-  // The user's current ID token stays valid until expiry (~1h), but the next refresh will reflect the change.
-  await adminAuth.revokeRefreshTokens(uid).catch(() => {});
-  return getUserProfileByUid(uid);
-}

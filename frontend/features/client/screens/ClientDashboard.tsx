@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Modal, Pressable, SafeAreaView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import HomeScreen from './HomeScreen';
 import LovedOnesScreen from './LovedOnesScreen';
@@ -8,7 +9,7 @@ import PartnerStoresScreen from './PartnerStoresScreen';
 import NotificationsScreen from './NotificationsScreen';
 import SettingsScreen from './SettingsScreen';
 import { useAuth } from '../../../context/AuthContext';
-import { C } from '../../../constants/theme';
+import { C, S } from '../../../constants/theme';
 import { AppNotification, DeadlineAlert, PriceAlert, PriceAlertTarget } from '../../../types/priceAlerts';
 import {
   deletePriceAlerts,
@@ -39,7 +40,7 @@ import {
 } from '../../../services/pushNotificationsService';
 import { track, Events } from '../../../services/analytics';
 
-type ClientTab = 'home' | 'lovedOnes' | 'calendar' | 'partnerStores' | 'notifications' | 'settings';
+export type ClientTab = 'home' | 'lovedOnes' | 'calendar' | 'partnerStores' | 'notifications' | 'settings';
 
 type TabConfig = {
   id: ClientTab;
@@ -72,9 +73,33 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
   const [giftDetailsTarget, setGiftDetailsTarget] = useState<{ lovedOneId: string; giftPlanId: string } | null>(null);
   const [settingsPersonalDataOpen, setSettingsPersonalDataOpen] = useState(false);
   const [settingsNotificationsOpen, setSettingsNotificationsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 1100;
 
   const calendarResetRef  = useRef<(() => void) | null>(null);
   const lovedOnesResetRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (isDesktop) setMenuOpen(false);
+  }, [isDesktop]);
+
+  const drawerProgress = useSharedValue(0);
+
+  useEffect(() => {
+    if (menuOpen) {
+      drawerProgress.value = 0;
+      drawerProgress.value = withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) });
+    }
+  }, [menuOpen]);
+
+  const drawerPanelStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: (drawerProgress.value - 1) * 280 }],
+  }));
+
+  const drawerOverlayStyle = useAnimatedStyle(() => ({
+    opacity: drawerProgress.value,
+  }));
 
   useEffect(() => {
     if (!token) return;
@@ -91,9 +116,7 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
   const loadAlerts = useCallback(async () => {
     if (!token) return;
 
-    const allPriceAlerts = await getPriceAlerts(token).catch(() => [] as any[]);
-    const priceAlerts =
-      profile?.subscriptionTier === 'premium' ? allPriceAlerts : allPriceAlerts.slice(0, 10);
+    const priceAlerts = await getPriceAlerts(token).catch(() => [] as any[]);
 
     let deadlineAlerts: any[] = [];
     let birthdayAlerts: any[] = [];
@@ -226,6 +249,7 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
               setGiftDetailsTarget(target);
               setActiveTab('lovedOnes');
             }}
+            onNavigateTab={setActiveTab}
           />
         );
       case 'lovedOnes':
@@ -236,12 +260,13 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
             giftDetailsTarget={giftDetailsTarget}
             onGiftDetailsTargetConsumed={() => setGiftDetailsTarget(null)}
             resetRef={lovedOnesResetRef}
+            onNavigateTab={setActiveTab}
           />
         );
       case 'calendar':
-        return <CalendarScreen resetRef={calendarResetRef} />;
+        return <CalendarScreen resetRef={calendarResetRef} onNavigateTab={setActiveTab} />;
       case 'partnerStores':
-        return <PartnerStoresScreen userGender={userGender} />;
+        return <PartnerStoresScreen userGender={userGender} onNavigateTab={setActiveTab} />;
       case 'notifications':
         return (
           <NotificationsScreen
@@ -249,6 +274,7 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
             onOpenAlert={handleOpenAlert}
             onMarkAllRead={handleMarkAllRead}
             onDeleteAlerts={handleDeleteAlerts}
+            onNavigateTab={setActiveTab}
           />
         );
       case 'settings':
@@ -261,58 +287,152 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
               if (section === 'personalData') setSettingsPersonalDataOpen((v) => !v);
               else setSettingsNotificationsOpen((v) => !v);
             }}
+            onNavigateTab={setActiveTab}
           />
         );
     }
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.content}>{renderScreen()}</View>
-
-      <View style={styles.bottomNav}>
+  const renderNavItems = (onNavigate: () => void) => (
+    <>
+      <View style={styles.drawerList}>
         {TABS.map((tab) => {
           const isActive = activeTab === tab.id;
           const showBadge = tab.id === 'notifications' && unreadCount > 0;
           return (
             <Pressable
               key={tab.id}
-              onPress={() => setActiveTab(tab.id)}
-              style={styles.tabCell}
+              onPress={() => {
+                setActiveTab(tab.id);
+                onNavigate();
+              }}
+              style={({ hovered }) => [
+                styles.drawerItem,
+                isActive && styles.drawerItemActive,
+                hovered && !isActive && styles.drawerItemHover,
+              ]}
             >
-              {isActive ? (
-                <View style={styles.pillActive}>
-                  <View style={styles.iconWrap}>
-                    <Ionicons name={tab.iconActive} size={20} color="#fff" />
-                    {showBadge && (
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>
-                          {unreadCount > 9 ? '9+' : unreadCount}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.labelActive}>{tab.label}</Text>
-                </View>
-              ) : (
-                <View style={styles.pillInactive}>
-                  <View style={styles.iconWrap}>
-                    <Ionicons name={tab.icon} size={22} color="#9ca3af" />
-                    {showBadge && (
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>
-                          {unreadCount > 9 ? '9+' : unreadCount}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.labelInactive}>{tab.label}</Text>
+              <Ionicons
+                name={isActive ? tab.iconActive : tab.icon}
+                size={20}
+                color={isActive ? C.accent : '#6b7280'}
+              />
+              <Text style={[styles.drawerItemText, isActive && styles.drawerItemTextActive]}>
+                {tab.label}
+              </Text>
+              {showBadge && (
+                <View style={styles.drawerBadge}>
+                  <Text style={styles.drawerBadgeText}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </Text>
                 </View>
               )}
             </Pressable>
           );
         })}
       </View>
+
+      <View style={styles.drawerFooter}>
+        <Pressable
+          style={({ hovered }) => [
+            styles.drawerLogoutButton,
+            hovered && styles.drawerLogoutButtonHover,
+          ]}
+          onPress={() => {
+            onNavigate();
+            onLogout();
+          }}
+        >
+          <Ionicons name="log-out-outline" size={20} color="#dc2626" />
+          <Text style={styles.drawerLogoutText}>Deconectare</Text>
+        </Pressable>
+      </View>
+    </>
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          {!isDesktop && (
+            <Pressable
+              style={({ hovered, pressed }) => [
+                styles.menuButton,
+                hovered && styles.menuButtonHover,
+                pressed && styles.menuButtonPressed,
+              ]}
+              onPress={() => setMenuOpen(true)}
+              hitSlop={8}
+            >
+              <Ionicons name="menu" size={22} color="#fdf2f4" />
+              {unreadCount > 0 && (
+                <View style={styles.menuButtonBadge}>
+                  <Text style={styles.menuButtonBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                </View>
+              )}
+            </Pressable>
+          )}
+
+          <Pressable onPress={() => setActiveTab('home')} hitSlop={8}>
+            <Text style={styles.headerBrand}>PresentPerfect</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.headerRight}>
+          <Text style={styles.headerGreeting} numberOfLines={1}>
+            Salut, {firstName}
+          </Text>
+          <Pressable
+            style={({ hovered, pressed }) => [
+              styles.headerLogoutButton,
+              hovered && styles.menuButtonHover,
+              pressed && styles.menuButtonPressed,
+            ]}
+            onPress={onLogout}
+            hitSlop={8}
+          >
+            <Ionicons name="log-out-outline" size={18} color="#fdf2f4" />
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={[styles.content, isDesktop && styles.contentRow]}>
+        {isDesktop && (
+          <View style={styles.sidebarPersistent}>
+            {renderNavItems(() => {})}
+          </View>
+        )}
+        <View style={styles.mainContent}>{renderScreen()}</View>
+      </View>
+
+      {!isDesktop && (
+      <Modal visible={menuOpen} transparent animationType="none" onRequestClose={() => setMenuOpen(false)}>
+        <Animated.View style={[styles.drawerOverlay, drawerOverlayStyle]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setMenuOpen(false)} />
+        </Animated.View>
+
+        <Animated.View style={[styles.drawerPanel, drawerPanelStyle]}>
+          <SafeAreaView style={styles.drawerSafeArea}>
+            <View style={styles.drawerHeader}>
+              <Text style={styles.headerBrand}>PresentPerfect</Text>
+              <Pressable
+                style={({ hovered, pressed }) => [
+                  styles.drawerCloseButton,
+                  hovered && styles.drawerCloseButtonHover,
+                  pressed && styles.drawerCloseButtonPressed,
+                ]}
+                onPress={() => setMenuOpen(false)}
+                hitSlop={8}
+              >
+                <Ionicons name="close" size={20} color={C.textDim} />
+              </Pressable>
+            </View>
+
+            {renderNavItems(() => setMenuOpen(false))}
+          </SafeAreaView>
+        </Animated.View>
+      </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -320,71 +440,204 @@ export default function ClientDashboard({ firstName, lastName, userGender, onLog
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
   content:   { flex: 1 },
-
-  bottomNav: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
+  contentRow: { flexDirection: 'row' },
+  mainContent: { flex: 1, minWidth: 0 },
+  sidebarPersistent: {
+    width: 240,
+    flexShrink: 0,
     backgroundColor: '#fff',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    paddingBottom: 14,
-    alignItems: 'center',
+    borderRightWidth: 1,
+    borderRightColor: '#f3f4f6',
   },
 
-  tabCell: {
-    flex: 1,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 14,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 12,
+    backgroundColor: '#0b0508',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    flexShrink: 1,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexShrink: 0,
+  },
+  headerBrand: {
+    fontSize: 19,
+    fontWeight: '800',
+    color: '#fdf2f4',
+    letterSpacing: -0.5,
+  },
+  headerGreeting: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(253,242,244,0.7)',
+    maxWidth: 140,
+  },
+  headerLogoutButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
 
-  pillActive: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: C.accent,
-    borderRadius: 20,
-    paddingVertical: 7,
-    paddingHorizontal: 10,
-    gap: 5,
-  },
-
-  pillInactive: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 2,
-  },
-
-  iconWrap: {
+  menuButton: {
     position: 'relative',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
-
-  badge: {
+  menuButtonHover: {
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  menuButtonPressed: {
+    transform: [{ scale: 0.94 }],
+  },
+  menuButtonBadge: {
     position: 'absolute',
-    top: -4,
-    right: -7,
+    top: -3,
+    right: -3,
     backgroundColor: '#dc2626',
     borderRadius: 8,
-    minWidth: 15,
-    height: 15,
+    minWidth: 16,
+    height: 16,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#0b0508',
   },
-  badgeText: {
-    fontSize: 8,
+  menuButtonBadgeText: {
+    fontSize: 9,
     fontWeight: '700',
     color: '#fff',
   },
 
-  labelActive: {
-    fontSize: 11,
+  drawerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(11,5,8,0.5)',
+  },
+  drawerPanel: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: 280,
+    backgroundColor: '#fff',
+    ...S.float,
+  },
+  drawerSafeArea: {
+    flex: 1,
+  },
+  drawerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 12,
+    backgroundColor: '#0b0508',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  drawerCloseButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.surface2,
+  },
+  drawerCloseButtonHover: {
+    backgroundColor: C.border,
+  },
+  drawerCloseButtonPressed: {
+    transform: [{ scale: 0.94 }],
+  },
+
+  drawerList: {
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    gap: 4,
+  },
+  drawerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+  },
+  drawerItemHover: {
+    backgroundColor: '#f9fafb',
+  },
+  drawerItemActive: {
+    backgroundColor: C.accentSoft,
+  },
+  drawerItemText: {
+    fontSize: 15,
     fontWeight: '600',
+    color: '#374151',
+    flex: 1,
+  },
+  drawerItemTextActive: {
+    color: C.accent,
+    fontWeight: '700',
+  },
+  drawerBadge: {
+    backgroundColor: '#dc2626',
+    borderRadius: 8,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  drawerBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
     color: '#fff',
   },
-  labelInactive: {
-    fontSize: 9,
-    fontWeight: '500',
-    color: '#9ca3af',
-    marginTop: 1,
+
+  drawerFooter: {
+    marginTop: 'auto',
+    paddingHorizontal: 10,
+    paddingBottom: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+    paddingTop: 10,
+  },
+  drawerLogoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+  },
+  drawerLogoutButtonHover: {
+    backgroundColor: '#fef2f2',
+  },
+  drawerLogoutText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#dc2626',
   },
 });

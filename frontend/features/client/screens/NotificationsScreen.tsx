@@ -6,16 +6,20 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { AppNotification, BirthdayAlert, DeadlineAlert, PriceAlert } from '../../../types/priceAlerts';
 import { getModalBackdropResponder } from '../../../utils/modalBackdrop';
 import { C, R, S } from '../../../constants/theme';
+import ClientFooter from '../components/ClientFooter';
+import type { ClientTab } from './ClientDashboard';
 
 type Props = {
   alerts: AppNotification[];
   onOpenAlert: (alert: AppNotification) => void;
   onMarkAllRead: () => void;
   onDeleteAlerts: (mode: 'read' | 'all') => void;
+  onNavigateTab?: (tab: ClientTab) => void;
 };
 
 function formatMoney(value: number, currency = 'RON') {
@@ -273,8 +277,11 @@ export default function NotificationsScreen({
   onOpenAlert,
   onMarkAllRead,
   onDeleteAlerts,
+  onNavigateTab,
 }: Props) {
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const { width } = useWindowDimensions();
+  const isNarrow = width < 960;
   const unreadCount = alerts.filter((alert) => !alert.readAt).length;
   const readCount = alerts.length - unreadCount;
 
@@ -345,7 +352,7 @@ export default function NotificationsScreen({
   return (
     <>
       <FlatList
-        contentContainerStyle={styles.container}
+        contentContainerStyle={[styles.container, isNarrow && styles.containerFlush]}
         data={alerts}
         keyExtractor={(alert) => alert.id}
         renderItem={renderItem}
@@ -359,6 +366,7 @@ export default function NotificationsScreen({
             </Text>
           </View>
         }
+        ListFooterComponent={<ClientFooter onNavigate={onNavigateTab} />}
       />
 
       <Modal
@@ -413,10 +421,14 @@ export default function NotificationsScreen({
 
 const styles = StyleSheet.create({
   container: {
-    padding: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
     gap: 14,
     backgroundColor: C.bg,
+  },
+  containerFlush: {
+    paddingHorizontal: 0,
   },
   headerRow: {
     gap: 4,

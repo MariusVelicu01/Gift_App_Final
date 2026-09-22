@@ -22,6 +22,8 @@ import { getModalBackdropResponder } from '../../../utils/modalBackdrop';
 import { GiftPlan, GiftPurpose } from '../../../types/giftPlans';
 import { LovedOne } from '../../../types/lovedOnes';
 import LovedOneDetailsScreen from './LovedOneDetailsScreen';
+import ClientFooter from '../components/ClientFooter';
+import type { ClientTab } from './ClientDashboard';
 
 const PURPOSES: GiftPurpose[] = [
   'Zi de nastere',
@@ -275,13 +277,15 @@ function MultiSelectDropdown({
 
 type Props = {
   resetRef?: React.MutableRefObject<(() => void) | null>;
+  onNavigateTab?: (tab: ClientTab) => void;
 };
 
-export default function CalendarScreen({ resetRef }: Props) {
+export default function CalendarScreen({ resetRef, onNavigateTab }: Props) {
   const { token, profile } = useAuth();
   const { width } = useWindowDimensions();
   const today = new Date();
   const isCompact = width < 760;
+  const isNarrow = width < 960;
   const [loading, setLoading] = useState(true);
   const [lovedOnes, setLovedOnes] = useState<LovedOne[]>([]);
   const [giftPlansByLovedOne, setGiftPlansByLovedOne] = useState<
@@ -590,7 +594,7 @@ export default function CalendarScreen({ resetRef }: Props) {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={[styles.container, isNarrow && styles.containerFlush]}>
       <View style={styles.headerRow}>
         <View>
           <Text style={styles.title}>Calendar</Text>
@@ -996,16 +1000,22 @@ export default function CalendarScreen({ resetRef }: Props) {
           </Text>
         )}
       </View>
+
+      <ClientFooter onNavigate={onNavigateTab} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    padding: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
     gap: 16,
     backgroundColor: C.bg,
+  },
+  containerFlush: {
+    paddingHorizontal: 0,
   },
   center: {
     flex: 1,

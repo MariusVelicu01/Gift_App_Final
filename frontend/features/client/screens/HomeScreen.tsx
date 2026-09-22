@@ -17,6 +17,13 @@ import { GiftPlan } from '../../../types/giftPlans';
 import { LovedOne } from '../../../types/lovedOnes';
 import { PartnerStore, ProductImportItem } from '../../../types/partnerStores';
 import { C, R, S } from '../../../constants/theme';
+import RevealIn from '../../../components/landing/RevealIn';
+import ClientFooter from '../components/ClientFooter';
+import type { ClientTab } from './ClientDashboard';
+import GiftMascot from '../../../components/landing/GiftMascot';
+import AnimatedGiftIcon from '../../../components/landing/AnimatedGiftIcon';
+import DriftBlob from '../../../components/landing/DriftBlob';
+import PartnerOffersCarousel from '../components/PartnerOffersCarousel';
 
 type Promotion = {
   product: ProductImportItem;
@@ -36,6 +43,7 @@ type Props = {
   lastName?: string;
   userGender?: string;
   onOpenGift?: (target: GiftDetailsTarget) => void;
+  onNavigateTab?: (tab: ClientTab) => void;
 };
 
 function profileGenderToProductGender(g?: string): 'barbati' | 'femei' | null {
@@ -102,11 +110,12 @@ function openProductLink(affiliateUrl?: string, productUrl?: string) {
   openUrl(targetUrl);
 }
 
-export default function HomeScreen({ firstName, lastName, userGender, onOpenGift }: Props) {
+export default function HomeScreen({ firstName, lastName, userGender, onOpenGift, onNavigateTab }: Props) {
   const userProductGender = profileGenderToProductGender(userGender);
   const { token } = useAuth();
   const { width } = useWindowDimensions();
   const isCompact = width < 760;
+  const isNarrow = width < 960;
   const [loading, setLoading] = useState(true);
   const [lovedOnes, setLovedOnes] = useState<LovedOne[]>([]);
   const [giftPlansByLovedOne, setGiftPlansByLovedOne] = useState<Record<string, GiftPlan[]>>({});
@@ -194,159 +203,245 @@ export default function HomeScreen({ firstName, lastName, userGender, onOpenGift
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      {/* Hero greeting */}
-      <View style={styles.heroBlock}>
-        <View style={styles.roleBadge}>
-          <Text style={styles.roleBadgeText}>Bun venit</Text>
-        </View>
-        <Text style={styles.heroTitle}>
-          {firstName}{lastName ? ` ${lastName}` : ''}
-        </Text>
-        <Text style={styles.heroSub}>
-          {activeGiftPlans.length > 0
-            ? `Ai ${activeGiftPlans.length} ${activeGiftPlans.length === 1 ? 'cadou activ' : 'cadouri active'} care asteapta atentia ta.`
-            : 'Nu ai cadouri active momentan.'}
-        </Text>
-      </View>
+    <ScrollView contentContainerStyle={[styles.container, isNarrow && styles.containerFlush]}>
+      {(() => {
+        const heroCardEl = (
+          <View style={[styles.heroCard, isCompact && styles.heroCardCompact, !isCompact && styles.heroCardWide]}>
+            <View style={styles.heroCopy}>
+              <View style={styles.roleBadge}>
+                <Text style={styles.roleBadgeText}>Bun venit</Text>
+              </View>
+              <Text style={styles.heroTitle}>
+                {firstName}{lastName ? ` ${lastName}` : ''}
+              </Text>
+              <Text style={styles.heroSub}>
+                {activeGiftPlans.length > 0 ? (
+                  <>
+                    Ai{' '}
+                    <Text style={styles.heroSubAccent}>
+                      {activeGiftPlans.length}{' '}
+                      {activeGiftPlans.length === 1 ? 'cadou activ' : 'cadouri active'}
+                    </Text>{' '}
+                    care asteapta atentia ta.
+                  </>
+                ) : (
+                  'Niciun cadou activ momentan — e un moment bun sa mai adaugi unul.'
+                )}
+              </Text>
+            </View>
 
-      {/* Buy soon */}
-      <View style={styles.card}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.cardTitle}>De cumparat in curand</Text>
-        </View>
-        {urgentBuyPlans.length === 0 ? (
-          <Text style={styles.cardText}>Nu ai deadline-uri de cumparare urgente in urmatoarele 14 zile.</Text>
-        ) : (
-          urgentBuyPlans.map(({ lovedOne, giftPlan, daysLeft }) => (
-            <Pressable
-              key={`${lovedOne.id}-${giftPlan.id}-buy`}
-              style={({ hovered, pressed }) => [
-                styles.giftRow,
-                hovered && styles.giftRowHover,
-                pressed && styles.giftRowPressed,
-              ]}
-              onPress={() => onOpenGift?.({ lovedOneId: lovedOne.id, giftPlanId: giftPlan.id })}
-            >
-              <View style={styles.giftInfo}>
-                <Text style={styles.giftTitle}>{giftPlan.purpose}</Text>
-                <Text style={styles.giftMeta}>
-                  {lovedOne.name} · pana la {formatDate(giftPlan.purchaseDeadlineDate || giftPlan.deadlineDate)}
+            {isCompact && (
+              <View style={styles.heroMascotBlock}>
+                <GiftMascot size={64} mood={urgentBuyPlans.length > 0 ? 'building' : 'idle'} />
+                <Text style={styles.heroMascotCaption}>
+                  {activeGiftPlans.length} {activeGiftPlans.length === 1 ? 'activ' : 'active'}
                 </Text>
               </View>
-              <View style={styles.buyBadge}>
-                <Text style={styles.buyBadgeText}>
-                  {Number(daysLeft) < 0 ? 'intarziat' : `${daysLeft}z`}
-                </Text>
-              </View>
-            </Pressable>
-          ))
-        )}
-      </View>
-
-      {/* Offer soon */}
-      <View style={styles.card}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.cardTitle}>Urmeaza sa oferi</Text>
-        </View>
-        {soonOfferPlans.length === 0 ? (
-          <Text style={styles.cardText}>Nu ai cadouri de oferit in urmatoarele 30 de zile.</Text>
-        ) : (
-          soonOfferPlans.map(({ lovedOne, giftPlan, daysLeft }) => (
-            <Pressable
-              key={`${lovedOne.id}-${giftPlan.id}-offer`}
-              style={({ hovered, pressed }) => [
-                styles.giftRow,
-                hovered && styles.giftRowHover,
-                pressed && styles.giftRowPressed,
-              ]}
-              onPress={() => onOpenGift?.({ lovedOneId: lovedOne.id, giftPlanId: giftPlan.id })}
-            >
-              <View style={styles.giftInfo}>
-                <Text style={styles.giftTitle}>{giftPlan.purpose}</Text>
-                <Text style={styles.giftMeta}>
-                  {lovedOne.name} · pe {formatDate(giftPlan.deadlineDate)}
-                </Text>
-              </View>
-              <View style={styles.offerBadge}>
-                <Text style={styles.offerBadgeText}>
-                  {daysLeft === 0 ? 'azi' : `${daysLeft}z`}
-                </Text>
-              </View>
-            </Pressable>
-          ))
-        )}
-      </View>
-
-      {/* Promotions */}
-      <View style={styles.card}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.cardTitle}>Promotii din magazine partenere</Text>
-          <View style={styles.countPill}>
-            <Text style={styles.countPillText}>{promotions.length} oferte</Text>
+            )}
           </View>
-        </View>
+        );
 
-        {promotions.length === 0 ? (
-          <Text style={styles.cardText}>Nu sunt promotii importate momentan.</Text>
-        ) : (
-          promotions.map((promotion, index) => (
-            <Pressable
-              key={`${promotion.store.id}-${promotion.product.id || promotion.product.name}-${index}`}
-              style={({ hovered, pressed }) => [
-                styles.promotionRow,
-                isCompact && styles.promotionRowCompact,
-                hovered && styles.promotionRowHover,
-                pressed && styles.promotionRowPressed,
-              ]}
-              onPress={() => openProductLink(promotion.product.affiliateUrl, promotion.product.productUrl)}
-              disabled={!promotion.product.affiliateUrl && !promotion.product.productUrl}
-            >
-              {promotion.product.imageUrl ? (
-                <Image source={{ uri: promotion.product.imageUrl }} style={styles.productImage} />
-              ) : (
-                <View style={styles.productPlaceholder} />
-              )}
-
-              <View style={styles.promotionInfo}>
-                <Text style={styles.productName} numberOfLines={1}>{promotion.product.name}</Text>
-                <Text style={styles.productMeta} numberOfLines={1}>
-                  {promotion.store.displayName}{promotion.product.brand ? ` · ${promotion.product.brand}` : ''}
-                </Text>
-                {!!promotion.product.category && (
-                  <Text style={styles.productMeta} numberOfLines={1}>
-                    {promotion.product.category}{promotion.product.subcategory ? ` / ${promotion.product.subcategory}` : ''}
-                  </Text>
-                )}
-              </View>
-
-              <View style={styles.priceBlock}>
-                <View style={styles.discountBadge}>
-                  <Text style={styles.discountBadgeText}>-{Math.round(promotion.discountPercent)}%</Text>
+        const brandStripEl = (
+          <View style={[styles.brandStrip, isCompact && styles.brandStripCompact, !isCompact && styles.brandStripWide]}>
+            {!isCompact && (
+              <>
+                <DriftBlob style={styles.brandBlobLeft} driftX={14} driftY={10} duration={5200} />
+                <DriftBlob style={styles.brandBlobRight} driftX={-16} driftY={-8} duration={6600} />
+                <View style={styles.brandStripCenterWrap} pointerEvents="none">
+                  <Text style={styles.brandStripCenterText}>PresentPerfect</Text>
                 </View>
-                <Text style={styles.productPrice}>
-                  {formatMoney(promotion.currentPrice, promotion.store.currency)}
+              </>
+            )}
+
+            <View style={styles.brandStripTop}>
+              <View style={styles.brandStripCopy}>
+                <Text style={styles.brandStripHeadline}>
+                  Cadoul potrivit.{'\n'}
+                  <Text style={styles.brandStripHeadlineAccent}>La timpul potrivit.</Text>
                 </Text>
-                {promotion.originalPrice !== undefined && (
-                  <Text style={styles.originalPrice}>
-                    {formatMoney(promotion.originalPrice, promotion.store.currency)}
-                  </Text>
-                )}
               </View>
-            </Pressable>
-          ))
-        )}
+              {!isCompact && <AnimatedGiftIcon size={80} />}
+            </View>
+          </View>
+        );
+
+        return isCompact ? (
+          <>
+            <RevealIn delay={0}>{brandStripEl}</RevealIn>
+            <RevealIn delay={80}>{heroCardEl}</RevealIn>
+          </>
+        ) : (
+          <View style={styles.topRow}>
+            <RevealIn delay={0} style={styles.topRowItem}>{heroCardEl}</RevealIn>
+            <RevealIn delay={80} style={styles.topRowItem}>{brandStripEl}</RevealIn>
+          </View>
+        );
+      })()}
+
+      {/* Buy soon + Offer soon */}
+      <View style={[styles.twoColRow, !isCompact && styles.twoColRowWide]}>
+        <RevealIn delay={160} style={!isCompact && styles.twoColItem}>
+        <View style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.cardTitle}>De cumparat in curand</Text>
+          </View>
+          {urgentBuyPlans.length === 0 ? (
+            <Text style={styles.cardText}>Nu ai deadline-uri de cumparare urgente in urmatoarele 14 zile.</Text>
+          ) : (
+            urgentBuyPlans.map(({ lovedOne, giftPlan, daysLeft }) => (
+              <Pressable
+                key={`${lovedOne.id}-${giftPlan.id}-buy`}
+                style={({ hovered, pressed }) => [
+                  styles.giftRow,
+                  hovered && styles.giftRowHover,
+                  pressed && styles.giftRowPressed,
+                ]}
+                onPress={() => onOpenGift?.({ lovedOneId: lovedOne.id, giftPlanId: giftPlan.id })}
+              >
+                <View style={styles.giftInfo}>
+                  <Text style={styles.giftTitle}>{giftPlan.purpose}</Text>
+                  <Text style={styles.giftMeta}>
+                    {lovedOne.name} · pana la {formatDate(giftPlan.purchaseDeadlineDate || giftPlan.deadlineDate)}
+                  </Text>
+                </View>
+                <View style={styles.buyBadge}>
+                  <Text style={styles.buyBadgeText}>
+                    {Number(daysLeft) < 0 ? 'intarziat' : `${daysLeft}z`}
+                  </Text>
+                </View>
+              </Pressable>
+            ))
+          )}
+        </View>
+        </RevealIn>
+
+        <RevealIn delay={240} style={!isCompact && styles.twoColItem}>
+        <View style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.cardTitle}>Urmeaza sa oferi</Text>
+          </View>
+          {soonOfferPlans.length === 0 ? (
+            <Text style={styles.cardText}>Nu ai cadouri de oferit in urmatoarele 30 de zile.</Text>
+          ) : (
+            soonOfferPlans.map(({ lovedOne, giftPlan, daysLeft }) => (
+              <Pressable
+                key={`${lovedOne.id}-${giftPlan.id}-offer`}
+                style={({ hovered, pressed }) => [
+                  styles.giftRow,
+                  hovered && styles.giftRowHover,
+                  pressed && styles.giftRowPressed,
+                ]}
+                onPress={() => onOpenGift?.({ lovedOneId: lovedOne.id, giftPlanId: giftPlan.id })}
+              >
+                <View style={styles.giftInfo}>
+                  <Text style={styles.giftTitle}>{giftPlan.purpose}</Text>
+                  <Text style={styles.giftMeta}>
+                    {lovedOne.name} · pe {formatDate(giftPlan.deadlineDate)}
+                  </Text>
+                </View>
+                <View style={styles.offerBadge}>
+                  <Text style={styles.offerBadgeText}>
+                    {daysLeft === 0 ? 'azi' : `${daysLeft}z`}
+                  </Text>
+                </View>
+              </Pressable>
+            ))
+          )}
+        </View>
+        </RevealIn>
       </View>
+
+      {/* Promotions + partner banners */}
+      <View style={[styles.twoColRow, !isCompact && styles.twoColRowWide]}>
+        <RevealIn delay={320} style={!isCompact && styles.twoColItem}>
+        <View style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.cardTitle}>Promotii din magazine partenere</Text>
+            <View style={styles.countPill}>
+              <Text style={styles.countPillText}>{promotions.length} oferte</Text>
+            </View>
+          </View>
+
+          {promotions.length === 0 ? (
+            <Text style={styles.cardText}>Nu sunt promotii importate momentan.</Text>
+          ) : (
+            promotions.map((promotion, index) => (
+              <Pressable
+                key={`${promotion.store.id}-${promotion.product.id || promotion.product.name}-${index}`}
+                style={({ hovered, pressed }) => [
+                  styles.promotionRow,
+                  isCompact && styles.promotionRowCompact,
+                  hovered && styles.promotionRowHover,
+                  pressed && styles.promotionRowPressed,
+                ]}
+                onPress={() => openProductLink(promotion.product.affiliateUrl, promotion.product.productUrl)}
+                disabled={!promotion.product.affiliateUrl && !promotion.product.productUrl}
+              >
+                {promotion.product.imageUrl ? (
+                  <Image source={{ uri: promotion.product.imageUrl }} style={styles.productImage} />
+                ) : (
+                  <View style={styles.productPlaceholder} />
+                )}
+
+                <View style={styles.promotionInfo}>
+                  <Text style={styles.productName} numberOfLines={1}>{promotion.product.name}</Text>
+                  <Text style={styles.productMeta} numberOfLines={1}>
+                    {promotion.store.displayName}{promotion.product.brand ? ` · ${promotion.product.brand}` : ''}
+                  </Text>
+                  {!!promotion.product.category && (
+                    <Text style={styles.productMeta} numberOfLines={1}>
+                      {promotion.product.category}{promotion.product.subcategory ? ` / ${promotion.product.subcategory}` : ''}
+                    </Text>
+                  )}
+                </View>
+
+                <View style={styles.priceBlock}>
+                  <View style={styles.discountBadge}>
+                    <Text style={styles.discountBadgeText}>-{Math.round(promotion.discountPercent)}%</Text>
+                  </View>
+                  <Text style={styles.productPrice}>
+                    {formatMoney(promotion.currentPrice, promotion.store.currency)}
+                  </Text>
+                  {promotion.originalPrice !== undefined && (
+                    <Text style={styles.originalPrice}>
+                      {formatMoney(promotion.originalPrice, promotion.store.currency)}
+                    </Text>
+                  )}
+                </View>
+              </Pressable>
+            ))
+          )}
+        </View>
+        </RevealIn>
+
+        <RevealIn delay={400} style={!isCompact && styles.twoColItem}>
+        <View style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.cardTitle}>Bannere magazine partenere</Text>
+            <View style={styles.demoPill}>
+              <Text style={styles.demoPillText}>DEMO</Text>
+            </View>
+          </View>
+          <PartnerOffersCarousel arrows={false} />
+        </View>
+        </RevealIn>
+      </View>
+
+      <ClientFooter onNavigate={onNavigateTab} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    padding: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
     gap: 14,
     paddingBottom: 32,
     backgroundColor: C.bg,
+  },
+  containerFlush: {
+    paddingHorizontal: 0,
   },
   center: {
     flex: 1,
@@ -361,14 +456,105 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  hero: {
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+  brandStrip: {
+    backgroundColor: '#0b0508',
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    borderRadius: R.xl,
+    gap: 16,
+    overflow: 'hidden',
+    position: 'relative',
   },
-  heroBlock: {
+  brandStripCompact: {
+    gap: 0,
+  },
+  brandStripTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  brandStripCopy: {
+    flexShrink: 1,
+  },
+  brandStripHeadline: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#fdf2f4',
+    letterSpacing: -0.5,
+    lineHeight: 26,
+  },
+  brandStripHeadlineAccent: {
+    color: '#ff4d6d',
+  },
+  brandBlobLeft: {
+    position: 'absolute',
+    top: -40,
+    left: -30,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(255,77,109,0.16)',
+  },
+  brandBlobRight: {
+    position: 'absolute',
+    bottom: -50,
+    right: 40,
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: 'rgba(253,242,244,0.06)',
+  },
+  brandStripCenterWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandStripCenterText: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#ffffff',
+    letterSpacing: -0.4,
+  },
+  brandStripWide: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 14,
+  },
+  topRowItem: {
+    flex: 1,
+  },
+
+  heroCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    backgroundColor: C.surface,
+    padding: 18,
+    borderRadius: R.xl,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    ...S.card,
+  },
+  heroCardCompact: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
+  heroCardWide: {
+    flex: 1,
+  },
+  heroCopy: {
+    flex: 1,
     gap: 6,
-    paddingTop: 4,
-    paddingBottom: 8,
   },
   roleBadge: {
     alignSelf: 'flex-start',
@@ -396,30 +582,40 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: C.textDim,
     marginTop: 2,
+    lineHeight: 20,
   },
-  heroKicker: { fontSize: 11, color: C.textFaint },
-  heroAccent: { color: C.accent, fontStyle: 'italic' },
+  heroSubAccent: {
+    color: C.accent,
+    fontWeight: '700',
+  },
 
-  statCard: {
-    backgroundColor: C.accent,
-    padding: 16,
-    borderRadius: R.xl,
+  heroMascotBlock: {
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 4,
+    backgroundColor: C.accentSoft,
+    borderRadius: R.xl,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    minWidth: 116,
   },
-  statValue: {
-    fontFamily: 'serif',
-    fontSize: 36,
-    fontWeight: '400',
-    color: C.accentInk,
-    lineHeight: 40,
-    letterSpacing: -0.5,
-  },
-  statLabel: {
+  heroMascotCaption: {
     fontSize: 11,
-    letterSpacing: 1.4,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
-    color: 'rgba(255,255,255,0.78)',
-    fontWeight: '500',
+    color: C.accent,
+    fontWeight: '700',
+  },
+
+  twoColRow: {
+    gap: 14,
+  },
+  twoColRowWide: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  twoColItem: {
+    flex: 1,
   },
 
   card: {
@@ -460,6 +656,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '500',
     color: C.textDim,
+  },
+  demoPill: {
+    backgroundColor: C.warnBg,
+    borderRadius: R.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  demoPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.warn,
+    letterSpacing: 0.5,
   },
 
   giftRow: {
