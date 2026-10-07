@@ -1,36 +1,53 @@
-import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { getModalBackdropResponder } from '../utils/modalBackdrop';
-import {
-  AFFILIATE_MARKETING_SECTIONS,
-  LEGAL_LAST_UPDATED,
-  PRIVACY_POLICY_SECTIONS,
-  TERMS_SECTIONS,
-} from '../constants/legalContent';
+import { getLegalDocs, LegalDoc, LegalDocType } from '../services/legalApi';
 import { C, R, S } from '../constants/theme';
 
-type LegalDocType = 'privacy' | 'terms' | 'affiliate' | null;
+type LegalDocTypeOrNull = LegalDocType | null;
 
 type Props = {
-  type: LegalDocType;
+  type: LegalDocTypeOrNull;
   onClose: () => void;
 };
 
-const TITLES: Record<Exclude<LegalDocType, null>, string> = {
+const TITLES: Record<LegalDocType, string> = {
   privacy: 'Politica de confidențialitate',
   terms: 'Termeni și condiții',
   affiliate: 'Marketing afiliat',
 };
 
-const SECTIONS: Record<Exclude<LegalDocType, null>, typeof PRIVACY_POLICY_SECTIONS> = {
-  privacy: PRIVACY_POLICY_SECTIONS,
-  terms: TERMS_SECTIONS,
-  affiliate: AFFILIATE_MARKETING_SECTIONS,
-};
+function formatRo(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('ro-RO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
 
 export default function LegalDocumentModal({ type, onClose }: Props) {
+  const [doc, setDoc] = useState<LegalDoc | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!type) {
+      setDoc(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    getLegalDocs()
+      .then((docs) => {
+        if (!cancelled) setDoc(docs[type]);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [type]);
+
   const title = type ? TITLES[type] : '';
-  const sections = type ? SECTIONS[type] : [];
 
   return (
     <Modal visible={type !== null} transparent animationType="slide" onRequestClose={onClose}>
@@ -38,17 +55,23 @@ export default function LegalDocumentModal({ type, onClose }: Props) {
         <View style={styles.card}>
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
-            <Text style={styles.updated}>Actualizat: {LEGAL_LAST_UPDATED}</Text>
+            {!!doc && <Text style={styles.updated}>Actualizat: {formatRo(doc.updatedAt)}</Text>}
           </View>
 
-          <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-            {sections.map((section) => (
-              <View key={section.heading} style={styles.section}>
-                <Text style={styles.sectionHeading}>{section.heading}</Text>
-                <Text style={styles.sectionBody}>{section.body}</Text>
-              </View>
-            ))}
-          </ScrollView>
+          {loading || !doc ? (
+            <View style={styles.loadingBlock}>
+              <ActivityIndicator color={C.accent} />
+            </View>
+          ) : (
+            <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
+              {doc.sections.map((section, i) => (
+                <View key={`${section.heading}-${i}`} style={styles.section}>
+                  <Text style={styles.sectionHeading}>{section.heading}</Text>
+                  <Text style={styles.sectionBody}>{section.body}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          )}
 
           <Pressable style={styles.closeButton} onPress={onClose}>
             <Text style={styles.closeButtonText}>Închide</Text>
@@ -90,6 +113,10 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 12,
     color: C.textFaint,
+  },
+  loadingBlock: {
+    paddingVertical: 48,
+    alignItems: 'center',
   },
   body: {
     paddingHorizontal: 24,

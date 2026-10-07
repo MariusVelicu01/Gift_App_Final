@@ -13,6 +13,7 @@ import {
 import { Image } from 'expo-image';
 import { useAuth } from '../../../context/AuthContext';
 import { changePasswordRequest, updateProfileRequest } from '../../../services/authApi';
+import AdminFooter from '../components/AdminFooter';
 import { C, R, S } from '../../../constants/theme';
 
 type Props = {
@@ -359,6 +360,8 @@ export default function SettingsScreen({ onLogout }: Props) {
       <Pressable style={styles.logoutButton} onPress={onLogout}>
         <Text style={styles.logoutButtonText}>Deconecteaza-te</Text>
       </Pressable>
+
+      <AdminFooter />
     </ScrollView>
   );
 }

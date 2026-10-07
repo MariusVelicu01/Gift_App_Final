@@ -12,6 +12,7 @@ import {
 import { getModalBackdropResponder } from '../../../utils/modalBackdrop';
 import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
+import AdminFooter from '../components/AdminFooter';
 import {
   AdminUserStatisticsGiftPlan,
   getAdminUserStatistics,
@@ -1018,6 +1019,7 @@ export default function StatisticsScreen() {
         </Pressable>
       </View>
 
+      <AdminFooter />
     </ScrollView>
   );
 }

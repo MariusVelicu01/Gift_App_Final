@@ -15,6 +15,11 @@ import adminStatisticsRoutes from './routes/adminStatisticsRoutes';
 import priceAlertsRoutes from './routes/priceAlertsRoutes';
 import giftBotRoutes from './routes/giftBotRoutes';
 import pushTokenRoutes from './routes/pushTokenRoutes';
+import maintenanceRoutes from './routes/maintenanceRoutes';
+import legalRoutes from './routes/legalRoutes';
+import adminUsersRoutes from './routes/adminUsersRoutes';
+import { maintenanceGate } from './middleware/maintenanceGate';
+import { accountStatusGate } from './middleware/accountStatusGate';
 
 const app = express();
 
@@ -55,13 +60,13 @@ app.use(cors({ origin: buildCorsOrigin() }));
 // user's store catalog grew.
 app.use(express.json({ limit: '1mb' }));
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Prea multe încercări. Încearcă din nou peste 15 minute.' },
-});
+// Blocks every non-admin request while maintenance is active — enforced server-side
+// so it can't be dodged by calling the API directly once the frontend gate is bypassed.
+app.use(maintenanceGate);
+
+// Blocks every request from a blocked/deleted account — same reasoning: enforced
+// server-side, not just hidden behind a frontend screen.
+app.use(accountStatusGate);
 
 function tokenKey(req: any): string {
   const auth = req.headers?.authorization as string | undefined;
@@ -102,7 +107,10 @@ const giftBotLimiter = rateLimit({
 });
 
 app.use('/api/health', healthRoutes);
-app.use('/api/auth', authLimiter, authRoutes);
+// The strict brute-force limiter for credential-guessing routes (login/register/...)
+// now lives inside authRoutes.ts itself, applied per-route — /me and other session
+// routes on this same router need the much more generous baseline below instead.
+app.use('/api/auth', generalLimiter, authRoutes);
 app.use('/api/loved-ones', generalLimiter, lovedOnesRoutes);
 app.use('/api/upload', generalLimiter, uploadRoutes);
 app.use('/api/partner-stores', generalLimiter, partnerStoresRoutes);
@@ -110,6 +118,9 @@ app.use('/api/admin-statistics', generalLimiter, adminStatisticsRoutes);
 app.use('/api/price-alerts', generalLimiter, priceAlertsRoutes);
 app.use('/api/giftbot', giftBotLimiter, giftBotRoutes);
 app.use('/api/push-tokens', generalLimiter, pushTokenRoutes);
+app.use('/api/maintenance', generalLimiter, maintenanceRoutes);
+app.use('/api/legal', generalLimiter, legalRoutes);
+app.use('/api/admin-users', generalLimiter, adminUsersRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ message: 'Ruta nu a fost găsită.' });

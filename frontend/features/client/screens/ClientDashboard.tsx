@@ -9,6 +9,7 @@ import PartnerStoresScreen from './PartnerStoresScreen';
 import NotificationsScreen from './NotificationsScreen';
 import SettingsScreen from './SettingsScreen';
 import { useAuth } from '../../../context/AuthContext';
+import { useTabHistory } from '../../../hooks/useTabHistory';
 import { C, S } from '../../../constants/theme';
 import { AppNotification, DeadlineAlert, PriceAlert, PriceAlertTarget } from '../../../types/priceAlerts';
 import {
@@ -67,7 +68,7 @@ type Props = {
 
 export default function ClientDashboard({ firstName, lastName, userGender, onLogout }: Props) {
   const { token, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<ClientTab>('home');
+  const { activeTab, navigateToTab: setActiveTab } = useTabHistory<ClientTab>('home');
   const [alerts, setAlerts] = useState<AppNotification[]>([]);
   const [priceAlertTarget, setPriceAlertTarget] = useState<PriceAlertTarget | null>(null);
   const [giftDetailsTarget, setGiftDetailsTarget] = useState<{ lovedOneId: string; giftPlanId: string } | null>(null);

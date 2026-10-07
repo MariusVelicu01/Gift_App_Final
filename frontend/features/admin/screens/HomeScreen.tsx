@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../../../context/AuthContext';
 import { C, R, S } from '../../../constants/theme';
+import AdminFooter from '../components/AdminFooter';
 import {
   getAdminPartnerStoresCache,
   subscribeAdminPartnerStoresCache,
@@ -179,6 +180,8 @@ export default function HomeScreen({ firstName, lastName, onOpenStore }: Props) 
           </View>
         </>
       )}
+
+      <AdminFooter />
     </ScrollView>
   );
 }

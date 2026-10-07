@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { openUrl } from '../../../utils/openUrl';
+import AdminFooter from '../components/AdminFooter';
 import * as ImagePicker from 'expo-image-picker';
 import { Dropdown } from 'react-native-element-dropdown';
 import { useAuth } from '../../../context/AuthContext';
@@ -2053,6 +2054,8 @@ export default function PartnerStoresScreen({ initialSelectedStoreId }: Props) {
           </View>
         </View>
       </Modal>
+
+      <AdminFooter />
     </ScrollView>
   );
 }

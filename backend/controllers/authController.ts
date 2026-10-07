@@ -12,6 +12,8 @@ import {
   updateUserName,
 } from '../services/authService';
 import { updateUserConsent } from '../services/userService';
+import { getCurrentTermsVersion } from '../services/legalService';
+import { isEmailBlacklisted } from '../services/adminUsersService';
 import { db } from '../config/firebase';
 
 // ─── Firestore-backed OAuth stores (survive restarts & scale-out) ────────────
@@ -104,6 +106,12 @@ export async function register(req: Request, res: Response) {
       });
     }
 
+    if (await isEmailBlacklisted(email)) {
+      return res.status(403).json({
+        message: 'Acest email nu mai poate fi folosit pentru a crea un cont.',
+      });
+    }
+
     const { consent } = req.body;
     if (!consent || consent.privacyAndTerms !== true) {
       return res.status(400).json({ message: 'Trebuie să accepți Politica de confidențialitate și Termenii și condițiile.' });
@@ -112,7 +120,7 @@ export async function register(req: Request, res: Response) {
       privacyAndTerms: true as const,
       giftBot: consent.giftBot === true,
       marketing: consent.marketing === true,
-      consentVersion: '1.0',
+      consentVersion: String(await getCurrentTermsVersion()),
       consentTimestamp: new Date().toISOString(),
     };
 
@@ -385,7 +393,7 @@ export async function googleCompleteWithTempToken(req: Request, res: Response) {
       privacyAndTerms: true as const,
       giftBot: consent.giftBot === true,
       marketing: consent.marketing === true,
-      consentVersion: '1.0',
+      consentVersion: String(await getCurrentTermsVersion()),
       consentTimestamp: new Date().toISOString(),
     };
 
@@ -405,6 +413,12 @@ export async function googleCompleteWithTempToken(req: Request, res: Response) {
     }
     if (!gender || !['male', 'female', 'unknown'].includes(gender)) {
       return res.status(400).json({ message: 'Genul este obligatoriu.' });
+    }
+
+    if (await isEmailBlacklisted(stored.googleEmail)) {
+      return res.status(403).json({
+        message: 'Acest email nu mai poate fi folosit pentru a crea un cont.',
+      });
     }
 
     const tokens = await completeGoogleRegistration(

@@ -24,6 +24,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import AuthModal from '../components/AuthModal';
 import OnboardingModal from '../components/OnboardingModal';
 import LegalDocumentModal from '../components/LegalDocumentModal';
+import MaintenanceBlock from '../components/MaintenanceBlock';
+import MaintenanceBanner from '../components/MaintenanceBanner';
+import TermsUpdateModal from '../components/TermsUpdateModal';
+import AccountBlockedScreen from '../components/AccountBlockedScreen';
+import { useMaintenanceStatus } from '../hooks/useMaintenanceStatus';
+import { useAccountStatus } from '../hooks/useAccountStatus';
+import { getLegalDocs } from '../services/legalApi';
 import RevealIn from '../components/landing/RevealIn';
 import Marquee from '../components/landing/Marquee';
 import MagneticButton from '../components/landing/MagneticButton';
@@ -438,7 +445,7 @@ function ServerDown({ onRetry }: { onRetry: () => void }) {
 }
 
 function IndexContent() {
-  const { loading, profile, logout } = useAuth();
+  const { loading, profile, logout, token } = useAuth();
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
   const [serverChecking, setServerChecking] = useState(true);
@@ -467,6 +474,20 @@ function IndexContent() {
     checkServer();
     track(Events.APP_OPEN);
   }, []);
+
+  const [termsVersion, setTermsVersion] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (profile?.role !== 'client') return;
+    getLegalDocs()
+      .then((docs) => setTermsVersion(docs.terms.version))
+      .catch(() => {});
+  }, [profile?.role]);
+
+  const needsTermsUpdate =
+    profile?.role === 'client' &&
+    termsVersion !== null &&
+    Number(profile.consent?.consentVersion || 0) < termsVersion;
 
   useEffect(() => {
     if (!profile) return;
@@ -508,6 +529,10 @@ function IndexContent() {
   const { width: windowWidth } = useWindowDimensions();
   const isWide = windowWidth >= 860;
 
+  const maintenance = useMaintenanceStatus();
+  const isAdmin = profile?.role === 'admin';
+  const accountStatus = useAccountStatus(token);
+
   const isGuestLanding = !profile && !serverChecking && serverUp && !loading;
 
   const smallLogoStyle = useAnimatedStyle(() => {
@@ -536,6 +561,14 @@ function IndexContent() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {!loading && !isAdmin && maintenance.phase === 'upcoming' && (
+        <MaintenanceBanner
+          message={maintenance.message}
+          scheduledStart={maintenance.scheduledStart}
+          scheduledEnd={maintenance.scheduledEnd}
+        />
+      )}
+
       {(!profile || serverChecking || !serverUp || loading) && (
         <View style={styles.topBar}>
           <View style={styles.topBarBrand}>
@@ -574,6 +607,12 @@ function IndexContent() {
             <ActivityIndicator size="large" color="#be123c" />
             <Text style={styles.loadingText}>Se încarcă sesiunea...</Text>
           </View>
+        ) : maintenance.blocked && !isAdmin ? (
+          <MaintenanceBlock message={maintenance.message} />
+        ) : (accountStatus.blocked || accountStatus.deleted) && !isAdmin ? (
+          <AccountBlockedScreen />
+        ) : needsTermsUpdate ? (
+          <TermsUpdateModal />
         ) : !profile ? (
           <GuestHome onOpenAuth={openAuthModal} scrollY={scrollY} />
         ) : profile.role === 'client' ? (

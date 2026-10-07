@@ -19,4 +19,6 @@ export type UserProfile = {
   role: AppRole;
   createdAt: string;
   consent?: UserConsent;
+  blocked?: boolean;
+  deletedAt?: string | null;
 };
